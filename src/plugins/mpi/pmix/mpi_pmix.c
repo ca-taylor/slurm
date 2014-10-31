@@ -89,7 +89,7 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 //    }
 
   // Create UNIX socket for slurmd communication
-  sprintf(path, PMIX_SLURMD_ADDR_FMT, job->jobid, job->stepid );
+  sprintf(path, PMIX_STEPD_ADDR_FMT, job->jobid, job->stepid );
   if( (fd = pmix_comm_srvsock_create(path)) < 0 ){
     return SLURM_ERROR;
   }
@@ -104,6 +104,18 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
   pmix_info_cli_contacts_set(path, fd);
   pmix_info_is_stepd_set();
   pmix_info_job_set(job);
+
+//  {
+//    int delay = 1;
+//    while( delay ){
+//      sleep(1);
+//    }
+//  }
+
+//  char *p = "cndev1";
+//  char buf[10] = "hello";
+//  sprintf(path, PMIX_SRUN_ADDR_FMT, job->jobid, job->stepid );
+//  int rc = slurm_forward_data(p, path, 10, buf);
 
   pmix_agent_start();
 
@@ -122,8 +134,29 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 mpi_plugin_client_state_t *
 p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 {
+//  char path[MAX_USOCK_PATH];
+//  int fd;
+
   PMIX_DEBUG("srun initialization");
 	/* only return NULL on error */
+
+//  {
+//    int delay = 1;
+//    while( delay ){
+//      sleep(1);
+//    }
+//  }
+
+//  // Create UNIX socket for slurmd communication
+//  sprintf(path, PMIX_SRUN_ADDR_FMT, job->jobid, job->stepid );
+//  if( (fd = pmix_comm_srvsock_create(path)) < 0 ){
+//    return SLURM_ERROR;
+//  }
+//  pmix_info_server_contacts_set(path, fd);
+//  pmix_info_is_srun_set();
+//  pmix_info_job_set_srun(job);
+
+//  pmix_agent_start();
 
 	return (void *)0xdeadbeef;
 }

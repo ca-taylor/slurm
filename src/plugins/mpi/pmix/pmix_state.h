@@ -11,9 +11,12 @@ typedef struct {
   pmix_msgengine_t mstate;
 } client_state_t;
 
-typedef struct {
-  bool in_progress;
+typedef enum { PMIX_COLL_INIT, PMIX_COLL_LOCAL, PMIX_COLL_SRV, PMIX_COLL_FAIL } pmix_coll_state_t;
 
+typedef struct {
+  pmix_coll_state_t rcvd_state;
+  uint32_t local_joined;
+  uint32_t remote
 } collective_state_t;
 
 typedef struct {
@@ -79,10 +82,10 @@ inline static bool pmix_state_cli_failed(uint32_t taskid)
 {
   pmix_state_cli_sanity_check(taskid);
   client_state_t *cli = &pmix_state.cli_state[taskid];
-  return pmix_msgengine_failed(&cli->mstate);
+  return pmix_nbmsg_finalized(&cli->mstate);
 }
 
-inline static void pmix_state_cli_failed_set(uint32_t taskid)
+inline static void pmix_state_cli_finalized_set(uint32_t taskid)
 {
   pmix_state_cli_sanity_check(taskid);
   client_state_t *cli = &pmix_state.cli_state[taskid];
@@ -90,7 +93,6 @@ inline static void pmix_state_cli_failed_set(uint32_t taskid)
   // I assume that this will be done by eio when shutdown flag is on.
   cli->fd = -1;
   cli->io_obj = NULL;
-
 }
 
 

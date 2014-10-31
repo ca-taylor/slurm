@@ -11,7 +11,7 @@
   if( file_base == NULL ){                      \
     file_base = file;                           \
   }                                             \
-  debug("%s:%d [%s] mpi/pmix: " format "\n",    \
+  debug("%s:%d [%s] mpi/pmix: " format "",    \
         file_base, __LINE__, __FUNCTION__,      \
         ## args);                               \
 }
@@ -22,7 +22,7 @@
   if( file_base == NULL ){                            \
     file_base = file;                                 \
   }                                                   \
-  error("%s:%d [%s] mpi/pmix: " format ": %s (%d)\n", \
+  error("%s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
         file_base, __LINE__, __FUNCTION__,            \
         ## args, strerror(errno), errno);             \
 }

@@ -8,7 +8,8 @@
 #include "pmix_info.h"
 #include "pmix_agent.h"
 
-#define PMIX_SLURMD_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_srv.%u.%u"
+#define PMIX_STEPD_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_stepd.%u.%u"
+#define PMIX_SRUN_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_srun.%u.%u"
 #define PMIX_CLI_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_cli.%u.%u"
 
 #define MAX_USOCK_PATH                                      \
@@ -18,5 +19,7 @@
 #define SERVER_URI_ENV "PMIX_SERVER_URI"
 #define JOBID_ENV "PMIX_ID"
 
+#define PMIX_SRUN_PORT_ENV "SLURM_PMIX_SRUN_PORT"
+#define PMIX_STEP_NODES_ENV "SLURM_PMIX_SRUN_PORT"
 
 #endif // MPI_PMIX_H

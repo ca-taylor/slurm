@@ -17,13 +17,14 @@ struct pmix_jobinfo_t {
   uint32_t node_id;     /* relative position of this node in job     */
   uint32_t node_tasks;  /* number of tasks on *this* node            */
   uint32_t *gtids;
+  uint32_t task_dist;
   // TODO: remove later
   //eio_handle_t  *eio; ??
   // List 	       sruns; ?? /* List of srun_info_t pointers               */
   // List           clients; ?? /* List of struct client_io_info pointers   */
 };
 
-extern struct pmix_jobinfo_t __pmix_job_info;
+extern struct pmix_jobinfo_t pmix_job_info;
 
 // Client contact information
 void pmix_info_cli_contacts_set(char *path, int fd);
@@ -45,46 +46,46 @@ int pmix_info_is_srun();
 void pmix_info_job_set(const stepd_step_rec_t *job);
 
 inline static uint32_t pmix_info_jobid(){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return __pmix_job_info.jobid;
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return pmix_job_info.jobid;
 }
 
 inline static uint32_t pmix_info_stepid(){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return __pmix_job_info.stepid;
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return pmix_job_info.stepid;
 }
 
 inline static uint32_t pmix_info_nodeid(){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return __pmix_job_info.node_id;
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return pmix_job_info.node_id;
 }
 
 inline static uint32_t pmix_info_nodes(){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return __pmix_job_info.nnodes;
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return pmix_job_info.nnodes;
 }
 
 inline static uint32_t pmix_info_tasks(){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return __pmix_job_info.ntasks;
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return pmix_job_info.ntasks;
 }
 
 inline static uint32_t pmix_info_node_taskcnt(uint32_t i){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  xassert( i < __pmix_job_info.nnodes);
-  return __pmix_job_info.task_cnts[i];
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  xassert( i < pmix_job_info.nnodes);
+  return pmix_job_info.task_cnts[i];
 }
 
 
 inline static uint32_t pmix_info_ltasks(){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return __pmix_job_info.node_tasks;
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return pmix_job_info.node_tasks;
 }
 
 inline static uint32_t pmix_info_ltask_id(uint32_t i){
-  xassert(__pmix_job_info.magic == PMIX_INFO_MAGIC );
-  xassert( i < __pmix_job_info.node_tasks );
-  return __pmix_job_info.gtids[i];
+  xassert(pmix_job_info.magic == PMIX_INFO_MAGIC );
+  xassert( i < pmix_job_info.node_tasks );
+  return pmix_job_info.gtids[i];
 }
 
 

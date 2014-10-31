@@ -18,5 +18,6 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xassert.h"
 #include "src/common/eio.h"
+#include "src/common/fd.h"
 
 #endif // PMIX_COMMON_H
