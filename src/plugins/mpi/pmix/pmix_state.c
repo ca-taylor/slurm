@@ -16,6 +16,6 @@ void pmix_state_init()
   for( i = 0; i < pmix_state.cli_size; i++ ){
     pmix_state.cli_state[i].fd = -1;
   }
-  pmix_state.coll.in_progress = false;
+  //pmix_state.coll.in_progress = false;
 }
 
