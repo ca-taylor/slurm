@@ -8,7 +8,9 @@
 
 int pmix_comm_srvsock_create(char *path);
 
-static inline bool pmix_comm_fd_is_ready(int fd)
+//--------------------------------8<--------------------------------//
+// FIXME: Do we really need this checks?
+static inline bool pmix_comm_fd_read_ready(int fd)
 {
   struct pollfd pfd[1];
   int    rc;
@@ -18,11 +20,20 @@ static inline bool pmix_comm_fd_is_ready(int fd)
   return ((rc == 1) && (pfd[0].revents & POLLIN));
 }
 
+static inline bool pmix_comm_fd_write_ready(int fd)
+{
+  struct pollfd pfd[1];
+  int    rc;
+  pfd[0].fd     = fd;
+  pfd[0].events = POLLOUT;
+  rc = poll(pfd, 1, 10);
+  return ((rc == 1) && (pfd[0].revents & POLLOUT));
+}
+//--------------------------------8<--------------------------------//
+
 // Message management
 
 typedef uint32_t (*msg_pay_size_cb_t)(void *msg);
-
-typedef enum { PMIX_MSG_HDR, PMIX_MSG_BODY, PMIX_MSG_READY, PMIX_MSG_FAIL } engine_states_t;
 
 typedef struct {
 #ifndef NDEBUG
@@ -32,45 +43,39 @@ typedef struct {
   // User supplied information
   uint32_t hdr_size;
   msg_pay_size_cb_t pay_size_cb;
-  // dynamically adjusted fields
-  engine_states_t state;
-  uint32_t hdr_offs;
-  void *header;
-  uint32_t pay_size;
-  uint32_t pay_offs;
-  void *payload;
+  bool operating;
+  // receiver
+  uint32_t rcvd_hdr_offs;
+  void *rcvd_header;
+  uint32_t rcvd_pay_size;
+  uint32_t rcvd_pay_offs;
+  void *rcvd_payload;
+  // sender
+  void *send_current;
+  uint32_t send_offs;
+  uint32_t send_size;
+  List send_queue;
 } pmix_msgengine_t;
 
-int pmix_msgengine_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len);
-void pmix_msgengine_init(pmix_msgengine_t *mstate, uint32_t _hsize, msg_pay_size_cb_t cb);
-void pmix_msgengine_add_hdr(pmix_msgengine_t *mstate, void *buf);
-void pmix_msgengine_rcvd(int fd, pmix_msgengine_t *mstate);
 
-inline static bool pmix_msgengine_ready(pmix_msgengine_t *mstate){
-  return (mstate->state == PMIX_MSG_READY);
+inline static bool pmix_nbmsg_rcvd_ready(pmix_msgengine_t *mstate){
+  return (mstate->rcvd_hdr_offs == mstate->hdr_size) && (mstate->rcvd_pay_size == mstate->rcvd_pay_offs);
 }
 
-inline static bool pmix_msgengine_failed(pmix_msgengine_t *mstate){
-  return (mstate->state == PMIX_MSG_FAIL);
+inline static bool pmix_nbmsg_finalized(pmix_msgengine_t *mstate){
+  return !(mstate->operating);
 }
 
-inline static void *pmix_msgengine_extract(pmix_msgengine_t *mstate, void *header, uint32_t *paysize)
-{
-  void *ptr = mstate->payload;
-  *paysize = mstate->pay_size;
-
-  xassert( mstate->state == PMIX_MSG_READY );
-  if( mstate->state != PMIX_MSG_READY ){
-    return NULL;
-  }
-  // Drop message state to receive new one
-  mstate->pay_size = mstate->hdr_offs = mstate->pay_offs = 0;
-  mstate->state = PMIX_MSG_HDR;
-  mstate->payload = NULL;
-  memcpy(header, mstate->header, (size_t)mstate->hdr_size);
-  return ptr;
-}
-
+// Receiver
+int pmix_nbmsg_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len);
+void pmix_nbmsg_init(pmix_msgengine_t *mstate, uint32_t _hsize, msg_pay_size_cb_t cb);
+void pmix_nbmsg_add_hdr(pmix_msgengine_t *mstate, void *buf);
+void pmix_nbmsg_rcvd(int fd, pmix_msgengine_t *mstate);
+void *pmix_nbmsg_rcvd_extract(pmix_msgengine_t *mstate, void *header, uint32_t *paysize);
+// Transmitter
+void pmix_nbmsg_send_enqueue(int fd, pmix_msgengine_t *mstate,void *msg);
+void pmix_nbmsg_send_progress(int fd, pmix_msgengine_t *mstate);
+bool pmix_nbmsg_send_pending(pmix_msgengine_t *mstate);
 
 
 #endif // COMM_ENGINE_H
