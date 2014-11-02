@@ -61,7 +61,7 @@ static size_t _read_buf(int fd, void *buf, size_t count, bool *shutdown, bool bl
 
   *shutdown = false;
 
-  if( !blocking && !pmix_comm_fd_read_ready(fd) ){
+  if( !blocking && !pmix_comm_fd_read_ready(fd, shutdown) ){
     return 0;
   }
 
@@ -95,9 +95,9 @@ static size_t _write_buf(int fd, void *buf, size_t count, bool *shutdown)
 
   *shutdown = false;
 
-//  if( !pmix_comm_fd_write_ready(fd) ){
-//    return 0;
-//  }
+  if( !pmix_comm_fd_write_ready(fd, shutdown) ){
+    return 0;
+  }
 
   while( count - offs > 0 ) {
     ret = write(fd, (char*)buf + offs, count - offs);
@@ -324,7 +324,6 @@ void pmix_nbmsg_send_enqueue(pmix_msgengine_t *mstate, void *msg)
 {
   xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
   xassert( mstate->operating );
-  int fd = mstate->fd;
   if( mstate->send_current == NULL ){
     _pmix_send_setup_current(mstate, msg);
   }else{
