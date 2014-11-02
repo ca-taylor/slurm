@@ -1,9 +1,14 @@
-#include "mpi_pmix.h"
+#include "pmix_common.h"
 #include "pmix_state.h"
 #include "pmix_msg.h"
 #include "pmix_db.h"
+#include "pmix_debug.h"
+#include "pmix_coll.h"
 
-#define MSGSIZE 100
+typedef struct {
+    uint32_t taskid;
+    size_t nbytes;
+} cli_msg_hdr_t;
 
 static bool peer_readable(eio_obj_t *obj);
 static int peer_read(eio_obj_t *obj, List objs);
@@ -17,10 +22,7 @@ static struct io_operations peer_ops = {
 };
 
 // Unblocking message processing
-typedef struct {
-    uint32_t taskid;
-    size_t nbytes;
-} cli_msg_hdr_t;
+
 
 static uint32_t payload_size(void *buf)
 {
@@ -28,19 +30,21 @@ static uint32_t payload_size(void *buf)
   return ptr->nbytes;
 }
 
+static void *_new_msg_to_task(uint32_t taskid, uint32_t size, void **payload)
+{
+  int msize = size + sizeof(cli_msg_hdr_t);
+  cli_msg_hdr_t *msg = (cli_msg_hdr_t*)xmalloc( msize );
+  msg->nbytes = size;
+  msg->taskid = taskid;
+  *payload = (void*)(msg + 1);
+  return msg;
+}
 
-void pmix_client_request(eio_handle_t *handle, int fd)
+void pmix_client_request(int fd)
 {
   cli_msg_hdr_t hdr;
   uint32_t offset = 0;
   eio_obj_t *obj;
-
-  //    {
-  //        int delay = 1;
-  //        while( delay ){
-  //      sleep(1);
-  //        }
-  //    }
 
   PMIX_DEBUG("Request from fd = %d", fd);
 
@@ -58,16 +62,15 @@ void pmix_client_request(eio_handle_t *handle, int fd)
     close(fd);
     return;
   }
-  PMIX_DEBUG("Received ")
+
   // Setup message engine. Push the header we just received to
   // ensure integrity of msgengine
   pmix_msgengine_t *me = pmix_state_cli_msghandler(taskid);
-  pmix_nbmsg_init(me,sizeof(hdr),payload_size);
+  pmix_nbmsg_init(me, fd, sizeof(hdr),payload_size);
   pmix_nbmsg_add_hdr(me, &hdr);
 
   obj = eio_obj_create(fd, &peer_ops, (void*)(long)taskid);
-  eio_new_obj(handle, obj);
-  pmix_state_cli_set_io(taskid, obj);
+  eio_new_obj( pmix_info_io(), obj);
 }
 
 static bool peer_readable(eio_obj_t *obj)
@@ -87,14 +90,14 @@ static bool peer_readable(eio_obj_t *obj)
 
 static int peer_read(eio_obj_t *obj, List objs)
 {
-
+  static int count = 0;
   PMIX_DEBUG("fd = %d", obj->fd);
   uint32_t taskid = (int)(long)(obj->arg);
   pmix_msgengine_t *me = pmix_state_cli_msghandler(taskid);
 
   // Read and process all received messages
   while( 1 ){
-    pmix_nbmsg_rcvd(obj->fd, me);
+    pmix_nbmsg_rcvd(me);
     if( pmix_nbmsg_finalized(me) ){
       PMIX_ERROR("Connection with task %d finalized", taskid);
       obj->shutdown = true;
@@ -107,23 +110,32 @@ static int peer_read(eio_obj_t *obj, List objs)
     }
     if( pmix_nbmsg_rcvd_ready(me) ){
       cli_msg_hdr_t hdr;
-      uint32_t size;
-      void *msg = pmix_nbmsg_rcvd_extract(me, &hdr, &size);
+      void *msg = pmix_nbmsg_rcvd_extract(me, &hdr);
       xassert( hdr.taskid == taskid );
-//      if( size > 4 ){
-//        PMIX_DEBUG("Big message!");
-//      }
-//      pmix_db_add_blob(taskid, msg);
-      xfree(msg);
-      {
-        int i = 0;
-        for(i=0;i<100;i++){
-          void *buf = xmalloc(sizeof(cli_msg_hdr_t) + 100000);
-          cli_msg_hdr_t *hdr = (cli_msg_hdr_t*)buf;
-          hdr->taskid = 0;
-          hdr->nbytes = 10000;
-          pmix_nbmsg_send_enqueue(obj->fd,me,buf);
-        }
+      count++;
+      if(count == 1){
+        xfree(msg);
+        int size = sizeof(cli_msg_hdr_t) + 2*sizeof(int);
+        void *ptr = xmalloc(size);
+        cli_msg_hdr_t *hdr = (cli_msg_hdr_t*)ptr;
+        hdr->nbytes = 2*sizeof(int);
+        hdr->taskid = taskid;
+        *(int*)(hdr+1) = pmix_info_task_id(taskid);
+        *((int*)(hdr+1) + 1) = pmix_info_tasks();
+        pmix_nbmsg_send_enqueue(me, ptr);
+        xfree(msg);
+      } else if( count == 2 ){
+        //pmix_debug_hang(1);
+        pmix_coll_task_contrib(taskid, msg, hdr.nbytes);
+      } else {
+        // Fin out what info he wants
+        int gtaskid = *(int*)msg;
+        void *blob, *payload;
+        int size = pmix_db_get_blob(gtaskid, &blob);
+        void *resp = _new_msg_to_task(taskid, size, &payload);
+        memcpy(payload, blob, size);
+        pmix_nbmsg_send_enqueue(me, resp);
+        xfree(msg);
       }
     }else{
       // No more complete messages
@@ -163,7 +175,20 @@ static int peer_write(eio_obj_t *obj, List objs)
   uint32_t taskid = (int)(long)(obj->arg);
 
   pmix_msgengine_t *me = pmix_state_cli_msghandler(taskid);
-  pmix_nbmsg_send_progress(obj->fd, me);
+  pmix_nbmsg_send_progress(me);
 
   return 0;
+}
+
+void pmix_client_fence_notify()
+{
+  uint ltask = 0;
+  for(ltask = 0; ltask < pmix_info_ltasks(); ltask++){
+    int *payload;
+    void *msg = _new_msg_to_task(ltask, sizeof(int), (void**)&payload);
+    pmix_msgengine_t *me = pmix_state_cli_msghandler(ltask);
+    *payload = 1;
+    pmix_nbmsg_send_enqueue(me, msg);
+    pmix_state_task_coll_finish(ltask);
+  }
 }

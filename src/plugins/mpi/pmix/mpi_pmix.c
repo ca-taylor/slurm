@@ -42,7 +42,11 @@
 #include <signal.h>
 #include <sys/types.h>
 
-#include "mpi_pmix.h"
+#include "pmix_common.h"
+#include "pmix_server.h"
+#include "pmix_debug.h"
+#include "pmix_agent.h"
+#include "pmix_info.h"
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -77,54 +81,24 @@ const uint32_t plugin_version   = 100;
 
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
-  char path[MAX_USOCK_PATH];
-  int fd;
-  PMIX_DEBUG("slurmstepd prefork");
+  int ret;
+  PMIX_DEBUG("slurmstepd initialization");
 
-//    {
-//        int delay = 1;
-//        while( delay ){
-//      sleep(1);
-//        }
-//    }
+  // TODO: remove debug
+  static int debug_delay = 1;
+  //pmix_debug_hang(debug_delay);
 
-  // Create UNIX socket for slurmd communication
-  sprintf(path, PMIX_STEPD_ADDR_FMT, job->jobid, job->stepid );
-  if( (fd = pmix_comm_srvsock_create(path)) < 0 ){
-    return SLURM_ERROR;
+  if( ( ret = pmix_stepd_init(job, env) ) ){
+    return ret;
   }
-  pmix_info_server_contacts_set(path, fd);
-
-  // Create UNIX socket for client communication
-  sprintf(path, PMIX_CLI_ADDR_FMT, job->jobid, job->stepid );
-  if( (fd = pmix_comm_srvsock_create(path)) < 0 ){
-    close( pmix_info_srv_fd() );
-    return SLURM_ERROR;
-  }
-  pmix_info_cli_contacts_set(path, fd);
-  pmix_info_is_stepd_set();
-  pmix_info_job_set(job);
-
-//  {
-//    int delay = 1;
-//    while( delay ){
-//      sleep(1);
-//    }
-//  }
-
-//  char *p = "cndev1";
-//  char buf[10] = "hello";
-//  sprintf(path, PMIX_SRUN_ADDR_FMT, job->jobid, job->stepid );
-//  int rc = slurm_forward_data(p, path, 10, buf);
-
-  pmix_agent_start();
-
-	return SLURM_SUCCESS;
+  ret = pmix_agent_start();
+  return ret;
 }
 
 int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 			       char ***env)
 {
+  PMIX_DEBUG("task initialization");
   env_array_overwrite_fmt(env, SERVER_URI_ENV, "%s", pmix_info_cli_addr());
   env_array_overwrite_fmt(env, JOBID_ENV, "%d.%d.%d", job->jobid, job->stepid, job->ltaskid);
   pmix_agent_task_cleanup();
@@ -134,31 +108,19 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 mpi_plugin_client_state_t *
 p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 {
-//  char path[MAX_USOCK_PATH];
-//  int fd;
+  // TODO: remove debug
+  static int debug_delay = 1;
+  //pmix_debug_hang(debug_delay);
 
   PMIX_DEBUG("srun initialization");
-	/* only return NULL on error */
-
-//  {
-//    int delay = 1;
-//    while( delay ){
-//      sleep(1);
-//    }
-//  }
-
-//  // Create UNIX socket for slurmd communication
-//  sprintf(path, PMIX_SRUN_ADDR_FMT, job->jobid, job->stepid );
-//  if( (fd = pmix_comm_srvsock_create(path)) < 0 ){
-//    return SLURM_ERROR;
-//  }
-//  pmix_info_server_contacts_set(path, fd);
-//  pmix_info_is_srun_set();
-//  pmix_info_job_set_srun(job);
-
-//  pmix_agent_start();
-
-	return (void *)0xdeadbeef;
+  if( SLURM_SUCCESS != pmix_srun_init(job,env) ){
+    return NULL;
+  }
+  if( SLURM_SUCCESS != pmix_agent_start() ){
+    return NULL;
+  }
+  /* only return NULL on error */
+  return (void *)0xdeadbeef;
 }
 
 int p_mpi_hook_client_single_task_per_node(void)

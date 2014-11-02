@@ -41,6 +41,7 @@ typedef struct {
   int  magic;
 #endif
   // User supplied information
+  int fd;
   uint32_t hdr_size;
   msg_pay_size_cb_t pay_size_cb;
   bool operating;
@@ -50,6 +51,8 @@ typedef struct {
   uint32_t rcvd_pay_size;
   uint32_t rcvd_pay_offs;
   void *rcvd_payload;
+  uint32_t rcvd_padding;
+  uint32_t rcvd_pad_recvd;
   // sender
   void *send_current;
   uint32_t send_offs;
@@ -57,24 +60,32 @@ typedef struct {
   List send_queue;
 } pmix_msgengine_t;
 
+inline static void pmix_nbmsg_set_padding(pmix_msgengine_t *mstate, uint32_t padsize){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
+  mstate->rcvd_padding = padsize;
+}
 
 inline static bool pmix_nbmsg_rcvd_ready(pmix_msgengine_t *mstate){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
   return (mstate->rcvd_hdr_offs == mstate->hdr_size) && (mstate->rcvd_pay_size == mstate->rcvd_pay_offs);
 }
 
 inline static bool pmix_nbmsg_finalized(pmix_msgengine_t *mstate){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
   return !(mstate->operating);
 }
 
+void pmix_nbmsg_init(pmix_msgengine_t *mstate, int fd, uint32_t _hsize, msg_pay_size_cb_t cb);
+void pmix_nbmsg_finalize(pmix_msgengine_t *mstate);
+
 // Receiver
 int pmix_nbmsg_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len);
-void pmix_nbmsg_init(pmix_msgengine_t *mstate, uint32_t _hsize, msg_pay_size_cb_t cb);
 void pmix_nbmsg_add_hdr(pmix_msgengine_t *mstate, void *buf);
-void pmix_nbmsg_rcvd(int fd, pmix_msgengine_t *mstate);
-void *pmix_nbmsg_rcvd_extract(pmix_msgengine_t *mstate, void *header, uint32_t *paysize);
+void pmix_nbmsg_rcvd(pmix_msgengine_t *mstate);
+void *pmix_nbmsg_rcvd_extract(pmix_msgengine_t *mstate, void *header);
 // Transmitter
-void pmix_nbmsg_send_enqueue(int fd, pmix_msgengine_t *mstate,void *msg);
-void pmix_nbmsg_send_progress(int fd, pmix_msgengine_t *mstate);
+void pmix_nbmsg_send_enqueue(pmix_msgengine_t *mstate,void *msg);
+void pmix_nbmsg_send_progress(pmix_msgengine_t *mstate);
 bool pmix_nbmsg_send_pending(pmix_msgengine_t *mstate);
 
 
