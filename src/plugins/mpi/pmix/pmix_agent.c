@@ -2,10 +2,11 @@
 #include <poll.h>
 #include <arpa/inet.h>
 
-#include "mpi_pmix.h"
+#include "pmix_common.h"
 #include "pmix_server.h"
 #include "pmix_client.h"
 #include "pmix_state.h"
+#include "pmix_debug.h"
 #include "pmix_db.h"
 
 #define MAX_RETRIES 5
@@ -49,7 +50,7 @@ static bool _server_conn_readable(eio_obj_t *obj)
 static int
 _server_conn_read(eio_obj_t *obj, List objs)
 {
-  int sd;
+  int fd;
   struct sockaddr addr;
   struct sockaddr_in *sin;
   socklen_t size = sizeof(addr);
@@ -64,7 +65,7 @@ _server_conn_read(eio_obj_t *obj, List objs)
     if (!pmix_comm_fd_read_ready(obj->fd))
       return 0;
 
-    while ((sd = accept(obj->fd, &addr, &size)) < 0) {
+    while ((fd = accept(obj->fd, &addr, &size)) < 0) {
       if (errno == EINTR)
         continue;
       if (errno == EAGAIN)    /* No more connections */
@@ -80,12 +81,10 @@ _server_conn_read(eio_obj_t *obj, List objs)
     if( pmix_info_is_srun() ){
       sin = (struct sockaddr_in *) &addr;
       inet_ntop(AF_INET, &sin->sin_addr, buf, INET_ADDRSTRLEN);
-      PMIX_DEBUG("accepted tree connection: ip=%s sd=%d", buf, sd);
+      PMIX_DEBUG("accepted tree connection: ip=%s sd=%d", buf, fd);
     }
-
     /* read command from socket and handle it */
-    pmix_server_request(pmix_io_handle, sd);
-    close(sd);
+    pmix_server_request(fd);
   }
   return 0;
 }
@@ -109,13 +108,6 @@ static bool _cli_conn_readable(eio_obj_t *obj)
 static int _cli_conn_read(eio_obj_t *obj, List objs)
 {
   int fd;
-
-  {
-    static int delay = 1;
-    while( delay ){
-      sleep(1);
-    }
-  }
 
   PMIX_DEBUG("fd = %d", obj->fd);
 
@@ -145,7 +137,7 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
     }
 
     /* read command from socket and handle it */
-    pmix_client_request(pmix_io_handle, fd);
+    pmix_client_request(fd);
   }
   return 0;
 }
@@ -156,7 +148,7 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
  */
 static void *_agent(void * unused)
 {
-
+  PMIX_DEBUG("Start agent thread");
   eio_obj_t *srv_obj, *cli_obj;
 
   pmix_io_handle = eio_handle_create();
@@ -166,13 +158,14 @@ static void *_agent(void * unused)
   eio_new_initial_obj(pmix_io_handle, srv_obj);
 
   /* for stepd, add the sockets to tasks */
-  if (pmix_info_is_stepd()) {
+  if( pmix_info_is_stepd() ) {
     cli_obj = eio_obj_create(pmix_info_cli_fd(), &cli_ops, (void*)(long)(-1));
     eio_new_initial_obj(pmix_io_handle, cli_obj);
   }
 
   pmix_state_init();
   pmix_db_init();
+  pmix_info_io_set(pmix_io_handle);
 
   eio_handle_mainloop(pmix_io_handle);
 
@@ -193,7 +186,7 @@ int pmix_agent_start(void)
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
   while ((errno = pthread_create(&pmix_agent_tid, &attr, _agent, NULL))) {
     if (++retries > MAX_RETRIES) {
-      error ("mpi/pmi2: pthread_create error %m");
+      PMIX_ERROR("pthread_create error");
       slurm_attr_destroy(&attr);
       return SLURM_ERROR;
     }

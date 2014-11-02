@@ -3,7 +3,10 @@
 
 #include "pmix_common.h"
 
-void pmix_client_request(eio_handle_t *h, int fd);
+
+
+void pmix_client_request(int fd);
+void pmix_client_fence_notify();
 
 
 #endif // CLIENT_H
