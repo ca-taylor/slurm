@@ -62,8 +62,9 @@ _server_conn_read(eio_obj_t *obj, List objs)
     /*
      * Return early if fd is not now ready
      */
-    if (!pmix_comm_fd_read_ready(obj->fd))
+    if (!pmix_comm_fd_read_ready(obj->fd, &obj->shutdown)){
       return 0;
+    }
 
     while ((fd = accept(obj->fd, &addr, &size)) < 0) {
       if (errno == EINTR)
@@ -115,7 +116,7 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
     /*
      * Return early if fd is not now ready
      */
-    if (!pmix_comm_fd_read_ready(obj->fd))
+    if (!pmix_comm_fd_read_ready(obj->fd, &obj->shutdown))
       return 0;
 
     while ((fd = accept(obj->fd, NULL, 0)) < 0) {

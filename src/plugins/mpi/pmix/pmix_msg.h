@@ -10,23 +10,37 @@ int pmix_comm_srvsock_create(char *path);
 
 //--------------------------------8<--------------------------------//
 // FIXME: Do we really need this checks?
-static inline bool pmix_comm_fd_read_ready(int fd)
+static inline bool pmix_comm_fd_read_ready(int fd, bool *shutdown)
 {
   struct pollfd pfd[1];
   int    rc;
   pfd[0].fd     = fd;
   pfd[0].events = POLLIN;
   rc = poll(pfd, 1, 10);
+  if( rc < 0 ){
+    *shutdown = true;
+    return false;
+  }
+  if( pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL) ){
+    *shutdown = true;
+  }
   return ((rc == 1) && (pfd[0].revents & POLLIN));
 }
 
-static inline bool pmix_comm_fd_write_ready(int fd)
+static inline bool pmix_comm_fd_write_ready(int fd, bool *shutdown)
 {
   struct pollfd pfd[1];
   int    rc;
   pfd[0].fd     = fd;
   pfd[0].events = POLLOUT;
   rc = poll(pfd, 1, 10);
+  if( rc < 0 ){
+    *shutdown = true;
+    return false;
+  }
+  if( pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL) ){
+    *shutdown = true;
+  }
   return ((rc == 1) && (pfd[0].revents & POLLOUT));
 }
 //--------------------------------8<--------------------------------//
