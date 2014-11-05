@@ -9,7 +9,7 @@
 int pmix_comm_srvsock_create(char *path);
 
 //--------------------------------8<--------------------------------//
-// FIXME: Do we really need this checks?
+
 static inline bool pmix_comm_fd_read_ready(int fd, bool *shutdown)
 {
   struct pollfd pfd[1];
@@ -21,10 +21,11 @@ static inline bool pmix_comm_fd_read_ready(int fd, bool *shutdown)
     *shutdown = true;
     return false;
   }
-  if( pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL) ){
+  bool ret = ((rc == 1) && (pfd[0].revents & POLLIN));
+  if( !ret && (pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL))){
     *shutdown = true;
   }
-  return ((rc == 1) && (pfd[0].revents & POLLIN));
+  return ret;
 }
 
 static inline bool pmix_comm_fd_write_ready(int fd, bool *shutdown)
@@ -56,6 +57,7 @@ typedef struct {
 #endif
   // User supplied information
   int fd;
+  int error;
   uint32_t hdr_size;
   msg_pay_size_cb_t pay_size_cb;
   bool operating;
@@ -89,8 +91,13 @@ inline static bool pmix_nbmsg_finalized(pmix_msgengine_t *mstate){
   return !(mstate->operating);
 }
 
+inline static int pmix_nbmsg_error(pmix_msgengine_t *mstate){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
+  return mstate->error;
+}
+
 void pmix_nbmsg_init(pmix_msgengine_t *mstate, int fd, uint32_t _hsize, msg_pay_size_cb_t cb);
-void pmix_nbmsg_finalize(pmix_msgengine_t *mstate);
+void pmix_nbmsg_finalize(pmix_msgengine_t *mstate, int error);
 
 // Receiver
 int pmix_nbmsg_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len);
