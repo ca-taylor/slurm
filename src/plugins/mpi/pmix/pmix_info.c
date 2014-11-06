@@ -202,7 +202,7 @@ char *pmix_info_nth_child_name(int idx)
 {
   hostlist_t hl = hostlist_create(pmix_info_step_hosts());
   int n = pmix_info_nth_child(idx);
-  char *p = hostlist_nth(hl, idx);
+  char *p = hostlist_nth(hl, n);
   hostlist_destroy(hl);
   return p;
 }

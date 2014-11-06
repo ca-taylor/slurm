@@ -187,8 +187,6 @@ int pmix_coll_init(char ***env)
     this_host = xstrdup("srun");
   }
 
-  //pmix_debug_hang(1);
-
   // We interested in amount of direct childs
   child_cnt = _node_childrens(&childs, width, nodeid + 1, nodes + 1);
 
@@ -301,8 +299,6 @@ void pmix_coll_update_db(void *msg, uint32_t size)
 {
   int i = 0;
   char *pay = (char*)msg;
-
-  //pmix_debug_hang(1);
 
   pmix_db_update_init();
   while( i < size ){
