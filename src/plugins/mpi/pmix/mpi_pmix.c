@@ -84,10 +84,6 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
   int ret;
   PMIX_DEBUG("slurmstepd initialization");
 
-  // TODO: remove debug
-  static int debug_delay = 1;
-  //pmix_debug_hang(debug_delay);
-
   if( ( ret = pmix_stepd_init(job, env) ) ){
     return ret;
   }
@@ -108,10 +104,6 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 mpi_plugin_client_state_t *
 p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 {
-  // TODO: remove debug
-  static int debug_delay = 1;
-  //pmix_debug_hang(debug_delay);
-
   PMIX_DEBUG("srun initialization");
   if( SLURM_SUCCESS != pmix_srun_init(job,env) ){
     return NULL;
