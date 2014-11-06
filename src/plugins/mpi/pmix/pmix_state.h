@@ -1,8 +1,46 @@
+/*****************************************************************************\
+ **  pmix_state.h - PMIx agent state related code
+ *****************************************************************************
+ *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
+ *                     Russian Academy of Science
+ *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  All rights reserved.
+ *
+ *  This file is part of SLURM, a resource management program.
+ *  For details, see <http://slurm.schedmd.com/>.
+ *  Please also read the included file: DISCLAIMER.
+ *
+ *  SLURM is free software; you can redistribute it and/or modify it under
+ *  the terms of the GNU General Public License as published by the Free
+ *  Software Foundation; either version 2 of the License, or (at your option)
+ *  any later version.
+ *
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
+ *  so. If you do not wish to do so, delete this exception statement from your
+ *  version.  If you delete this exception statement from all source files in
+ *  the program, then also delete it here.
+ *
+ *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ *  details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+\*****************************************************************************/
+
 #ifndef STATE_H
 #define STATE_H
 
 #include "pmix_common.h"
-#include "pmix_msg.h"
+#include "pmix_io.h"
 
 typedef enum { PMIX_CLI_UNCONNECTED, PMIX_CLI_ACK, PMIX_CLI_OPERATE, PMIX_CLI_COLL, PMIX_CLI_FINALIZED} pmix_cli_state_t;
 
@@ -10,7 +48,7 @@ typedef struct {
   pmix_cli_state_t state;
   uint32_t task_id;
   int fd;
-  pmix_msgengine_t mstate;
+  pmix_io_engine_t mstate;
 } client_state_t;
 
 typedef enum { PMIX_COLL_SYNC, PMIX_COLL_GATHER, PMIX_COLL_FORWARD } pmix_coll_state_t;
@@ -69,7 +107,7 @@ inline static int pmix_state_cli_connected(int taskid, int fd)
   return SLURM_SUCCESS;
 }
 
-inline static pmix_msgengine_t *pmix_state_cli_msghandler(int taskid)
+inline static pmix_io_engine_t *pmix_state_cli_msghandler(int taskid)
 {
   pmix_state_cli_sanity_check(taskid);
   return &pmix_state.cli_state[taskid].mstate;

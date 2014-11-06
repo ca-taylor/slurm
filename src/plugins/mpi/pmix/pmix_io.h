@@ -1,5 +1,5 @@
 /*****************************************************************************\
- **  pmix_db.h - PMIx KVS database
+ **  pmix_io.h - PMIx non-blocking IO routines
  *****************************************************************************
  *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
  *                     Russian Academy of Science
@@ -36,76 +36,80 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_DB_H
-#define PMIX_DB_H
+#ifndef COMM_ENGINE_H
+#define COMM_ENGINE_H
 
+#include <poll.h>
 #include "pmix_common.h"
-#include "pmix_info.h"
-#include "pmix_debug.h"
+
+//--------------------------------8<--------------------------------//
+
+
+
+//--------------------------------8<--------------------------------//
+
+// Message management
+
+typedef uint32_t (*msg_pay_size_cb_t)(void *msg);
 
 typedef struct {
 #ifndef NDEBUG
 #       define PMIX_MSGSTATE_MAGIC 0xdeadbeef
-	int  magic;
+  int  magic;
 #endif
-	int *upd;
-	void **blobs;
-	int *blob_sizes;
-} pmix_db_t;
+  // User supplied information
+  int fd;
+  int error;
+  uint32_t hdr_size;
+  msg_pay_size_cb_t pay_size_cb;
+  bool operating;
+  // receiver
+  uint32_t rcvd_hdr_offs;
+  void *rcvd_header;
+  uint32_t rcvd_pay_size;
+  uint32_t rcvd_pay_offs;
+  void *rcvd_payload;
+  uint32_t rcvd_padding;
+  uint32_t rcvd_pad_recvd;
+  // sender
+  void *send_current;
+  uint32_t send_offs;
+  uint32_t send_size;
+  List send_queue;
+} pmix_io_engine_t;
 
-extern pmix_db_t pmix_db;
-
-static inline void pmix_db_init()
-{
-	int i;
-	pmix_db.magic = PMIX_MSGSTATE_MAGIC;
-	uint32_t tasks = pmix_info_tasks();
-	pmix_db.upd = xmalloc(sizeof(int)*tasks);
-	pmix_db.blobs = xmalloc( sizeof(int*) * tasks );
-	pmix_db.blob_sizes = xmalloc( sizeof(int) * tasks );
-	for(i=0;i<tasks;i++){
-		pmix_db.upd[i] = 0;
-	}
+inline static void pmix_io_read_padding(pmix_io_engine_t *mstate, uint32_t padsize){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
+  mstate->rcvd_padding = padsize;
 }
 
-static inline void pmix_db_update_init()
-{
-	// Mark everybody as non-reported
-	int i;
-	for(i=0;i < pmix_info_tasks();i++){
-		pmix_db.upd[i] = 0;
-	}
+inline static bool pmix_io_rcvd_ready(pmix_io_engine_t *mstate){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
+  return (mstate->rcvd_hdr_offs == mstate->hdr_size) && (mstate->rcvd_pay_size == mstate->rcvd_pay_offs);
 }
 
-static inline void pmix_db_update_verify()
-{
-	int i;
-
-	xassert(pmix_db.magic == PMIX_MSGSTATE_MAGIC);
-	// Everybody has to report
-	for(i=0;i < pmix_info_tasks(); i++){
-		if( !pmix_db.upd[i] ){
-			PMIX_ERROR("Task %d have not reported!", i);
-			xassert( pmix_db.upd[i] );
-		}
-	}
+inline static bool pmix_io_finalized(pmix_io_engine_t *mstate){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
+  return !(mstate->operating);
 }
 
-static inline void pmix_db_add_blob(int taskid, void *blob, int size)
-{
-	xassert(pmix_db.magic == PMIX_MSGSTATE_MAGIC);
-	pmix_db.upd[taskid] = taskid;
-	pmix_db.blobs[taskid] = blob;
-	pmix_db.blob_sizes[taskid] = size;
-	pmix_db.upd[taskid] = 1;
+inline static int pmix_io_error(pmix_io_engine_t *mstate){
+  xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
+  return mstate->error;
 }
 
-static inline int pmix_db_get_blob(int taskid, void **blob)
-{
-	xassert(pmix_db.magic == PMIX_MSGSTATE_MAGIC);
-	pmix_db.upd[taskid] = taskid;
-	*blob = pmix_db.blobs[taskid];
-	return pmix_db.blob_sizes[taskid];
-}
+void pmix_io_init(pmix_io_engine_t *mstate, int fd, uint32_t _hsize, msg_pay_size_cb_t cb);
+void pmix_io_finalize(pmix_io_engine_t *mstate, int error);
 
-#endif // PMIX_DB_H
+// Receiver
+int pmix_io_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len);
+void pmix_io_add_hdr(pmix_io_engine_t *mstate, void *buf);
+void pmix_io_rcvd(pmix_io_engine_t *mstate);
+void *pmix_io_rcvd_extract(pmix_io_engine_t *mstate, void *header);
+// Transmitter
+void pmix_io_send_enqueue(pmix_io_engine_t *mstate,void *msg);
+void pmix_io_send_progress(pmix_io_engine_t *mstate);
+bool pmix_io_send_pending(pmix_io_engine_t *mstate);
+
+
+#endif // COMM_ENGINE_H
