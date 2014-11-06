@@ -1,10 +1,54 @@
+/*****************************************************************************\
+ **  pmix_info.h - PMIx various environment information
+ *****************************************************************************
+ *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
+ *                     Russian Academy of Science
+ *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  All rights reserved.
+ *
+ *  This file is part of SLURM, a resource management program.
+ *  For details, see <http://slurm.schedmd.com/>.
+ *  Please also read the included file: DISCLAIMER.
+ *
+ *  SLURM is free software; you can redistribute it and/or modify it under
+ *  the terms of the GNU General Public License as published by the Free
+ *  Software Foundation; either version 2 of the License, or (at your option)
+ *  any later version.
+ *
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
+ *  so. If you do not wish to do so, delete this exception statement from your
+ *  version.  If you delete this exception statement from all source files in
+ *  the program, then also delete it here.
+ *
+ *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ *  details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+\*****************************************************************************/
+
+
 #ifndef INFO_H
 #define INFO_H
 
 #include "pmix_common.h"
 
-// Job information
-struct pmix_jobinfo_t {
+/*
+ *
+ *  Job information structure and access API
+ *
+ */
+
+typedef struct {
 #ifndef NDEBUG
 #       define PMIX_INFO_MAGIC 0xdeadbeef
   int  magic;
@@ -18,14 +62,9 @@ struct pmix_jobinfo_t {
   uint32_t node_tasks;  /* number of tasks on *this* node            */
   uint32_t *gtids;
   uint32_t task_dist;
-  // TODO: remove later
-  //eio_handle_t  *eio; ??
-  // List 	       sruns; ?? /* List of srun_info_t pointers               */
-  // List           clients; ?? /* List of struct client_io_info pointers   */
-};
+} pmix_jobinfo_t;
 
-typedef enum {PMIX_PARENT_NONE, PMIX_PARENT_ROOT, PMIX_PARENT_SRUN, PMIX_PARENT_STEPD } parent_type_t;
-extern struct pmix_jobinfo_t _pmix_job_info;
+extern pmix_jobinfo_t _pmix_job_info;
 
 // Client contact information
 void pmix_info_cli_contacts_set(char *path, int fd);
@@ -99,6 +138,28 @@ inline static uint32_t pmix_info_task_id(uint32_t i){
   xassert( i < _pmix_job_info.node_tasks );
   return _pmix_job_info.gtids[i];
 }
+
+/*
+ *
+ *  Collective information structure and access API
+ *
+ */
+
+typedef enum {PMIX_PARENT_NONE, PMIX_PARENT_ROOT, PMIX_PARENT_SRUN, PMIX_PARENT_STEPD } parent_type_t;
+
+
+
+typedef struct {
+	parent_type_t _pmix_parent_type;
+	char *_pmix_this_host;
+	char *_pmix_nodes_list;
+	int _pmix_child_num;
+	int *_pmix_child_list;
+	char *_pmix_parent_host;
+	slurm_addr_t *_pmix_parent_addr;
+} pmix_collective_info_t;
+
+
 
 extern parent_type_t _pmix_parent_type;
 extern char *_pmix_this_host;
