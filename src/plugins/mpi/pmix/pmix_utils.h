@@ -1,5 +1,5 @@
 /*****************************************************************************\
- **  pmix_server.h - PMIx server side functionality
+ **	pmix_utils.c - Various PMIx utility functions
  *****************************************************************************
  *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
  *                     Russian Academy of Science
@@ -36,19 +36,15 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef SERVER_H
-#define SERVER_H
+#ifndef PMIX_UTILS_H
+#define PMIX_UTILS_H
 
-#include "pmix_common.h"
+void pmix_xfree_buffer(void *x);
+int pmix_usock_create_srv(char *path);
+size_t pmix_read_buf(int fd, void *buf, size_t count, bool *shutdown, bool blocking);
+size_t pmix_write_buf(int fd, void *buf, size_t count, bool *shutdown);
+bool pmix_fd_read_ready(int fd, bool *shutdown);
+bool pmix_fd_write_ready(int fd, bool *shutdown);
 
-typedef enum { PMIX_SRV_FENCE, PMIX_FENCE_RESP } pmix_srv_cmd_t;
 
-int pmix_stepd_init(const stepd_step_rec_t *job, char ***env);
-int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
-void pmix_server_request(int fd);
-char *pmix_server_alloc_msg(uint32_t size, char **payload);
-void pmix_server_msg_set_fence(char *msg);
-void pmix_server_msg_set_fence_resp(char *msg);
-uint32_t pmix_server_sendmsg_size(char *msg);
-
-#endif // SERVER_H
+#endif // PMIX_UTILS_H
