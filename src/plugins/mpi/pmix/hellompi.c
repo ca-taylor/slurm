@@ -15,7 +15,7 @@
 typedef struct {
     unsigned int taskid;
     size_t nbytes;
-} cli_msg_hdr_t;
+} message_header_t;
 
 int connect_to_server_usock(char *path)
 {
@@ -58,18 +58,18 @@ int main(int argc, char* argv[])
   }
 
   // Allocate memory with the reserve
-  void *buf = malloc( sizeof(cli_msg_hdr_t) + sizeof(int)*100 );
+  void *buf = malloc( sizeof(message_header_t) + sizeof(int)*100 );
 
   // Greeting
-  int size = sizeof(cli_msg_hdr_t) + sizeof(int);
-  cli_msg_hdr_t *hdr = (cli_msg_hdr_t *)buf;
+  int size = sizeof(message_header_t) + sizeof(int);
+  message_header_t *hdr = (message_header_t *)buf;
   int *payload = (int*)(hdr + 1);
   hdr->taskid = lrank;
   hdr->nbytes = 4;
-  *((int*)((char*)buf + sizeof(cli_msg_hdr_t))) = lrank;
+  *((int*)((char*)buf + sizeof(message_header_t))) = lrank;
   write(fd, buf, size);
 // Read the answer and get our global rank and task number
-  read(fd,buf, sizeof(cli_msg_hdr_t));
+  read(fd,buf, sizeof(message_header_t));
   read(fd, (void*)(hdr+1),hdr->nbytes);
   grank = payload[0];
   ntasks = payload[1];
@@ -80,11 +80,11 @@ int main(int argc, char* argv[])
   for(i=0;i<10;i++){
     payload[i] = grank + i;
   }
-  size = sizeof(cli_msg_hdr_t) + hdr->nbytes;
+  size = sizeof(message_header_t) + hdr->nbytes;
   write(fd, buf, size);
 
   // Read fence confirmation
-  size = sizeof(cli_msg_hdr_t) + sizeof(int);
+  size = sizeof(message_header_t) + sizeof(int);
   read(fd, buf, size);
   printf("Fence finished: %s\n", (*((int*)(hdr + 1)) == 1) ? "OK" : "FAIL");
 
@@ -98,11 +98,11 @@ int main(int argc, char* argv[])
       hdr->nbytes = 4;
       hdr->taskid = lrank;
       payload[0] = task_to_ask;
-      size = sizeof(cli_msg_hdr_t) + hdr->nbytes;
+      size = sizeof(message_header_t) + hdr->nbytes;
       write(fd, buf, size);
       
       // Get response
-      read(fd, (void*)hdr, sizeof(cli_msg_hdr_t));
+      read(fd, (void*)hdr, sizeof(message_header_t));
       read(fd, (void*)payload,hdr->nbytes);
       fprintf(fp, "%d: ", task_to_ask);
       int j;
