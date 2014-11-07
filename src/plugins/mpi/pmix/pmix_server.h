@@ -41,14 +41,17 @@
 
 #include "pmix_common.h"
 
-typedef enum { PMIX_SRV_FENCE, PMIX_FENCE_RESP } pmix_srv_cmd_t;
+typedef enum { PMIX_FENCE, PMIX_FENCE_RESP } pmix_srv_cmd_t;
 
 int pmix_stepd_init(const stepd_step_rec_t *job, char ***env);
 int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
-void pmix_server_request(int fd);
-char *pmix_server_alloc_msg(uint32_t size, char **payload);
-void pmix_server_msg_set_fence(char *msg);
-void pmix_server_msg_set_fence_resp(char *msg);
-uint32_t pmix_server_sendmsg_size(char *msg);
+void pmix_server_new_conn(int fd);
+
+void *pmix_server_alloc_msg(uint32_t size, void **payload);
+void pmix_server_free_msg(void *msg);
+void pmix_server_msg_setcmd(void *msg, pmix_srv_cmd_t cmd);
+void pmix_server_msg_finalize(void *msg);
+uint32_t pmix_server_msg_size(void *msg);
+void *pmix_server_msg_start(void *msg);
 
 #endif // SERVER_H
