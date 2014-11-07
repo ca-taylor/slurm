@@ -44,7 +44,7 @@
 
 
 
-void pmix_client_new_connection(int fd);
+void pmix_client_new_conn(int fd);
 void pmix_client_fence_notify();
 
 
