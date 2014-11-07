@@ -48,169 +48,236 @@
 #include "pmix_debug.h"
 #include "pmix_utils.h"
 
-void pmix_io_init(pmix_io_engine_t *mstate, int fd, uint32_t _hsize, msg_pay_size_cb_t cb)
+void pmix_io_init(pmix_io_engine_t *eng, int fd, pmix_io_engine_header_t header)
 {
 	// Initialize general options
-	mstate->magic = PMIX_MSGSTATE_MAGIC;
-	mstate->error = 0;
-	mstate->fd = fd;
-	mstate->hdr_size = _hsize;
-	mstate->pay_size_cb = cb;
-	mstate->operating = true;
+	eng->magic = PMIX_MSGSTATE_MAGIC;
+	eng->error = 0;
+	eng->fd = fd;
+	eng->header = header;
+	eng->operating = true;
+
+	if( header.pack_hdr_cb == NULL && header.unpack_hdr_cb == NULL ){
+		xassert( header.host_size == header.net_size );
+	}
+
 	// Init receiver
-	mstate->rcvd_header = xmalloc(_hsize);
-	mstate->rcvd_pay_size = 0;
-	mstate->rcvd_payload = NULL;
-	mstate->rcvd_hdr_offs = mstate->rcvd_pay_offs = 0;
-	mstate->rcvd_padding = 0;
+	eng->rcvd_hdr = xmalloc(eng->header.net_size);
+	if( eng->header.unpack_hdr_cb ){
+		eng->rcvd_hdr_host = xmalloc(eng->header.host_size);
+	} else {
+		eng->rcvd_hdr_host = eng->rcvd_hdr;
+	}
+
+	eng->rcvd_pay_size = 0;
+	eng->rcvd_payload = NULL;
+	eng->rcvd_hdr_offs = eng->rcvd_pay_offs = 0;
+	eng->rcvd_padding = 0;
 	// Init transmitter
-	mstate->send_current = NULL;
-	mstate->send_offs = mstate->send_size = 0;
-	mstate->send_queue = list_create(pmix_xfree_buffer);
+	eng->send_current = NULL;
+	if( eng->header.pack_hdr_cb ){
+		eng->send_hdr_net = xmalloc(eng->header.net_size);
+	}
+	eng->send_hdr_size = eng->send_hdr_offs = 0;
+	eng->send_payload = NULL;
+	eng->send_pay_size = eng->send_pay_offs = 0;
+	eng->send_queue = list_create(pmix_xfree_buffer);
 }
 
-void pmix_io_finalize(pmix_io_engine_t *mstate, int error)
+void pmix_io_finalize(pmix_io_engine_t *eng, int error)
 {
-	if( !mstate->operating ){
+	if( !eng->operating ){
 		return;
 	}
 	// Free transmitter
-	if( list_count(mstate->send_queue) ){
-		list_destroy(mstate->send_queue);
+	if( list_count(eng->send_queue) ){
+		list_destroy(eng->send_queue);
 	}
-	if( NULL != mstate->send_current ){
-		xfree(mstate->send_current);
+	if( NULL != eng->send_current ){
+		xfree(eng->send_current);
 	}
-	mstate->send_current = NULL;
-	mstate->send_offs = mstate->send_size = 0;
+	eng->send_current = NULL;
+	eng->send_payload = NULL;
+	eng->send_pay_size = eng->send_pay_offs = 0;
+	if( eng->header.pack_hdr_cb ){
+		xfree( eng->send_hdr_net );
+	}
+	eng->send_hdr_size = eng->send_hdr_offs = 0;
 
 	// Free receiver
-	if( NULL != mstate->rcvd_payload){
-		free(mstate->rcvd_payload);
+	if( NULL != eng->rcvd_payload){
+		free(eng->rcvd_payload);
 	}
-	xfree(mstate->rcvd_header);
-	mstate->rcvd_header = NULL;
-	mstate->rcvd_pay_size = 0;
-	mstate->rcvd_payload = NULL;
-	mstate->rcvd_hdr_offs = mstate->rcvd_pay_offs = 0;
 
-	mstate->operating = false;
+	xfree( eng->rcvd_hdr );
+	if( eng->header.unpack_hdr_cb ){
+		xfree( eng->rcvd_hdr_host );
+	}
+	eng->rcvd_hdr = NULL;
+	eng->rcvd_hdr_host = NULL;
+
+	eng->rcvd_pay_size = 0;
+	eng->rcvd_payload = NULL;
+	eng->rcvd_hdr_offs = eng->rcvd_pay_offs = 0;
+
+	eng->operating = false;
+	if( error < 0 ){
+		eng->error = -error;
+	} else {
+		eng->error = 0;
+	}
 }
 
 // Receiver
 
 int pmix_io_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len)
 {
-	bool shutdown;
+	int shutdown;
 	uint32_t offs = *_offs;
 
-	// FIXME: is it ok to use this function for blocking receive?
 	offs += pmix_read_buf(fd, buf + offs, len, &shutdown, true);
 	*_offs = offs;
 	if( shutdown ){
+		if( shutdown < 0 ){
+			PMIX_ERROR_NO(shutdown, "Unexpected connection close");
+		} else {
+			PMIX_DEBUG("Unexpected connection close");
+		}
 		return SLURM_ERROR;
 	}
 	return 0;
 }
 
-inline static void _pmix_rcvd_next_message(pmix_io_engine_t *mstate)
+inline static void _rcvd_next_message(pmix_io_engine_t *eng)
 {
-	xassert( mstate->magic == PMIX_MSGSTATE_MAGIC );
-	xassert( mstate->rcvd_header != NULL );
-	xassert( mstate->operating );
+	xassert( eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->rcvd_hdr != NULL );
+	xassert( eng->operating );
 
-	mstate->rcvd_pad_recvd = 0;
-	mstate->rcvd_hdr_offs = 0;
-	mstate->rcvd_pay_offs = mstate->rcvd_pay_size = 0;
-	mstate->rcvd_payload = NULL;
+	eng->rcvd_pad_recvd = 0;
+	eng->rcvd_hdr_offs = 0;
+	eng->rcvd_pay_offs = eng->rcvd_pay_size = 0;
+	eng->rcvd_payload = NULL;
 
 }
 
-inline static void _pmix_rcvd_swithch_to_body(pmix_io_engine_t *mstate)
+inline static int _rcvd_swithch_to_body(pmix_io_engine_t *eng)
 {
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC);
-	xassert( mstate->operating );
-	xassert(mstate->hdr_size == mstate->rcvd_hdr_offs);
+	int rc;
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
+	xassert( eng->operating );
+	xassert(eng->header.net_size == eng->rcvd_hdr_offs);
 
-	mstate->rcvd_pay_offs = 0;
-	mstate->rcvd_pay_size = mstate->pay_size_cb(mstate->rcvd_header);
-	mstate->rcvd_payload = xmalloc(mstate->rcvd_pay_size);
+
+	eng->rcvd_pay_offs = eng->rcvd_pay_size = 0;
+	eng->rcvd_payload = NULL;
+	if( eng->header.unpack_hdr_cb ){
+		// If this is inter-node communication - unpack the buffer first
+		if( (rc = eng->header.unpack_hdr_cb(eng->rcvd_hdr, eng->rcvd_hdr_host)) ){
+			PMIX_ERROR_NO(rc, "Cannot unpack message header");
+			return rc;
+		}
+	}
+	eng->rcvd_pay_size = eng->header.pay_size_cb(eng->rcvd_hdr_host);
+	eng->rcvd_payload = xmalloc(eng->rcvd_pay_size);
+	return 0;
 }
 
-void pmix_io_add_hdr(pmix_io_engine_t *mstate, void *buf)
+inline static bool _rcvd_have_padding(pmix_io_engine_t *eng)
 {
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC);
-	xassert( mstate->operating );
-
-	memcpy(mstate->rcvd_header, buf, mstate->hdr_size);
-	mstate->rcvd_hdr_offs = mstate->hdr_size;
-	_pmix_rcvd_swithch_to_body(mstate);
+	return eng->rcvd_padding && eng->rcvd_pad_recvd < eng->rcvd_padding;
 }
 
-void pmix_io_rcvd(pmix_io_engine_t *mstate)
+inline static bool _rcvd_need_header(pmix_io_engine_t *eng)
 {
-	size_t size, to_recv;
-	bool shutdown;
-	int fd = mstate->fd;
+	return eng->rcvd_hdr_offs < eng->header.net_size;
+}
 
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC);
-	xassert( mstate->operating );
 
-	if( pmix_io_rcvd_ready(mstate) ){
+/*
+ * Add already unpacked (converted from net to host format) header.
+ */
+void pmix_io_add_hdr(pmix_io_engine_t *eng, void *buf)
+{
+	int rc;
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
+	xassert( eng->operating );
+
+	memcpy(eng->rcvd_hdr_host, buf, eng->header.host_size);
+	eng->rcvd_hdr_offs = eng->header.net_size;
+	if( (rc = _rcvd_swithch_to_body(eng) ) ){
+		pmix_io_finalize(eng, rc);
+	}
+}
+
+void pmix_io_rcvd(pmix_io_engine_t *eng)
+{
+	size_t size, remain;
+	void *offs;
+	int shutdown;
+	int fd = eng->fd;
+
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
+	xassert( eng->operating );
+
+	if( pmix_io_rcvd_ready(eng) ){
 		// nothing to do,
 		// first the current message has to be extracted
 		return;
 	}
 
 	// Drop padding first so it won't corrupt the message
-	if( mstate->rcvd_padding && mstate->rcvd_pad_recvd < mstate->rcvd_padding ){
-		char buf[mstate->rcvd_padding];
-		size = mstate->rcvd_padding;
-		to_recv = size - mstate->rcvd_pad_recvd;
-		mstate->rcvd_pad_recvd += pmix_read_buf(fd, buf, to_recv, &shutdown, false);
+	if( _rcvd_have_padding(eng) ){
+		char buf[eng->rcvd_padding];
+		size = eng->rcvd_padding;
+		remain = size - eng->rcvd_pad_recvd;
+		eng->rcvd_pad_recvd += pmix_read_buf(fd, buf, remain, &shutdown, false);
 		if( shutdown ){
-			pmix_io_finalize(mstate, 0);
+			pmix_io_finalize(eng, 0);
 			return;
 		}
-		if( mstate->rcvd_pad_recvd < size ){
+		if( eng->rcvd_pad_recvd < size ){
 			// normal return. receive another portion of header later
 			return;
 		}
 	}
 
-	if( mstate->rcvd_hdr_offs < mstate->hdr_size ){
+	if( _rcvd_need_header(eng) ){
 		// need to finish with the header
-		size = mstate->hdr_size;
-		to_recv = size - mstate->rcvd_hdr_offs;
-		mstate->rcvd_hdr_offs += pmix_read_buf(fd, mstate->rcvd_header + mstate->rcvd_hdr_offs,
-										   to_recv, &shutdown, false);
+		size = eng->header.net_size;
+		remain = size - eng->rcvd_hdr_offs;
+		offs = eng->rcvd_hdr + eng->rcvd_hdr_offs;
+		eng->rcvd_hdr_offs += pmix_read_buf(fd, offs, remain, &shutdown, false);
 		if( shutdown ){
-			pmix_io_finalize(mstate, 0);
+			pmix_io_finalize(eng, shutdown);
 			return;
 		}
-		if( mstate->rcvd_hdr_offs < size ){
+		if( eng->rcvd_hdr_offs < size ){
 			// normal return. receive another portion of header later
 			return;
 		}
 		// if we are here then header is received and we can adjust buffer
-		_pmix_rcvd_swithch_to_body(mstate);
+		if( (shutdown = _rcvd_swithch_to_body(eng) ) ){
+			pmix_io_finalize(eng, shutdown);
+			return;
+		}
 		// go ahared with body receive
 	}
 	// we are receiving the body
-	xassert( mstate->rcvd_hdr_offs == mstate->hdr_size );
-	if( mstate->rcvd_pay_size == 0 ){
+	xassert( eng->rcvd_hdr_offs == eng->header.net_size );
+	if( eng->rcvd_pay_size == 0 ){
 		// zero-byte message. exit. next time we will hit pmix_nbmsg_rcvd_ready
 		return;
 	}
-	size = mstate->rcvd_pay_size;
-	to_recv = size - mstate->rcvd_pay_offs;
-	mstate->rcvd_pay_offs += pmix_read_buf(fd, mstate->rcvd_payload + mstate->rcvd_pay_offs,
-									   to_recv, &shutdown, false);
+	size = eng->rcvd_pay_size;
+	remain = size - eng->rcvd_pay_offs;
+	eng->rcvd_pay_offs += pmix_read_buf(fd, eng->rcvd_payload + eng->rcvd_pay_offs,
+									   remain, &shutdown, false);
 	if( shutdown ){
-		pmix_io_finalize(mstate, 0);
+		pmix_io_finalize(eng, 0);
 		return;
 	}
-	if( mstate->rcvd_pay_offs  == size ){
+	if( eng->rcvd_pay_offs  == size ){
 		// normal return. receive another portion later
 		PMIX_DEBUG("Message is ready for processing!");
 		return;
@@ -218,89 +285,170 @@ void pmix_io_rcvd(pmix_io_engine_t *mstate)
 
 }
 
-void *pmix_io_rcvd_extract(pmix_io_engine_t *mstate, void *header)
+void *pmix_io_rcvd_extract(pmix_io_engine_t *eng, void *header)
 {
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
-	xassert( mstate->operating );
-	xassert( pmix_io_rcvd_ready(mstate) );
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
+	xassert( pmix_io_rcvd_ready(eng) );
 
-	void *ptr = mstate->rcvd_payload;
-	memcpy(header, mstate->rcvd_header, (size_t)mstate->hdr_size);
+	void *ptr = eng->rcvd_payload;
+	memcpy(header, eng->rcvd_hdr_host, (size_t)eng->header.host_size);
 	// Drop message state to receive new one
-	_pmix_rcvd_next_message(mstate);
+	_rcvd_next_message(eng);
 	return ptr;
 }
 
 // Transmitter
 
 
-inline static void _pmix_send_setup_current(pmix_io_engine_t *mstate, void *msg)
+inline static int _send_set_current(pmix_io_engine_t *eng, void *msg)
 {
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
-	xassert( mstate->operating );
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
 
-	mstate->send_current = msg;
-	mstate->send_offs = 0;
-	mstate->send_size = mstate->hdr_size + mstate->pay_size_cb(msg);
-}
+	// Set message basis
+	eng->send_current = msg;
 
-void pmix_io_send_enqueue(pmix_io_engine_t *mstate, void *msg)
-{
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
-	xassert( mstate->operating );
-	if( mstate->send_current == NULL ){
-		_pmix_send_setup_current(mstate, msg);
+	// Setup header for sending
+	if( eng->header.pack_hdr_cb ){
+		eng->send_hdr_size = eng->header.pack_hdr_cb(msg, eng->send_hdr_net);
+		xassert( eng->send_hdr_size > 0 );
 	}else{
-		list_enqueue(mstate->send_queue, msg);
+		eng->send_hdr_net = msg;
+		eng->send_hdr_size = eng->header.net_size;
 	}
-	pmix_io_send_progress(mstate);
+	eng->send_hdr_offs = 0;
+
+	// Setup payload for sending
+	eng->send_payload = (char*)msg + eng->header.net_size;
+	eng->send_pay_size = eng->header.pay_size_cb(msg);
+	eng->send_pay_offs = 0;
+	return 0;
 }
 
-bool pmix_io_send_pending(pmix_io_engine_t *mstate)
+inline static void _send_free_current(pmix_io_engine_t *eng)
 {
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
-	xassert( mstate->operating );
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
+	xassert( eng->send_current );
 
-	if( mstate->send_size && mstate->send_offs == mstate->send_size ){
-		// The current message is send. Cleanup current msg
-		xassert(mstate->send_current != NULL);
-		xfree(mstate->send_current);
-		mstate->send_current = NULL;
-		mstate->send_offs = mstate->send_size = 0;
+	eng->send_payload = NULL;
+	eng->send_pay_size = eng->send_pay_offs = 0;
+
+	if( eng->header.pack_hdr_cb == NULL ){
+		eng->send_hdr_net = NULL;
 	}
-	if( mstate->send_current == NULL ){
+	eng->send_hdr_size = eng->send_hdr_offs = 0;
+	xfree( eng->send_current );
+}
+
+inline static int _send_header_ok(pmix_io_engine_t *eng)
+{
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
+	xassert( eng->send_current != NULL );
+
+	return (eng->send_current != NULL) &&
+			(eng->send_hdr_size > 0) &&
+			(eng->send_hdr_offs == eng->send_hdr_size);
+}
+
+inline static int _send_payload_ok(pmix_io_engine_t *eng)
+{
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
+
+	return (eng->send_current != NULL) && _send_header_ok(eng) &&
+			(eng->send_pay_size > 0) && (eng->send_pay_offs == eng->send_pay_size);
+}
+
+void pmix_io_send_enqueue(pmix_io_engine_t *eng, void *msg)
+{
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
+	if( eng->send_current == NULL ){
+		_send_set_current(eng, msg);
+	}else{
+		list_enqueue(eng->send_queue, msg);
+	}
+	pmix_io_send_progress(eng);
+}
+
+bool pmix_io_send_pending(pmix_io_engine_t *eng)
+{
+	int rc;
+
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
+
+	if( _send_payload_ok(eng) ){
+		// The current message is send. Cleanup current msg
+		_send_free_current(eng);
+	}
+
+	if( eng->send_current == NULL ){
 		// Try next element
-		int n = list_count(mstate->send_queue);
+		int n = list_count(eng->send_queue);
 		if( n == 0 ){
 			// Nothing to do
 			return false;
 		}
-		mstate->send_current = list_dequeue(mstate->send_queue);
-		xassert( mstate->send_current != NULL );
-		mstate->send_size = mstate->hdr_size + mstate->pay_size_cb(mstate->send_current);
+		void *msg = list_dequeue(eng->send_queue);
+		xassert( msg != NULL );
+		if( (rc = _send_set_current(eng, msg) ) ){
+			PMIX_ERROR_NO(rc,"Cannot switch to the next message");
+			pmix_io_finalize(eng, rc);
+		}
 	}
 	return true;
 }
 
-void pmix_io_send_progress(pmix_io_engine_t *mstate)
+void pmix_io_send_progress(pmix_io_engine_t *eng)
 {
-	xassert(mstate->magic == PMIX_MSGSTATE_MAGIC );
-	xassert( mstate->operating );
-	int fd = mstate->fd;
+	int fd = eng->fd;
+	uint32_t size, remain;
+	void *offs;
 
-	while( pmix_io_send_pending(mstate) ){
-		// try to send everything
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	xassert( eng->operating );
+
+
+	while( pmix_io_send_pending(eng) ){
+		// try to send everything untill fd became blockable
 		// FIXME: maybe set some restriction on number of messages sended at once
-		bool shutdown = false;
-		uint32_t to_write = mstate->send_size - mstate->send_offs;
-		int cnt = pmix_write_buf(fd, mstate->send_current + mstate->send_offs, to_write, &shutdown);
-		if( shutdown ){
-			pmix_io_finalize(mstate,0);
-			return;
+		int shutdown = 0;
+		if( !_send_header_ok(eng) ){
+			size = eng->send_hdr_size;
+			remain = size - eng->send_hdr_offs;
+			offs = eng->send_hdr_net + eng->send_hdr_offs;
+			int cnt = pmix_write_buf(fd, offs, remain, &shutdown);
+			if( shutdown ){
+				pmix_io_finalize(eng, shutdown);
+				return;
+			}
+			if( cnt == 0 ){
+				break;
+			}
+			eng->send_hdr_offs += cnt;
+			if( !_send_header_ok(eng) ){
+				// Go to the next interation and try to finish header reception
+				continue;
+			}
 		}
-		if( cnt == 0 ){
-			break;
+
+		if( _send_header_ok(eng) ){
+			size = eng->send_pay_size;
+			remain = size - eng->send_pay_offs;
+			offs = eng->send_payload + eng->send_pay_offs;
+			int cnt = pmix_write_buf(fd, offs, remain, &shutdown);
+			if( shutdown ){
+				pmix_io_finalize(eng, shutdown);
+				return;
+			}
+			if( cnt == 0 ){
+				break;
+			}
+			eng->send_pay_offs += cnt;
 		}
-		mstate->send_offs += cnt;
 	}
 }

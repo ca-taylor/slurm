@@ -66,6 +66,16 @@
         ## args, strerror(errno), errno);             \
 }
 
+#define PMIX_ERROR_NO(err, format, args...) {                 \
+  char file[] = __FILE__;                             \
+  char *file_base = strrchr(file, '/');               \
+  if( file_base == NULL ){                            \
+	file_base = file;                                 \
+  }                                                   \
+  error("%s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
+		file_base, __LINE__, __FUNCTION__,            \
+		## args, strerror(err), err);             \
+}
 #ifdef NDEBUG
 #define pmix_debug_hang(x)
 #else

@@ -41,10 +41,10 @@
 
 void pmix_xfree_buffer(void *x);
 int pmix_usock_create_srv(char *path);
-size_t pmix_read_buf(int fd, void *buf, size_t count, bool *shutdown, bool blocking);
-size_t pmix_write_buf(int fd, void *buf, size_t count, bool *shutdown);
-bool pmix_fd_read_ready(int fd, bool *shutdown);
-bool pmix_fd_write_ready(int fd, bool *shutdown);
+size_t pmix_read_buf(int fd, void *buf, size_t count, int *shutdown, bool blocking);
+size_t pmix_write_buf(int fd, void *buf, size_t count, int *shutdown);
+bool pmix_fd_read_ready(int fd, int *shutdown);
+bool pmix_fd_write_ready(int fd, int *shutdown);
 
 
 #endif // PMIX_UTILS_H

@@ -83,48 +83,50 @@ const uint32_t plugin_version   = 100;
 
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
-  int ret;
-  PMIX_DEBUG("slurmstepd initialization");
+	int ret;
+	PMIX_DEBUG("slurmstepd initialization");
 
-  if( ( ret = pmix_stepd_init(job, env) ) ){
-    return ret;
-  }
-  ret = pmix_agent_start();
-  return ret;
+	if( ( ret = pmix_stepd_init(job, env) ) ){
+		return ret;
+	}
+	ret = pmix_agent_start();
+	return ret;
 }
 
 int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
-			       char ***env)
+							   char ***env)
 {
-  PMIX_DEBUG("task initialization");
-  env_array_overwrite_fmt(env, SERVER_URI_ENV, "%s", pmix_info_cli_addr());
-  env_array_overwrite_fmt(env, JOBID_ENV, "%d.%d.%d", job->jobid, job->stepid, job->ltaskid);
-  pmix_agent_task_cleanup();
-  return SLURM_SUCCESS;
+	PMIX_DEBUG("task initialization");
+	env_array_overwrite_fmt(env, SERVER_URI_ENV, "%s", pmix_info_cli_addr());
+	env_array_overwrite_fmt(env, JOBID_ENV, "%d.%d.%d", job->jobid, job->stepid, job->ltaskid);
+	pmix_agent_task_cleanup();
+	return SLURM_SUCCESS;
 }
 
 mpi_plugin_client_state_t *
 p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 {
-  PMIX_DEBUG("srun initialization");
-  if( SLURM_SUCCESS != pmix_srun_init(job,env) ){
-    return NULL;
-  }
-  if( SLURM_SUCCESS != pmix_agent_start() ){
-    return NULL;
-  }
-  /* only return NULL on error */
-  return (void *)0xdeadbeef;
+	// pmix_debug_hang(1);
+
+	PMIX_DEBUG("srun initialization");
+	if( SLURM_SUCCESS != pmix_srun_init(job,env) ){
+		return NULL;
+	}
+	if( SLURM_SUCCESS != pmix_agent_start() ){
+		return NULL;
+	}
+	/* only return NULL on error */
+	return (void *)0xdeadbeef;
 }
 
 int p_mpi_hook_client_single_task_per_node(void)
 {
-  PMIX_DEBUG("Single task per node");
+	PMIX_DEBUG("Single task per node");
 	return false;
 }
 
 int p_mpi_hook_client_fini()
 {
-  PMIX_DEBUG("Cleanup client");
+	PMIX_DEBUG("Cleanup client");
 	return SLURM_SUCCESS;
 }

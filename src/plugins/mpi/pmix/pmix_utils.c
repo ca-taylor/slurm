@@ -95,11 +95,11 @@ err_fd:
 	return ret;
 }
 
-size_t pmix_read_buf(int fd, void *buf, size_t count, bool *shutdown, bool blocking)
+size_t pmix_read_buf(int fd, void *buf, size_t count, int *shutdown, bool blocking)
 {
 	ssize_t ret, offs = 0;
 
-	*shutdown = false;
+	*shutdown = 0;
 
 	if( !blocking && !pmix_fd_read_ready(fd, shutdown) ){
 		return 0;
@@ -111,8 +111,9 @@ size_t pmix_read_buf(int fd, void *buf, size_t count, bool *shutdown, bool block
 			offs += ret;
 			continue;
 		} else if( ret == 0 ){
-			// closed connection. shutdown.
-			goto err_exit;
+			// connection closed.
+			*shutdown = 1;
+			return offs;
 		}
 		switch( errno ){
 			case EINTR:
@@ -121,20 +122,18 @@ size_t pmix_read_buf(int fd, void *buf, size_t count, bool *shutdown, bool block
 				return offs;
 			default:
 				PMIX_ERROR("blocking=%d",blocking);
-				goto err_exit;
+				*shutdown = -errno;
+				return offs;
 		}
 	}
 	return offs;
-err_exit:
-	*shutdown = true;
-	return offs;
 }
 
-size_t pmix_write_buf(int fd, void *buf, size_t count, bool *shutdown)
+size_t pmix_write_buf(int fd, void *buf, size_t count, int *shutdown)
 {
 	ssize_t ret, offs = 0;
 
-	*shutdown = false;
+	*shutdown = 0;
 
 	if( !pmix_fd_write_ready(fd, shutdown) ){
 		return 0;
@@ -152,16 +151,14 @@ size_t pmix_write_buf(int fd, void *buf, size_t count, bool *shutdown)
 			case EWOULDBLOCK:
 				return offs;
 			default:
-				goto err_exit;
+				*shutdown = -errno;
+				return offs;
 		}
 	}
 	return offs;
-err_exit:
-	*shutdown = true;
-	return offs;
 }
 
-bool pmix_fd_read_ready(int fd, bool *shutdown)
+bool pmix_fd_read_ready(int fd, int *shutdown)
 {
   struct pollfd pfd[1];
   int    rc;
@@ -169,18 +166,23 @@ bool pmix_fd_read_ready(int fd, bool *shutdown)
   pfd[0].events = POLLIN;
   rc = poll(pfd, 1, 10);
   if( rc < 0 ){
-	*shutdown = true;
+	*shutdown = -errno;
 	return false;
   }
   bool ret = ((rc == 1) && (pfd[0].revents & POLLIN));
   if( !ret && (pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL))){
-	*shutdown = true;
+	  if( pfd[0].revents & ( POLLERR | POLLNVAL) ){
+		  *shutdown = -EBADF;
+	  } else {
+		  // POLLHUP - normal connection close
+		  *shutdown = 1;
+	  }
   }
   return ret;
 }
 
 
-bool pmix_fd_write_ready(int fd, bool *shutdown)
+bool pmix_fd_write_ready(int fd, int *shutdown)
 {
   struct pollfd pfd[1];
   int    rc;
@@ -188,11 +190,16 @@ bool pmix_fd_write_ready(int fd, bool *shutdown)
   pfd[0].events = POLLOUT;
   rc = poll(pfd, 1, 10);
   if( rc < 0 ){
-	*shutdown = true;
+	*shutdown = -errno;
 	return false;
   }
   if( pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL) ){
-	*shutdown = true;
+	  if( pfd[0].revents & ( POLLERR | POLLNVAL) ){
+		  *shutdown = -EBADF;
+	  } else {
+		  // POLLHUP - normal connection close
+		  *shutdown = 1;
+	  }
   }
   return ((rc == 1) && (pfd[0].revents & POLLOUT));
 }

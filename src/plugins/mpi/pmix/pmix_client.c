@@ -65,14 +65,21 @@ static struct io_operations peer_ops = {
 	.handle_write = peer_write
 };
 
-// Unblocking message processing
-
-
 static uint32_t payload_size(void *buf)
 {
 	message_header_t *ptr = (message_header_t*)buf;
 	return ptr->nbytes;
 }
+
+pmix_io_engine_header_t cli_header = {
+	.net_size= sizeof(message_header_t),
+	.host_size = sizeof(message_header_t),
+	.pack_hdr_cb = NULL,
+	.unpack_hdr_cb = NULL,
+	.pay_size_cb = payload_size
+};
+
+// Unblocking message processing
 
 static void *_new_msg_to_task(uint32_t taskid, uint32_t size, void **payload)
 {
@@ -84,7 +91,7 @@ static void *_new_msg_to_task(uint32_t taskid, uint32_t size, void **payload)
 	return msg;
 }
 
-void pmix_client_new_connection(int fd)
+void pmix_client_new_conn(int fd)
 {
 	message_header_t hdr;
 	uint32_t offset = 0;
@@ -111,7 +118,7 @@ void pmix_client_new_connection(int fd)
 	// Setup message engine. Push the header we just received to
 	// ensure integrity of msgengine
 	pmix_io_engine_t *me = pmix_state_cli_msghandler(taskid);
-	pmix_io_init(me, fd, sizeof(hdr),payload_size);
+	pmix_io_init(me, fd, cli_header);
 	pmix_io_add_hdr(me, &hdr);
 
 	obj = eio_obj_create(fd, &peer_ops, (void*)(long)taskid);
