@@ -37,14 +37,14 @@
 \*****************************************************************************/
 
 
-#ifndef INFO_H
-#define INFO_H
+#ifndef PMIX_INFO_H
+#define PMIX_INFO_H
 
 #include "pmix_common.h"
 
 /*
  *
- *  Job information structure and access API
+ *  Environment information structure and access API
  *
  */
 
@@ -53,15 +53,19 @@ typedef struct {
 #       define PMIX_INFO_MAGIC 0xdeadbeef
   int  magic;
 #endif
-  uint32_t jobid;       /* Current SLURM job id                      */
-  uint32_t stepid;      /* Current step id (or NO_VAL)               */
-  uint32_t nnodes;      /* number of nodes in current job            */
-  uint32_t ntasks;      /* total number of tasks in current job      */
-  uint16_t *task_cnts;  /* Number of tasks on each node in job       */
-  int node_id;          /* relative position of this node in job     */
-  uint32_t node_tasks;  /* number of tasks on *this* node            */
-  uint32_t *gtids;
-  uint32_t task_dist;
+  uint32_t jobid;       /* Current SLURM job id                         */
+  uint32_t stepid;      /* Current step id (or NO_VAL)                  */
+  uint32_t nnodes;      /* number of nodes in current step              */
+  uint32_t nnodes_job;  /* number of nodes in current job               */
+  uint32_t ntasks;      /* total number of tasks in current step        */
+  uint32_t ntasks_job;  /* total possible number of tasks in job		*/
+  uint32_t ncpus_job;   /* total possible number of cpus in job		    */
+  uint16_t *task_cnts;  /* Number of tasks on each node in this step    */
+  int node_id;          /* relative position of this node in this step  */
+  int node_id_job;      /* relative position of this node in SLURM job  */
+  uint32_t node_tasks;  /* number of tasks on *this* node               */
+  uint32_t *gtids;      /* global ids of tasks located on *this* node   */
+  /*uint32_t task_dist; Dont need it for now                            */
 } pmix_jobinfo_t;
 
 extern pmix_jobinfo_t _pmix_job_info;
@@ -75,6 +79,16 @@ int pmix_info_cli_fd();
 void pmix_info_server_contacts_set(char *path, int fd);
 const char *pmix_info_srv_addr();
 int pmix_info_srv_fd();
+
+// Dealing with hostnames
+int pmix_info_resources_set(char ***env);
+char *pmix_info_nth_child_name(int idx);
+char *pmix_info_nth_host_name(int n);
+
+// Dealing with I/O
+void pmix_info_io_set(eio_handle_t *h);
+eio_handle_t *pmix_info_io();
+
 
 // Agent location
 static inline int pmix_info_is_srun()
@@ -90,7 +104,7 @@ static inline int pmix_info_is_stepd()
 }
 
 // Job information
-void pmix_info_job_set(const stepd_step_rec_t *job);
+int pmix_info_job_set_stepd(const stepd_step_rec_t *job, char ***env);
 void pmix_info_job_set_srun(const mpi_plugin_client_info_t *job);
 
 inline static uint32_t pmix_info_jobid(){
@@ -116,9 +130,24 @@ inline static uint32_t pmix_info_nodes(){
   return _pmix_job_info.nnodes;
 }
 
+inline static uint32_t pmix_info_nodes_uni(){
+  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return _pmix_job_info.nnodes_job;
+}
+
 inline static uint32_t pmix_info_tasks(){
   xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
   return _pmix_job_info.ntasks;
+}
+
+inline static uint32_t pmix_info_tasks_uni(){
+  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return _pmix_job_info.ntasks_job;
+}
+
+inline static uint32_t pmix_info_cpus(){
+  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+  return _pmix_job_info.ncpus_job;
 }
 
 inline static uint32_t pmix_info_node_taskcnt(uint32_t i){
@@ -138,6 +167,8 @@ inline static uint32_t pmix_info_task_id(uint32_t i){
   xassert( i < _pmix_job_info.node_tasks );
   return _pmix_job_info.gtids[i];
 }
+
+
 
 /*
  *
@@ -169,9 +200,7 @@ extern int *_pmix_child_list;
 extern char *_pmix_parent_host;
 extern slurm_addr_t *_pmix_parent_addr;
 
-
-int pmix_info_nodes_list_set(char ***env);
-int pmix_info_nodes_env_set(char *this_host, int *childs, int child_cnt);
+int pmix_info_coll_tree_set(int *childs, int child_cnt);
 int  pmix_info_parent_set_root();
 int  pmix_info_parent_set_srun(char *phost, uint16_t port);
 int pmix_info_parent_set_stepd(char *phost);
@@ -229,8 +258,6 @@ inline static int pmix_info_nth_child(int n)
   xassert( n < _pmix_child_num );
   return _pmix_child_list[n];
 }
-char *pmix_info_nth_child_name(int idx);
-char *pmix_info_nth_host_name(int n);
 
 inline static int pmix_info_is_child_no(int id)
 {
@@ -244,8 +271,5 @@ inline static int pmix_info_is_child_no(int id)
   }
   return -1;
 }
-
-void pmix_info_io_set(eio_handle_t *h);
-eio_handle_t *pmix_info_io();
 
 #endif // INFO_H

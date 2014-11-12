@@ -106,7 +106,7 @@ void pmix_io_finalize(pmix_io_engine_t *eng, int error)
 
 	// Free receiver
 	if( NULL != eng->rcvd_payload){
-		free(eng->rcvd_payload);
+		xfree(eng->rcvd_payload);
 	}
 
 	xfree( eng->rcvd_hdr );
@@ -218,7 +218,10 @@ void pmix_io_rcvd(pmix_io_engine_t *eng)
 	int fd = eng->fd;
 
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
-	xassert( eng->operating );
+
+	if( pmix_io_finalized(eng) ){
+		return;
+	}
 
 	if( pmix_io_rcvd_ready(eng) ){
 		// nothing to do,
@@ -320,7 +323,7 @@ inline static int _send_set_current(pmix_io_engine_t *eng, void *msg)
 	eng->send_hdr_offs = 0;
 
 	// Setup payload for sending
-	eng->send_payload = (char*)msg + eng->header.net_size;
+	eng->send_payload = (char*)msg + eng->header.host_size;
 	eng->send_pay_size = eng->header.pay_size_cb(msg);
 	eng->send_pay_offs = 0;
 	return 0;

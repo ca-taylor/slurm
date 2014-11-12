@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef COMM_ENGINE_H
-#define COMM_ENGINE_H
+#ifndef PMIX_IO_H
+#define PMIX_IO_H
 
 #include <poll.h>
 #include "pmix_common.h"

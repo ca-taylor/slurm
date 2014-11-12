@@ -205,40 +205,24 @@ void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size)
  */
 int pmix_coll_init(char ***env)
 {
-	char *p, *this_host;
 	uint32_t nodeid = pmix_info_nodeid();
 	uint32_t nodes = pmix_info_nodes();
 	int parent_id, child_cnt, depth, max_depth;
 	int *childs, width;
+	char *p;
 
 	PMIX_DEBUG("Start");
-	width = slurm_get_tree_width(); // FIXME: By now just use SLURM defaults. Make it flexible as PMI2 in future.
+	// FIXME: By now just use SLURM defaults. Make it flexible as PMI2 in future.
+	width = slurm_get_tree_width();
 	reverse_tree_info(nodeid + 1, nodes + 1, width, &parent_id, &child_cnt,
 					  &depth, &max_depth);
 	parent_id--;
-
-	// parent_id can't be less that -2!
-	xassert( parent_id >= -2 );
-
-	if( pmix_info_nodes_list_set(env) ){
-		return SLURM_ERROR;
-	}
-
-	// Deal with hostnames and child id's
-	hostlist_t hl = hostlist_create(pmix_info_step_hosts());
-	p = NULL;
-	if( nodeid >= 0 ){
-		p = hostlist_nth(hl, nodeid);
-		this_host = xstrdup(p);
-		free(p);
-	}else{
-		this_host = xstrdup("srun");
-	}
+	xassert( parent_id >= -2 ); // parent_id can't be less that -2!
 
 	// We interested in amount of direct childs
 	child_cnt = _node_childrens(&childs, width, nodeid + 1, nodes + 1);
 
-	if( pmix_info_nodes_env_set(this_host, childs, child_cnt) ){
+	if( pmix_info_coll_tree_set(childs, child_cnt) ){
 		return SLURM_ERROR;
 	}
 
@@ -272,12 +256,9 @@ int pmix_coll_init(char ***env)
 		unsetenvp(*env, PMIX_SRUN_PORT_ENV);
 		pmix_info_parent_set_srun(phost, port);
 	} else if( parent_id >= 0 ){
-		p = hostlist_nth(hl, parent_id);
-		char *phost = xstrdup(p);
-		free(p);
+		char *phost = pmix_info_nth_host_name(parent_id);
 		pmix_info_parent_set_stepd(phost);
 	}
-	hostlist_destroy(hl);
 
 	// Collectove data
 	uint32_t size = sizeof(void*) * pmix_info_childs();
@@ -327,7 +308,7 @@ void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size)
 {
 	PMIX_DEBUG("Local task contribution %d", taskid);
 	if( !pmix_state_task_contrib_ok(taskid) ){
-		PMIX_ERROR("The task %d already contributed to this collective", taskid);
+		PMIX_ERROR_NO(0,"The task %d already contributed to this collective", taskid);
 		return;
 	}
 	uint32_t full_size = sizeof(int)*2 + size;

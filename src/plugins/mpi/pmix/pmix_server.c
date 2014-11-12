@@ -83,7 +83,7 @@ pmix_io_engine_header_t srv_rcvd_header = {
 int pmix_stepd_init(const stepd_step_rec_t *job, char ***env)
 {
 	char path[MAX_USOCK_PATH];
-	int fd;
+	int fd, rc;
 
 
 	// Create UNIX socket for slurmd communication
@@ -101,16 +101,19 @@ int pmix_stepd_init(const stepd_step_rec_t *job, char ***env)
 	}
 	pmix_info_cli_contacts_set(path, fd);
 
-	pmix_info_job_set(job);
-	pmix_coll_init(env);
-
+	if( ( rc = pmix_info_job_set_stepd(job, env) ) ){
+		return rc;
+	}
+	if( ( rc = pmix_coll_init(env) ) ){
+		return rc;
+	}
 	return SLURM_SUCCESS;
 }
 
 int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env)
 {
 	char path[MAX_USOCK_PATH];
-	int fd;
+	int fd, rc;
 	uint16_t port;
 
 	if (net_stream_listen(&fd, &port) < 0) {
@@ -122,7 +125,9 @@ int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env)
 	PMIX_DEBUG("srun pmi port: %hu", port);
 	env_array_overwrite_fmt(env, PMIX_SRUN_PORT_ENV, "%hu", port);
 	pmix_info_job_set_srun(job);
-	pmix_coll_init(env);
+	if( ( rc = pmix_coll_init(env) ) ){
+		return rc;
+	}
 	return SLURM_SUCCESS;
 }
 
@@ -200,17 +205,20 @@ static int _recv_unpack_hdr(void *net, void *host)
 	if( unpack32(&ptr->send_hdr.magic, packbuf)){
 		return -EINVAL;
 	}
-	uint32_t tmp = PMIX_SERVER_MSG_MAGIC;
-	//xassert( ptr->send_hdr.magic == PMIX_SERVER_MSG_MAGIC );
+	xassert( ptr->send_hdr.magic == PMIX_SERVER_MSG_MAGIC );
+
 	if( unpack32(&ptr->send_hdr.nodeid, packbuf)){
 		return -EINVAL;
 	}
+
 	if( unpack32(&ptr->send_hdr.paysize, packbuf) ){
 		return -EINVAL;
 	}
+
 	if( unpack8(&ptr->send_hdr.cmd, packbuf) ){
 		return -EINVAL;
 	}
+
 	// free the Buf packbuf, but not the memory to which it points
 	packbuf->head = NULL;
 	free_buf(packbuf);
