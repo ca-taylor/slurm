@@ -65,190 +65,279 @@ uint16_t _pmix_parent_port = -1;
 // Client contact information
 void pmix_info_cli_contacts_set(char *path, int fd)
 {
-  int size = strlen(path);
-  _cli_addr = xmalloc(size + 1);
-  strcpy(_cli_addr,path);
-  _cli_fd = fd;
+	int size = strlen(path);
+	_cli_addr = xmalloc(size + 1);
+	strcpy(_cli_addr,path);
+	_cli_fd = fd;
 }
 
 const char *pmix_info_cli_addr()
 {
-  // Check that client address was initialized
-  xassert( _cli_addr != NULL );
-  return _cli_addr;
+	// Check that client address was initialized
+	xassert( _cli_addr != NULL );
+	return _cli_addr;
 }
 
 
 int pmix_info_cli_fd()
 {
-  // Check that client fd was created
-  xassert( _cli_fd >= 0  );
-  return _cli_fd;
+	// Check that client fd was created
+	xassert( _cli_fd >= 0  );
+	return _cli_fd;
 }
 
 // stepd global contact information
 void pmix_info_server_contacts_set(char *path, int fd)
 {
-  if( path != NULL ){
-    int size = strlen(path);
-    _server_addr = xmalloc(size + 1);
-    strcpy(_server_addr,path);
-  } else {
-    _server_addr = NULL;
-  }
-  _server_fd = fd;
+	if( path != NULL ){
+		int size = strlen(path);
+		_server_addr = xmalloc(size + 1);
+		strcpy(_server_addr,path);
+	} else {
+		_server_addr = NULL;
+	}
+	_server_fd = fd;
 }
 
 const char *pmix_info_srv_addr()
 {
-  // Check that Server address was initialized
-  xassert( _server_addr != NULL );
-  return _server_addr;
+	// Check that Server address was initialized
+	xassert( _server_addr != NULL );
+	return _server_addr;
 }
 
 int pmix_info_srv_fd()
 {
-  // Check that Server fd was created
-  xassert( _server_fd >= 0  );
-  return _server_fd;
+	// Check that Server fd was created
+	xassert( _server_fd >= 0  );
+	return _server_fd;
 }
 
 // Job information
 void pmix_info_job_set_srun(const mpi_plugin_client_info_t *job)
 {
-  int i;
+	int i;
 
-  memset(&_pmix_job_info, 0, sizeof(_pmix_job_info));
+	memset(&_pmix_job_info, 0, sizeof(_pmix_job_info));
 #ifndef NDEBUG
-  _pmix_job_info.magic = PMIX_INFO_MAGIC;
+	_pmix_job_info.magic = PMIX_INFO_MAGIC;
 #endif
 
-  _pmix_nodes_list = xstrdup(job->step_layout->node_list);
-  // This node info
-  _pmix_job_info.jobid      = job->jobid;
-  _pmix_job_info.stepid     = job->stepid;
-  _pmix_job_info.node_id    = -1; /* srun sign */
-  _pmix_job_info.node_tasks =  0; /* srun doesn't manage any tasks */
-  _pmix_job_info.ntasks     = job->step_layout->task_cnt;
-  _pmix_job_info.nnodes     = job->step_layout->node_cnt;
-  _pmix_job_info.task_cnts  = xmalloc( sizeof(*_pmix_job_info.task_cnts) * _pmix_job_info.nnodes);
-  for(i = 0; i < _pmix_job_info.nnodes; i++){
-    _pmix_job_info.task_cnts[i] = job->step_layout->tasks[i];
-  }
-  _pmix_job_info.task_dist = job->step_layout->task_dist;
-  // TODO: we need to extract global task mapping!
-  // Check PMI2's static char *_get_proc_mapping(const mpi_plugin_client_info_t *job)
-  // for possible way to go.
+	_pmix_nodes_list = xstrdup(job->step_layout->node_list);
+	// This node info
+	_pmix_job_info.jobid      = job->jobid;
+	_pmix_job_info.stepid     = job->stepid;
+	_pmix_job_info.node_id    = -1; /* srun sign */
+	_pmix_job_info.node_tasks =  0; /* srun doesn't manage any tasks */
+	_pmix_job_info.ntasks     = job->step_layout->task_cnt;
+	_pmix_job_info.nnodes     = job->step_layout->node_cnt;
+	_pmix_job_info.task_cnts  = xmalloc( sizeof(*_pmix_job_info.task_cnts) * _pmix_job_info.nnodes);
+	for(i = 0; i < _pmix_job_info.nnodes; i++){
+		_pmix_job_info.task_cnts[i] = job->step_layout->tasks[i];
+	}
+	// TODO: we need to extract global task mapping!
+	// Check PMI2's static char *_get_proc_mapping(const mpi_plugin_client_info_t *job)
+	// for possible way to go.
 }
 
-void pmix_info_job_set(const stepd_step_rec_t *job)
+int pmix_info_job_set_stepd(const stepd_step_rec_t *job, char ***env)
 {
-  int i;
+	int i, rc;
 #ifndef NDEBUG
-  _pmix_job_info.magic = PMIX_INFO_MAGIC;
+	_pmix_job_info.magic = PMIX_INFO_MAGIC;
 #endif
 
-  // This node info
-  _pmix_job_info.jobid      = job->jobid;
-  _pmix_job_info.stepid     = job->stepid;
-  _pmix_job_info.node_id    = job->nodeid;
-  _pmix_job_info.node_tasks = job->node_tasks;
+	// This node info
+	_pmix_job_info.jobid      = job->jobid;
+	_pmix_job_info.stepid     = job->stepid;
+	_pmix_job_info.node_id    = job->nodeid;
+	_pmix_job_info.node_tasks = job->node_tasks;
 
-  // Global info
-  _pmix_job_info.ntasks     = job->ntasks;
-  _pmix_job_info.nnodes     = job->nnodes;
-  _pmix_job_info.task_cnts  = xmalloc( sizeof(*_pmix_job_info.task_cnts) * _pmix_job_info.nnodes);
-  for(i = 0; i < _pmix_job_info.nnodes; i++){
-    _pmix_job_info.task_cnts[i] = job->task_cnts[i];
-  }
+	// Global info
+	_pmix_job_info.ntasks     = job->ntasks;
+	_pmix_job_info.nnodes     = job->nnodes;
+	_pmix_job_info.task_cnts  = xmalloc( sizeof(*_pmix_job_info.task_cnts) * _pmix_job_info.nnodes);
+	for(i = 0; i < _pmix_job_info.nnodes; i++){
+		_pmix_job_info.task_cnts[i] = job->task_cnts[i];
+	}
 
-  _pmix_job_info.gtids = xmalloc(_pmix_job_info.node_tasks * sizeof(uint32_t));
-  for (i = 0; i < job->node_tasks; i ++) {
-    _pmix_job_info.gtids[i] = job->task[i]->gtid;
-  }
+	_pmix_job_info.gtids = xmalloc(_pmix_job_info.node_tasks * sizeof(uint32_t));
+	for (i = 0; i < job->node_tasks; i ++) {
+		_pmix_job_info.gtids[i] = job->task[i]->gtid;
+	}
 
-  // TODO: we need to extract global task mapping!
-  // Check PMI2's static char *_get_proc_mapping(const mpi_plugin_client_info_t *job)
-  // for possible way to go.
+	// Setup hostnames and job-wide info
+	if( (rc = pmix_info_resources_set(env)) ){
+		return rc;
+	}
+
+	// TODO: we need to extract global task mapping!
+	// Check PMI2's static char *_get_proc_mapping(const mpi_plugin_client_info_t *job)
+	// for possible way to go.
+
+	return SLURM_SUCCESS;
 }
 
 // Data related to Collective tree
 
-int pmix_info_nodes_list_set(char ***env)
+int pmix_info_coll_tree_set(int *childs, int child_cnt)
 {
-  if( pmix_info_is_srun() ){
-    // we already set this value in pmix_info_job_set_srun
-    return SLURM_SUCCESS;
-  }
-
-  char *p = getenvp(*env, PMIX_STEP_NODES_ENV);
-  if (!p) {
-    PMIX_ERROR("Environment variable %s not found", PMIX_STEP_NODES_ENV);
-    return SLURM_ERROR;
-  }
-  _pmix_nodes_list = xstrdup(p);
-  return SLURM_SUCCESS;
-}
-
-int pmix_info_nodes_env_set(char *this_host, int *childs, int child_cnt)
-{
-  xassert( child_cnt >= 0 );
-  xassert( this_host );
-  xassert( childs != NULL );
-  _pmix_this_host = this_host;
-  _pmix_child_num = child_cnt;
-  _pmix_child_list = childs;
-  return SLURM_SUCCESS;
+	xassert( child_cnt >= 0 );
+	xassert( childs != NULL );
+	_pmix_child_num = child_cnt;
+	_pmix_child_list = childs;
+	return SLURM_SUCCESS;
 }
 
 int  pmix_info_parent_set_root(int child_num)
 {
-  _pmix_parent_type = PMIX_PARENT_ROOT;
+	_pmix_parent_type = PMIX_PARENT_ROOT;
 
-  return SLURM_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 int  pmix_info_parent_set_srun(char *phost, uint16_t port)
 {
-  _pmix_parent_type = PMIX_PARENT_SRUN;
-  _pmix_parent_addr = xmalloc(sizeof(slurm_addr_t));
-  slurm_set_addr(_pmix_parent_addr, port, phost);
-  return SLURM_SUCCESS;
+	_pmix_parent_type = PMIX_PARENT_SRUN;
+	_pmix_parent_addr = xmalloc(sizeof(slurm_addr_t));
+	slurm_set_addr(_pmix_parent_addr, port, phost);
+	return SLURM_SUCCESS;
 }
 
 int pmix_info_parent_set_stepd(char *phost)
 {
-  _pmix_parent_type = PMIX_PARENT_STEPD;
-  _pmix_parent_host = phost;
-  return SLURM_SUCCESS;
+	_pmix_parent_type = PMIX_PARENT_STEPD;
+	_pmix_parent_host = phost;
+	return SLURM_SUCCESS;
 }
 
 static eio_handle_t *_io_handle = NULL;
 
 void pmix_info_io_set(eio_handle_t *h)
 {
-  _io_handle = h;
+	_io_handle = h;
 }
 
 eio_handle_t *pmix_info_io()
 {
-  xassert( _io_handle != NULL );
-  return _io_handle;
+	xassert( _io_handle != NULL );
+	return _io_handle;
+}
+
+/*
+ * Job and step nodes/tasks count and hostname extraction routines
+ */
+
+/*
+ * Derived from src/srun/libsrun/opt.c
+ * _get_task_count()
+ *
+ * FIXME: original _get_task_count has some additinal ckeck
+ * for opt.ntasks_per_node & opt.cpus_set
+ * Should we care here?
+ */
+static int _get_task_count(char ***env, uint32_t *tasks, uint32_t *cpus)
+{
+	char *cpus_per_node = NULL, *cpus_per_task_env = NULL, *end_ptr = NULL;
+	int cpus_per_task = 1, cpu_count, node_count, task_count;
+	int total_tasks = 0, total_cpus = 0;
+
+	cpus_per_node = getenvp(*env, PMIX_CPUS_PER_NODE_ENV);
+	if( cpus_per_node == NULL ){
+		PMIX_ERROR_NO(0,"Cannot find %s environment variable", PMIX_CPUS_PER_NODE_ENV);
+		return SLURM_ERROR;
+	}
+	cpus_per_task_env = getenvp(*env, PMIX_CPUS_PER_TASK);
+	if( cpus_per_task_env != NULL ){
+		cpus_per_task = strtol(cpus_per_task_env, &end_ptr, 10);
+	}
+
+	cpu_count = strtol(cpus_per_node, &end_ptr, 10);
+	task_count = cpu_count / cpus_per_task;
+	while (1) {
+		if ((end_ptr[0] == '(') && (end_ptr[1] == 'x')) {
+			end_ptr += 2;
+			node_count = strtol(end_ptr, &end_ptr, 10);
+			task_count *= node_count;
+			total_tasks += task_count;
+			cpu_count *= node_count;
+			total_cpus += cpu_count;
+			if (end_ptr[0] == ')')
+				end_ptr++;
+		} else if ((end_ptr[0] == ',') || (end_ptr[0] == 0))
+			total_tasks += task_count;
+		else {
+			PMIX_ERROR_NO(0,"Invalid value for environment variable %s (%s)",
+						  PMIX_CPUS_PER_NODE_ENV, cpus_per_node);
+			return SLURM_ERROR;
+		}
+		if (end_ptr[0] == ',')
+			end_ptr++;
+		if (end_ptr[0] == 0)
+			break;
+	}
+	*tasks = total_tasks;
+	*cpus = total_cpus;
+	return 0;
+}
+
+
+int pmix_info_resources_set(char ***env)
+{
+	char *p = NULL;
+	hostlist_t hl;
+
+	// Save step host list
+	p = getenvp(*env, PMIX_STEP_NODES_ENV);
+	if (!p) {
+		PMIX_ERROR("Environment variable %s not found", PMIX_STEP_NODES_ENV);
+		return SLURM_ERROR;
+	}
+	_pmix_nodes_list = xstrdup(p);
+
+	// Extract our node name
+	hl = hostlist_create( _pmix_nodes_list );
+	p = hostlist_nth(hl, _pmix_job_info.node_id);
+	_pmix_this_host = xstrdup(p);
+	free(p);
+
+	// Determine job-wide node id and job-wide node count
+	p = getenvp(*env, PMIX_JOB_NODES_ENV);
+	if( p == NULL ){
+		// shouldn't happen if we are under SLURM!
+		PMIX_ERROR_NO(0, "No %s environment variable found!", PMIX_JOB_NODES_ENV);
+		return SLURM_ERROR;
+	}
+	hl = hostlist_create(p);
+	_pmix_job_info.nnodes_job = hostlist_count(hl);
+	_pmix_job_info.node_id_job = hostlist_find(hl, _pmix_this_host);
+	// TODO: count universe size too
+	hostlist_destroy(hl);
+
+	if( _get_task_count(env, &_pmix_job_info.ntasks_job, &_pmix_job_info.ncpus_job ) < 0 ){
+		_pmix_job_info.ntasks_job  = _pmix_job_info.ntasks;
+		_pmix_job_info.ncpus_job  = _pmix_job_info.ntasks;
+	}
+	xassert( _pmix_job_info.ntasks <= _pmix_job_info.ntasks_job );
+
+	return SLURM_SUCCESS;
 }
 
 char *pmix_info_nth_child_name(int idx)
 {
-  hostlist_t hl = hostlist_create(pmix_info_step_hosts());
-  int n = pmix_info_nth_child(idx);
-  char *p = hostlist_nth(hl, n);
-  hostlist_destroy(hl);
-  return p;
+	hostlist_t hl = hostlist_create(pmix_info_step_hosts());
+	int n = pmix_info_nth_child(idx);
+	char *p = hostlist_nth(hl, n);
+	hostlist_destroy(hl);
+	return p;
 }
 
 char *pmix_info_nth_host_name(int n)
 {
-  hostlist_t hl = hostlist_create(pmix_info_step_hosts());
-  char *p = hostlist_nth(hl, n);
-  hostlist_destroy(hl);
-  return p;
+	hostlist_t hl = hostlist_create(pmix_info_step_hosts());
+	char *p = hostlist_nth(hl, n);
+	char *ret = xstrdup(p);
+	free(p);
+	hostlist_destroy(hl);
+	return ret;
 }
