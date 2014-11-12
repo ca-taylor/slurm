@@ -37,8 +37,8 @@
 \*****************************************************************************/
 
 
-#ifndef CLIENT_H
-#define CLIENT_H
+#ifndef PMIX_CLIENT_H
+#define PMIX_CLIENT_H
 
 #include "pmix_common.h"
 
