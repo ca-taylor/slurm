@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef AGENT_H
-#define AGENT_H
+#ifndef PMIX_AGENT_H
+#define PMIX_AGENT_H
 
 #include "pmix_common.h"
 
