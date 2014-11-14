@@ -61,8 +61,9 @@
   if( file_base == NULL ){                            \
     file_base = file;                                 \
   }                                                   \
-  error("%s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
-        file_base, __LINE__, __FUNCTION__,            \
+  error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
+		pmix_info_this_host(), pmix_info_nodeid(),    \
+		file_base, __LINE__, __FUNCTION__,            \
         ## args, strerror(errno), errno);             \
 }
 
@@ -72,7 +73,8 @@
   if( file_base == NULL ){                            \
 	file_base = file;                                 \
   }                                                   \
-  error("%s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
+  error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
+		pmix_info_this_host(), pmix_info_nodeid(),    \
 		file_base, __LINE__, __FUNCTION__,            \
 		## args, strerror(err), err);             \
 }
