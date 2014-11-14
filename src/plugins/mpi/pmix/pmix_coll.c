@@ -54,33 +54,33 @@ static void list_free_data(void *x)
 	xfree(x);
 }
 
-// TODO: make this function more effective
-// use math instead of brut force :) for exascale!
-static int _node_childrens(int **child_array, int width, int id, int max_node_id)
-{
-	int child, *ptr;
-	List child_ids = list_create(list_free_data);
+//// TODO: make this function more effective
+//// use math instead of brut force :) for exascale!
+//static int _node_childrens(int **child_array, int width, int id, int max_node_id)
+//{
+//	int child, *ptr;
+//	List child_ids = list_create(list_free_data);
 
-	for(child = id+1; child < max_node_id; child++){
-		int parent_id, child_num, depth, max_depth;
-		reverse_tree_info(child, max_node_id, width, &parent_id, &child_num,
-						  &depth, &max_depth);
-		if( parent_id == id ){
-			ptr = xmalloc(sizeof(int));
-			*ptr = child;
-			list_enqueue(child_ids, ptr);
-		}
-	}
+//	for(child = id+1; child < max_node_id; child++){
+//		int parent_id, child_num, depth, max_depth;
+//		reverse_tree_info(child, max_node_id, width, &parent_id, &child_num,
+//						  &depth, &max_depth);
+//		if( parent_id == id ){
+//			ptr = xmalloc(sizeof(int));
+//			*ptr = child;
+//			list_enqueue(child_ids, ptr);
+//		}
+//	}
 
-	int n = list_count(child_ids);
-	int count = 0;
-	*child_array = xmalloc(n*sizeof(int));
-	while( (ptr = list_dequeue(child_ids) ) ){
-		(*child_array)[count++] = *ptr - 1;
-		xfree(ptr);
-	}
-	return count;
-}
+//	int n = list_count(child_ids);
+//	int count = 0;
+//	*child_array = xmalloc(n*sizeof(int));
+//	while( (ptr = list_dequeue(child_ids) ) ){
+//		(*child_array)[count++] = *ptr - 1;
+//		xfree(ptr);
+//	}
+//	return count;
+//}
 
 char *_pack_the_data()
 {
@@ -153,7 +153,7 @@ static void _forward()
 		case PMIX_PARENT_STEPD:
 			pmix_server_msg_setcmd(msg, PMIX_FENCE);
 			pmix_server_msg_finalize(msg);
-			slurm_forward_data(pmix_info_step_hosts(), (char*)pmix_info_srv_addr(), size, msg_begin);
+			slurm_forward_data(pmix_info_parent_host(), (char*)pmix_info_srv_addr(), size, msg_begin);
 			break;
 		default:
 			PMIX_ERROR("Inconsistent parent type value");
@@ -208,7 +208,7 @@ int pmix_coll_init(char ***env)
 	uint32_t nodeid = pmix_info_nodeid();
 	uint32_t nodes = pmix_info_nodes();
 	int parent_id, child_cnt, depth, max_depth;
-	int *childs, width;
+	int *children, width, i;
 	char *p;
 
 	PMIX_DEBUG("Start");
@@ -220,10 +220,10 @@ int pmix_coll_init(char ***env)
 	xassert( parent_id >= -2 ); // parent_id can't be less that -2!
 
 	// We interested in amount of direct childs
-	child_cnt = _node_childrens(&childs, width, nodeid + 1, nodes + 1);
-
-	if( pmix_info_coll_tree_set(childs, child_cnt) ){
-		return SLURM_ERROR;
+	children = xmalloc( sizeof(int) * width);
+	child_cnt = reverse_tree_direct_children(nodeid + 1, nodes + 1, width, depth, children);
+	for(i=0;i<child_cnt;i++){
+		children[i]--;
 	}
 
 	{
@@ -231,9 +231,13 @@ int pmix_coll_init(char ***env)
 		PMIX_DEBUG("Have %d childrens", child_cnt);
 		char buf[1024];
 		for(i=0;i<child_cnt; i++){
-			sprintf(buf,"%s %d", buf, childs[i]);
+			sprintf(buf,"%s %d", buf, children[i]);
 		}
 		PMIX_DEBUG("%s", buf);
+	}
+
+	if( pmix_info_coll_tree_set(children, child_cnt) ){
+		return SLURM_ERROR;
 	}
 
 	if( parent_id == -2 ){
