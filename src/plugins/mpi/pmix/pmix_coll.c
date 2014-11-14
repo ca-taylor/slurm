@@ -54,34 +54,6 @@ static void list_free_data(void *x)
 	xfree(x);
 }
 
-//// TODO: make this function more effective
-//// use math instead of brut force :) for exascale!
-//static int _node_childrens(int **child_array, int width, int id, int max_node_id)
-//{
-//	int child, *ptr;
-//	List child_ids = list_create(list_free_data);
-
-//	for(child = id+1; child < max_node_id; child++){
-//		int parent_id, child_num, depth, max_depth;
-//		reverse_tree_info(child, max_node_id, width, &parent_id, &child_num,
-//						  &depth, &max_depth);
-//		if( parent_id == id ){
-//			ptr = xmalloc(sizeof(int));
-//			*ptr = child;
-//			list_enqueue(child_ids, ptr);
-//		}
-//	}
-
-//	int n = list_count(child_ids);
-//	int count = 0;
-//	*child_array = xmalloc(n*sizeof(int));
-//	while( (ptr = list_dequeue(child_ids) ) ){
-//		(*child_array)[count++] = *ptr - 1;
-//		xfree(ptr);
-//	}
-//	return count;
-//}
-
 char *_pack_the_data()
 {
 	// Join all the pieces in the one message
@@ -160,45 +132,6 @@ static void _forward()
 			xassert(0);
 	}
 }
-/* TODO: Completely remove
-void pmix_coll_node_contrib(uint32_t nodeid, void *msg, uint32_t size)
-{
-  PMIX_DEBUG("Receive collective message from node %d", nodeid);
-  int idx = pmix_info_is_child_no(nodeid);
-  if( idx < 0 ){
-	PMIX_ERROR("%d: The node %d shouldn't send it's data directly to me",
-			   pmix_info_nodeid(), nodeid);
-	xfree(msg);
-	return;
-  }
-  if( pmix_state_node_contrib_ok(idx) ){
-	PMIX_ERROR("%d: The node %d already contributed to this collective",
-			   pmix_info_nodeid(), nodeid);
-	xfree(msg);
-	return;
-  }
-  node_data[idx] = msg;
-  node_sizes[idx] = size;
-  if( pmix_state_coll_local_ok() ){
-	_forward();
-  }
-}
-
-void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size)
-{
-  PMIX_DEBUG("%d: Local task contribution %d", pmix_info_nodeid(), taskid);
-   if( pmix_state_task_contrib_ok(taskid) ){
-	PMIX_ERROR("%d: The task %d already contributed to this collective",
-			   pmix_info_nodeid(), taskid);
-	return;
-  }
-  local_data[taskid]  = msg;
-  local_sizes[taskid] = size;
-  if( pmix_state_coll_local_ok() ){
-	_forward();
-  }
-}
-*/
 
 /*
  * Based on ideas provided by Hongjia Cao <hjcao@nudt.edu.cn> in PMI2 plugin
