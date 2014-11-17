@@ -64,6 +64,7 @@ job_attr_t jattr;
 typedef struct {
 	uint32_t magic;
 	uint32_t taskid;
+
 	uint8_t type;
 	uint32_t tag;
 	size_t nbytes;
@@ -251,6 +252,28 @@ int PMIx_Fence()
 	return ret;
 }
 
+int
+PMIx_Fence_nb()
+{
+	int size = strlen(blob)+1;
+	int ret;
+	void *msg, *payload;
+	message_header_t hdr;
+
+	// get job attributes
+	msg = _new_msg(jattr.lrank, size + 4 ,&payload);
+	*(int*)payload = PMIX_FENCENB_CMD;
+	memcpy( (int*)payload + 1, blob, size);
+	size += 4;
+	write(PMI_fd,msg, size + sizeof(message_header_t));
+	free(msg);
+
+	proc_blobs = malloc(jattr.jsize*sizeof(char*));
+	memset(proc_blobs,0,jattr.jsize*sizeof(char*));
+
+	return ret;
+}
+
 int PMIx_Get(int rank, char *key, char **ptr)
 {
 	void *msg, *payload;
@@ -271,9 +294,14 @@ int PMIx_Get(int rank, char *key, char **ptr)
 			return -1;
 		}
 
-		proc_blobs[rank] = malloc(hdr.nbytes);
+		int rank_rcv = -1;
+		if( pmix_recv_bytes(PMI_fd,(void*)&rank_rcv, sizeof(int)) ){
+			printf("PMIx_Get: error reading get response body\n");
+			return -1;
+		}
+		proc_blobs[rank] = malloc(hdr.nbytes - sizeof(int));
 
-		if( pmix_recv_bytes(PMI_fd,(char*)proc_blobs[rank], hdr.nbytes) ){
+		if( pmix_recv_bytes(PMI_fd,(char*)proc_blobs[rank], hdr.nbytes - sizeof(int)) ){
 			printf("PMIx_Get: error reading get response body\n");
 			return -1;
 		}
@@ -330,8 +358,7 @@ int main(int argc, char* argv[])
 	sprintf(buf,"My appnum is %d", appnum);
 	PMIx_Put("the-appnum",buf);
 
-	printf("Fence result: %d\n", PMIx_Fence());
-
+	printf("Fence result: %d\n", PMIx_Fence_nb());
 
 //	{
 //		int delay = 1;
