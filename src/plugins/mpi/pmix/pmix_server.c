@@ -55,7 +55,7 @@ typedef struct {
 	uint32_t paysize;
 	uint8_t cmd;
 } send_header_t;
-#define SEND_HDR_SIZE (3*sizeof(uint32_t) + sizeof(uint8_t))
+#define SEND_HDR_SIZE (4*sizeof(uint32_t) + sizeof(uint8_t))
 
 typedef struct {
 	uint32_t size; // Has to be first (appended by SLURM API)
@@ -192,7 +192,7 @@ static int _send_pack_hdr(void *host, void *net)
 	pack32(ptr->paysize, packbuf);
 	pack8(ptr->cmd, packbuf);
 	size = get_buf_offset(packbuf);
-	xassert( size == (3*sizeof(uint32_t) + sizeof(uint8_t)) );
+	xassert( size == (4*sizeof(uint32_t) + sizeof(uint8_t)) );
 	// free the Buf packbuf, but not the memory to which it points
 	packbuf->head = NULL;
 	free_buf(packbuf);
@@ -298,7 +298,8 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 	switch( hdr->cmd ){
 	case PMIX_FENCE:
 		pmix_coll_node_contrib(hdr->gen, hdr->nodeid, payload, hdr->paysize);
-		break;
+		// keep the payload!
+		return;
 	case PMIX_FENCE_RESP:
 		// Do not update DB if we are in direct modex mode.
 		if( false == pmix_info_dmdx()){
@@ -314,6 +315,7 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 	default:
 		PMIX_ERROR_NO(0,"Bad command %d", hdr->cmd);
 	}
+	xfree(payload);
 }
 
 static int _serv_read(eio_obj_t *obj, List objs)
@@ -338,7 +340,6 @@ static int _serv_read(eio_obj_t *obj, List objs)
 			recv_header_t hdr;
 			void *msg = pmix_io_rcvd_extract(me, &hdr);
 			_process_server_request(&hdr, msg);
-			xfree(msg);
 		}else{
 			// No more complete messages
 			break;
