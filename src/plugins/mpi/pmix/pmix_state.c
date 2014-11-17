@@ -42,6 +42,11 @@
 #include "pmix_state.h"
 
 pmix_state_t pmix_state;
+// Deferred requests
+List cli_req; // TODO: use hash table instead of list?
+// The array of lists.
+// i'th element - list of requests for i'th local client
+List *srv_req;
 
 void pmix_state_init()
 {
@@ -49,13 +54,19 @@ void pmix_state_init()
 #ifndef NDEBUG
   pmix_state.magic = PMIX_STATE_MAGIC;
 #endif
+  pmix_state.coll.generation = 0;
   pmix_state.cli_size = pmix_info_ltasks();
   size = pmix_state.cli_size * sizeof(client_state_t);
   pmix_state.cli_state = xmalloc( size );
+  size = pmix_state.cli_size * sizeof(List *);
+  srv_req = xmalloc( size );
   for( i = 0; i < pmix_state.cli_size; i++ ){
     pmix_state.cli_state[i].fd = -1;
     pmix_state.cli_state[i].state = PMIX_CLI_UNCONNECTED;
+	srv_req[i] = list_create(pmix_xfree_buffer);
   }
+  cli_req = list_create(pmix_xfree_buffer);
+
   pmix_state.coll.state = PMIX_COLL_SYNC;
   pmix_state.coll.local_joined = 0;
   pmix_state.coll.nodes_joined = 0;
@@ -72,8 +83,10 @@ static int _coll_new_contrib()
   case PMIX_COLL_SYNC:
     PMIX_DEBUG("Start collective");
     pmix_state.coll.state = PMIX_COLL_GATHER;
+	// Increment generation counter
+	pmix_state_data_gen_next();
   case PMIX_COLL_GATHER:
-    PMIX_DEBUG("New contribution");
+	PMIX_DEBUG("New contribution");
     return SLURM_SUCCESS;
   case PMIX_COLL_FORWARD:
     // This is not ok. Node shouldn't contribute during forward phase
@@ -128,10 +141,11 @@ static int _coll_sync()
   }
 }
 
-bool pmix_state_node_contrib_ok(int idx)
+bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 {
   // Check state consistence
   if( _coll_new_contrib() ){
+	  // TODO: respond with error!
     char *p = pmix_info_nth_child_name(idx);
     PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]",
                pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
@@ -139,7 +153,17 @@ bool pmix_state_node_contrib_ok(int idx)
     return false;
   }
 
+  if( pmix_state_data_gen() != gen){
+	  // TODO: respond with error!
+	  char *p = pmix_info_nth_child_name(idx);
+	  PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
+				 pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
+	  xfree(p);
+	  return false;
+  }
+
   if( pmix_state.coll.nodes_contrib[idx] ){
+	  // TODO: respond with error!
     char *p = pmix_info_nth_child_name(idx);
     PMIX_ERROR("%s [%d]: Node %s [%d] already contributed to the collective",
                pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
@@ -152,7 +176,7 @@ bool pmix_state_node_contrib_ok(int idx)
   return true;
 }
 
-bool pmix_state_task_contrib_ok(int idx)
+bool pmix_state_task_contrib_ok(int idx, bool blocking)
 {
   // Check state consistence
   if( _coll_new_contrib() ){
@@ -166,7 +190,11 @@ bool pmix_state_task_contrib_ok(int idx)
                pmix_info_this_host(), pmix_info_nodeid(), pmix_info_task_id(idx) );
     return false;
   }
-  pmix_state.cli_state[idx].state = PMIX_CLI_COLL;
+  if( blocking ){
+	  pmix_state.cli_state[idx].state = PMIX_CLI_COLL;
+  } else {
+	  pmix_state.cli_state[idx].state = PMIX_CLI_COLL_NB;
+  }
   pmix_state.coll.local_contrib[idx] = 1;
   pmix_state.coll.local_joined++;
   return true;
@@ -227,4 +255,82 @@ bool pmix_state_coll_sync()
     return false;
   }
   return true;
+}
+
+typedef struct {
+	uint32_t localid;
+	uint32_t taskid;
+} deferred_t;
+
+/*
+ *  Local task dst_lid requests blob of the src_gid process
+ */
+void pmix_state_defer_local_req(uint32_t dst_lid, uint32_t src_gid)
+{
+	deferred_t *elem = xmalloc( sizeof(deferred_t) );
+	elem->localid = dst_lid;
+	elem->taskid = src_gid;
+	// TODO: use hash table here (key = src_gid)
+	list_enqueue(cli_req,elem);
+}
+
+List pmix_state_local_reqs_to(uint32_t taskid)
+{
+	List ret = list_create(pmix_xfree_buffer);
+	ListIterator i;
+	deferred_t *elem;
+
+	i  = list_iterator_create(cli_req);
+	while ((elem = list_next(i))) {
+		if ( elem->taskid == taskid ) {
+			uint32_t *ptr = xmalloc(sizeof(uint32_t));
+			*ptr = elem->localid;
+			list_append(ret,ptr);
+			list_delete_item(i);
+		}
+	}
+	list_iterator_destroy(i);
+	return ret;
+}
+
+List pmix_state_local_reqs_from(uint32_t localid)
+{
+	List ret = list_create(pmix_xfree_buffer);
+	ListIterator i;
+	deferred_t *elem;
+
+	i  = list_iterator_create(cli_req);
+	while ((elem = list_next(i))) {
+		if ( elem->localid == localid ) {
+			uint32_t *ptr = xmalloc(sizeof(uint32_t));
+			*ptr = elem->taskid;
+			list_append(ret,ptr);
+			list_delete_item(i);
+		}
+	}
+	list_iterator_destroy(i);
+	return ret;
+}
+
+/*
+ *  Remote process dst_gid requests blob of the local process with id = src_lid.
+ */
+void pmix_state_defer_remote_req(uint32_t src_lid, uint32_t nodeid)
+{
+	xassert( src_lid < pmix_state.cli_size );
+	int *ptr = xmalloc( sizeof(uint32_t) );
+	*ptr = nodeid;
+	list_enqueue(srv_req[src_lid], ptr);
+}
+
+int pmix_state_remote_reqs_to_cnt(uint32_t localid)
+{
+	return list_count(srv_req[localid]);
+}
+
+List pmix_state_remote_reqs_to(uint32_t localid)
+{
+	List ret = srv_req[localid];
+	srv_req[localid] = list_create(pmix_xfree_buffer);
+	return ret;
 }

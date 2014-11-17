@@ -49,11 +49,6 @@ int *node_sizes = NULL;
 void **local_data = NULL;
 int *local_sizes = NULL;
 
-static void list_free_data(void *x)
-{
-	xfree(x);
-}
-
 char *_pack_the_data()
 {
 	// Join all the pieces in the one message
@@ -217,7 +212,7 @@ int pmix_coll_init(char ***env)
 	return SLURM_SUCCESS;
 }
 
-void pmix_coll_node_contrib(uint32_t nodeid, void *msg, uint32_t size)
+void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t size)
 {
 	int idx = pmix_info_is_child_no(nodeid);
 	PMIX_DEBUG("Receive collective message from node %d", nodeid);
@@ -228,7 +223,7 @@ void pmix_coll_node_contrib(uint32_t nodeid, void *msg, uint32_t size)
 		xfree(msg);
 		return;
 	}
-	if( !pmix_state_node_contrib_ok(idx) ){
+	if( !pmix_state_node_contrib_ok(gen, idx) ){
 		PMIX_ERROR("The node %s [%d] already contributed to this collective",
 				   pmix_info_nth_child_name(idx), nodeid);
 		xfree(msg);
@@ -241,10 +236,10 @@ void pmix_coll_node_contrib(uint32_t nodeid, void *msg, uint32_t size)
 	}
 }
 
-void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size)
+void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size, bool blocking)
 {
 	PMIX_DEBUG("Local task contribution %d", taskid);
-	if( !pmix_state_task_contrib_ok(taskid) ){
+	if( !pmix_state_task_contrib_ok(taskid, blocking) ){
 		PMIX_ERROR_NO(0,"The task %d already contributed to this collective", taskid);
 		return;
 	}
@@ -266,7 +261,6 @@ void pmix_coll_update_db(void *msg, uint32_t size)
 	int i = 0;
 	char *pay = (char*)msg;
 
-	pmix_db_update_init();
 	while( i < size ){
 		int taskid = *(int*)pay;
 		pay += sizeof(int);

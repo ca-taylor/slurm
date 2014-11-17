@@ -43,6 +43,7 @@
 #include "pmix_db.h"
 #include "pmix_debug.h"
 #include "pmix_coll.h"
+#include "pmix_server.h"
 
 // ----------------------------------- 8< -----------------------------------------------------------//
 
@@ -57,7 +58,7 @@
 #define PMIX_CLIENT_HDR_MAGIC 0xdeadbeef
 typedef struct {
 	uint32_t magic;
-	uint32_t taskid;
+	uint32_t localid;
 	uint8_t type;
 	uint32_t tag;
 	size_t nbytes;
@@ -105,18 +106,18 @@ typedef struct {
 int _process_message(message_header_t hdr, void *msg);
 int _establish_connection(message_header_t hdr, void *msg);
 inline void _fill_job_attributes(uint32_t taskid, job_attr_t *jattr);
-int _process_cli_request(message_header_t hdr, void *msg);
+int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent);
 int _postpone_cli_request(message_header_t hdr, void *msg);
 
-static bool peer_readable(eio_obj_t *obj);
-static int peer_read(eio_obj_t *obj, List objs);
-static bool peer_writable(eio_obj_t *obj);
-static int peer_write(eio_obj_t *obj, List objs);
+static bool _peer_readable(eio_obj_t *obj);
+static int _peer_read(eio_obj_t *obj, List objs);
+static bool _peer_writable(eio_obj_t *obj);
+static int _peer_write(eio_obj_t *obj, List objs);
 static struct io_operations peer_ops = {
-	.readable     = peer_readable,
-	.handle_read  = peer_read,
-	.writable     = peer_writable,
-	.handle_write = peer_write
+	.readable     = _peer_readable,
+	.handle_read  = _peer_read,
+	.writable     = _peer_writable,
+	.handle_write = _peer_write
 };
 
 static uint32_t payload_size(void *buf)
@@ -136,13 +137,13 @@ pmix_io_engine_header_t cli_header = {
 
 // Unblocking message processing
 
-static void *_allocate_msg_to_task(uint32_t taskid, uint8_t type, uint32_t tag, uint32_t size, void **payload)
+static void *_allocate_msg_to_task(uint32_t localid, uint8_t type, uint32_t tag, uint32_t size, void **payload)
 {
 	int msize = size + sizeof(message_header_t);
 	message_header_t *msg = (message_header_t*)xmalloc( msize );
 	msg->magic = PMIX_CLIENT_HDR_MAGIC;
 	msg->nbytes = size;
-	msg->taskid = taskid;
+	msg->localid = localid;
 	msg->tag = tag;
 	msg->type = type;
 	*payload = (void*)(msg + 1);
@@ -170,20 +171,20 @@ void pmix_client_new_conn(int fd)
 	fd_set_nonblocking(fd);
 	fd_set_close_on_exec(fd);
 
-	uint32_t taskid = hdr.taskid;
-	if( pmix_state_cli_connecting(taskid,fd) ){
-		PMIX_DEBUG("Bad connection, taskid = %d, fd = %d", taskid, fd);
+	uint32_t localid = hdr.localid;
+	if( pmix_state_cli_connecting(localid,fd) ){
+		PMIX_DEBUG("Bad connection, taskid = %d, fd = %d", pmix_info_task_id(localid), fd);
 		close(fd);
 		return;
 	}
 
 	// Setup message engine. Push the header we just received to
 	// ensure integrity of msgengine
-	pmix_io_engine_t *me = pmix_state_cli_io(taskid);
+	pmix_io_engine_t *me = pmix_state_cli_io(localid);
 	pmix_io_init(me, fd, cli_header);
 	pmix_io_add_hdr(me, &hdr);
 
-	obj = eio_obj_create(fd, &peer_ops, (void*)(long)taskid);
+	obj = eio_obj_create(fd, &peer_ops, (void*)(long)localid);
 	eio_new_obj( pmix_info_io(), obj);
 }
 
@@ -196,7 +197,7 @@ int _finalize_client(uint32_t taskid, eio_obj_t *obj, List objs)
 	return 0;
 }
 
-static bool peer_readable(eio_obj_t *obj)
+static bool _peer_readable(eio_obj_t *obj)
 {
 	PMIX_DEBUG("fd = %d", obj->fd);
 	xassert( !pmix_info_is_srun() );
@@ -211,23 +212,23 @@ static bool peer_readable(eio_obj_t *obj)
 	return true;
 }
 
-static int peer_read(eio_obj_t *obj, List objs)
+static int _peer_read(eio_obj_t *obj, List objs)
 {
 	PMIX_DEBUG("fd = %d", obj->fd);
-	uint32_t taskid = (int)(long)(obj->arg);
-	pmix_io_engine_t *eng = pmix_state_cli_io(taskid);
+	uint32_t localid = (int)(long)(obj->arg);
+	pmix_io_engine_t *eng = pmix_state_cli_io(localid);
 
 	// Read and process all received messages
 	while( 1 ){
 		pmix_io_rcvd(eng);
 		if( pmix_io_finalized(eng) ){
-			PMIX_DEBUG("Connection with task %d finalized", taskid);
+			PMIX_DEBUG("Connection with task %d finalized", localid);
 			break;
 		}
 		if( pmix_io_rcvd_ready(eng) ){
 			message_header_t hdr;
 			void *msg = pmix_io_rcvd_extract(eng, &hdr);
-			xassert( hdr.taskid == taskid );
+			xassert( hdr.localid == localid );
 //			{
 //				static int delay = 1;
 //				pmix_debug_hang(delay);
@@ -243,13 +244,13 @@ static int peer_read(eio_obj_t *obj, List objs)
 
 	// Check if we still have the connection
 	if( pmix_io_finalized(eng) ){
-		_finalize_client(taskid, obj, objs);
+		_finalize_client(localid, obj, objs);
 	}
 	return 0;
 }
 
 
-static bool peer_writable(eio_obj_t *obj)
+static bool _peer_writable(eio_obj_t *obj)
 {
 	xassert( !pmix_info_is_srun() );
 	PMIX_DEBUG("fd = %d", obj->fd);
@@ -264,7 +265,7 @@ static bool peer_writable(eio_obj_t *obj)
 	return false;
 }
 
-static int peer_write(eio_obj_t *obj, List objs)
+static int _peer_write(eio_obj_t *obj, List objs)
 {
 	xassert( !pmix_info_is_srun() );
 
@@ -276,28 +277,11 @@ static int peer_write(eio_obj_t *obj, List objs)
 	return 0;
 }
 
-void pmix_client_fence_notify()
-{
-	uint ltask = 0;
-	// FIXME: here we will need to iterate through postponed requests
-	// and answer them
-	// This will work for both blocking and non-blocking fence
-	// By now we only send ones to all clients
-	for(ltask = 0; ltask < pmix_info_ltasks(); ltask++){
-		int *payload;
-		void *msg = _new_msg(ltask, sizeof(int), (void**)&payload);
-		pmix_io_engine_t *me = pmix_state_cli_io(ltask);
-		*payload = 0;
-		pmix_io_send_enqueue(me, msg);
-		pmix_state_task_coll_finish(ltask);
-	}
-}
-
 int _process_message(message_header_t hdr, void *msg)
 {
 	int rc;
 
-	switch(  pmix_state_cli(hdr.taskid) ){
+	switch(  pmix_state_cli(hdr.localid) ){
 	case PMIX_CLI_UNCONNECTED:
 		PMIX_ERROR_NO(0,"We shouldn't be here. Obvious programmer mistake");
 		xassert(0);
@@ -308,29 +292,30 @@ int _process_message(message_header_t hdr, void *msg)
 		xfree(msg);
 		break;
 	case PMIX_CLI_OPERATE:
-		return _process_cli_request(hdr, msg);
+		return _process_cli_request(hdr, msg, 0);
 	case PMIX_CLI_COLL:
+	case PMIX_CLI_COLL_NB:
 		// We are in the middle of collective. DB is inconsistent.
-		return _postpone_cli_request(hdr,msg);
+		return _process_cli_request(hdr, msg, 1);
 	}
 	return rc;
 }
 
 int _establish_connection(message_header_t hdr, void *msg)
 {
-	uint32_t taskid = hdr.taskid;
-	pmix_io_engine_t *eng = pmix_state_cli_io(taskid);
+	uint32_t localid = hdr.localid;
+	pmix_io_engine_t *eng = pmix_state_cli_io(localid);
 	char *version;
 	void *rmsg, *payload;
 	int size;
 
 	if (hdr.type != PMIX_USOCK_IDENT) {
 		PMIX_ERROR_NO(0,"Invalid message header type: %d from ltask=%d, fd = %d",
-					  hdr.type, taskid, pmix_state_cli_fd(taskid));
+					  hdr.type, pmix_info_task_id(localid), pmix_state_cli_fd(localid));
 		return SLURM_ERROR;
 	}
 
-	PMIX_DEBUG("Connection from ltask %d established", taskid);
+	PMIX_DEBUG("Connection from ltask %d established", localid);
 
 	/* check that this is from a matching version */
 	version = (char*)(msg);
@@ -345,12 +330,12 @@ int _establish_connection(message_header_t hdr, void *msg)
 
 	// Send ack to a client
 	size = sizeof(PMIX_VERSION) + 1;
-	rmsg = _new_msg_connecting(taskid, size, &payload);
+	rmsg = _new_msg_connecting(localid, size, &payload);
 	strcpy((char*)payload, PMIX_VERSION);
 	pmix_io_send_enqueue(eng, rmsg);
 
 	// Switch to PMIX_CLI_OPERATE state
-	pmix_state_cli_connected(taskid);
+	pmix_state_cli_connected(localid);
 	return SLURM_SUCCESS;
 }
 
@@ -437,16 +422,17 @@ inline void _fill_job_attributes(uint32_t taskid, job_attr_t *jattr)
 	// -----------------------------------------------------------------------------------
 }
 
-int _process_cli_request(message_header_t hdr, void *msg)
+int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 {
-	uint32_t taskid = hdr.taskid;
+	uint32_t taskid = hdr.localid;
 	uint32_t tag = hdr.tag;
 	pmix_io_engine_t *eng = pmix_state_cli_io(taskid);
 	int *ptr = (int*)msg;
 	void *rmsg, *payload;
 	int rc = 0;
+	uint cmd = ptr[0];
 
-	switch( ptr[0] ){
+	switch( cmd ){
 	case PMIX_GETATTR_CMD:{
 		job_attr_t jattr;
 		_fill_job_attributes(taskid, &jattr);
@@ -455,24 +441,38 @@ int _process_cli_request(message_header_t hdr, void *msg)
 		pmix_io_send_enqueue(eng, rmsg);
 		goto free_message;
 	}
+	// FIXME: Is it blocking? Do we need non-blocking version?
 	case PMIX_GET_CMD:{
 		// Currently we just put the GID of the requested process
 		// in the first 4 bytes of the message
-		int gtaskid = *((int*)msg + 1);
-		if( gtaskid >= pmix_info_tasks() ){
+		int taskid = *((int*)msg + 1);
+		void *blob, *payload;
+		uint32_t gen;
+
+		if( taskid >= pmix_info_tasks() ){
 			// return error!
-			rmsg = _new_msg_tag(taskid, tag, 1, &payload);
-			*(char*)payload = 0;
+			rmsg = _new_msg_tag(taskid, tag, sizeof(int), &payload);
+			*(int*)payload = -1;
 			pmix_io_send_enqueue(eng, rmsg);
 			goto free_message;
 		}
 
-		void *blob, *payload;
-		int size = pmix_db_get_blob(gtaskid, &blob);
-		if( blob == NULL ){
-			// we don't have proper data now. Postpone until we'll get them
-			// return without xfree()ing msg!
-			return _postpone_cli_request(hdr, msg);
+		if( inconsistent ){
+			// Save that local cli asked about this task
+			pmix_state_defer_local_req(hdr.localid,taskid);
+			break;
+		}
+
+
+		int size = pmix_db_get_blob(taskid, &blob, &gen);
+		if( !gen || gen < pmix_state_data_gen() ){
+			// We don't have information about this task or
+			// the data is stalled
+			// FIXME: In case of non-blocking GET, just reply with ENOENT
+			// or somwthing like that
+			pmix_state_defer_local_req(hdr.localid,taskid);
+			pmix_server_dmdx_request(taskid);
+			goto free_message;
 		}
 		rmsg = _new_msg_tag(taskid, tag, size, &payload);
 		memcpy(payload, blob, size);
@@ -483,7 +483,20 @@ int _process_cli_request(message_header_t hdr, void *msg)
 	case PMIX_FENCENB_CMD:{
 		// remove cmd contribution
 		int size = hdr.nbytes - sizeof(uint32_t);
-		pmix_coll_task_contrib(taskid, (void*)&ptr[1], size);
+		if( !pmix_info_dmdx() ){
+			pmix_coll_task_contrib(taskid, (void*)&ptr[1], size, true);
+			goto free_message;
+		} else {
+			// In direct modex we don't send blobs with collective
+			uint32_t taskid = pmix_info_task_id(hdr.localid);
+			void *blob = xmalloc(size);
+			memcpy(blob,(void*)&ptr[1], size);
+			// Note: we need to contribute first to increment data generation counter
+			pmix_coll_task_contrib(taskid, &taskid, sizeof(taskid), true);
+			// Now new blob will belong to the new generation of the data
+			pmix_db_add_blob(taskid,blob,size);
+		}
+
 		break;
 	}
 	case PMIX_FINALIZE_CMD:{
@@ -500,8 +513,71 @@ free_message:
 	return rc;
 }
 
-int _postpone_cli_request(message_header_t hdr, void *msg)
+inline static void _send_blob_to(uint32_t localid, uint32_t taskid)
 {
-	// Implement request postpone functionality
-	return SLURM_SUCCESS;
+	void *msg, *payload, *blob;
+	uint32_t size, msize, gen;
+
+	size = pmix_db_get_blob(taskid, &blob, &gen);
+	if( !gen || gen < pmix_state_data_gen() ){
+		// We didn't have information about this task or
+		// the data is stalled
+		PMIX_ERROR_NO(ENOENT,"Trying to send empty blob. Shouldn't happen!")
+		return;
+	}
+	msize = size + sizeof(uint32_t);
+	msg = _new_msg(localid, msize, &payload);
+	*(uint32_t*)payload = taskid;
+	memcpy((uint32_t*)payload + 1, blob, msize );
+	pmix_io_engine_t *me = pmix_state_cli_io(localid);
+	pmix_io_send_enqueue(me, msg);
+}
+
+void pmix_client_fence_notify()
+{
+	uint32_t localid = 0;
+
+	// FIXME: here we will need to iterate through postponed requests
+	// and answer them
+	// This will work for both blocking and non-blocking fence
+	// By now we only send ones to all clients
+	for(localid = 0; localid < pmix_info_ltasks(); localid++){
+		if( pmix_state_cli(localid) == PMIX_CLI_COLL ){
+			// Client is waiting for notification that collective
+			// is finished.
+			int *payload;
+			void *msg = _new_msg(localid, sizeof(int), (void**)&payload);
+			pmix_io_engine_t *me = pmix_state_cli_io(localid);
+			*payload = 0;
+			pmix_io_send_enqueue(me, msg);
+		} else if( pmix_state_cli(localid) == PMIX_CLI_COLL_NB ){
+			// Client might already send us request about some tasks.
+			// Reply to them.
+			List requests = pmix_state_local_reqs_from(localid);
+			if( list_count(requests) ){
+				int *taskid;
+				while ( (taskid = list_dequeue(requests)) ) {
+					_send_blob_to(localid, *taskid);
+					xfree(taskid);
+				}
+			}
+			list_destroy(requests);
+		}
+		pmix_state_task_coll_finish(localid);
+	}
+}
+
+void pmix_client_taskid_reply(uint32_t taskid)
+{
+	int *localid;
+	List requests = pmix_state_local_reqs_to(taskid);
+	if( list_count(requests) == 0 ){
+		list_destroy(requests);
+		return;
+	}
+
+	while( (localid = list_dequeue(requests)) ){
+		_send_blob_to(*localid,taskid);
+		xfree(localid);
+	}
 }
