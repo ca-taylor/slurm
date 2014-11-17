@@ -426,9 +426,9 @@ inline void _fill_job_attributes(uint32_t taskid, job_attr_t *jattr)
 
 int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 {
-	uint32_t taskid = hdr.localid;
+	uint32_t localid = hdr.localid;
 	uint32_t tag = hdr.tag;
-	pmix_io_engine_t *eng = pmix_state_cli_io(taskid);
+	pmix_io_engine_t *eng = pmix_state_cli_io(localid);
 	int *ptr = (int*)msg;
 	void *rmsg, *payload;
 	int rc = 0;
@@ -437,8 +437,8 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 	switch( cmd ){
 	case PMIX_GETATTR_CMD:{
 		job_attr_t jattr;
-		_fill_job_attributes(taskid, &jattr);
-		rmsg = _new_msg_tag(taskid, tag, sizeof(job_attr_t), (void**)&payload);
+		_fill_job_attributes(localid, &jattr);
+		rmsg = _new_msg_tag(localid, tag, sizeof(job_attr_t), (void**)&payload);
 		memcpy(payload, &jattr, sizeof(jattr));
 		pmix_io_send_enqueue(eng, rmsg);
 		goto free_message;
@@ -472,17 +472,18 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 		int size = hdr.nbytes - sizeof(uint32_t);
 		bool blocking = (cmd == PMIX_FENCE_CMD);
 		if( !pmix_info_dmdx() ){
-			pmix_coll_task_contrib(taskid, (void*)&ptr[1], size, blocking);
+			pmix_coll_task_contrib(localid, (void*)&ptr[1], size, blocking);
 			goto free_message;
 		} else {
 			// In direct modex we don't send blobs with collective
-			uint32_t taskid = pmix_info_task_id(hdr.localid);
+			uint32_t *taskid = xmalloc(sizeof(uint32_t));
+			*taskid = pmix_info_task_id(localid);
 			void *blob = xmalloc(size);
 			memcpy(blob,(void*)&ptr[1], size);
 			// Note: we need to contribute first to increment data generation counter
-			pmix_coll_task_contrib(taskid, &taskid, sizeof(taskid), blocking);
+			pmix_coll_task_contrib(localid, taskid, sizeof(*taskid), blocking);
 			// Now new blob will belong to the new generation of the data
-			pmix_db_add_blob(taskid,blob,size);
+			pmix_db_add_blob(*taskid,blob,size);
 		}
 
 		break;
@@ -508,9 +509,12 @@ inline static void _send_blob_to(uint32_t localid, uint32_t taskid)
 
 	size = pmix_db_get_blob(taskid, &blob, &gen);
 	if( !gen || gen < pmix_state_data_gen() ){
-		// We didn't have information about this task or
+		// We don't have information about this task or
 		// the data is stalled
-		PMIX_ERROR_NO(ENOENT,"Trying to send empty blob. Shouldn't happen!")
+		// FIXME: In case of non-blocking GET, just reply with ENOENT
+		// or somwthing like that
+		pmix_state_defer_local_req(localid,taskid);
+		pmix_server_dmdx_request(taskid);
 		return;
 	}
 	msize = size + sizeof(uint32_t);

@@ -98,7 +98,6 @@ static void _forward()
 
 	switch( pmix_info_parent_type() ){
 		case PMIX_PARENT_ROOT:
-//		sleep(10);
 			// We have complete dataset. Broadcast it to others
 			pmix_server_msg_setcmd(msg, PMIX_FENCE_RESP);
 			pmix_server_msg_finalize(msg);
