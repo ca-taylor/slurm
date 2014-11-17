@@ -54,6 +54,8 @@ char *_pack_the_data()
 	// Join all the pieces in the one message
 	uint32_t cum_size = 0;
 	uint32_t i;
+	bool ret;
+
 	for(i = 0; i < pmix_info_childs(); i++ ){
 		cum_size += node_sizes[i];
 	}
@@ -69,7 +71,8 @@ char *_pack_the_data()
 		payload += node_sizes[i];
 		xfree(node_data[i]);
 		node_data[i] = NULL;
-		xassert( pmix_state_node_contrib_cancel(i) );
+		ret = pmix_state_node_contrib_cancel(i);
+		xassert( ret == true );
 	}
 
 	for(i = 0; i < pmix_info_ltasks(); i++ ){
@@ -77,7 +80,8 @@ char *_pack_the_data()
 		payload += local_sizes[i];
 		xfree(local_data[i]);
 		local_data[i] = NULL;
-		xassert( pmix_state_task_contrib_cancel(i) );
+		ret = pmix_state_task_contrib_cancel(i);
+		xassert( ret );
 	}
 	return msg;
 }
@@ -85,8 +89,6 @@ char *_pack_the_data()
 static void _forward()
 {
 	xassert( pmix_state_coll_local_ok() );
-
-	// pmix_debug_hang(1);
 
 	pmix_state_coll_forwad();
 
@@ -96,6 +98,7 @@ static void _forward()
 
 	switch( pmix_info_parent_type() ){
 		case PMIX_PARENT_ROOT:
+//		sleep(10);
 			// We have complete dataset. Broadcast it to others
 			pmix_server_msg_setcmd(msg, PMIX_FENCE_RESP);
 			pmix_server_msg_finalize(msg);
@@ -236,19 +239,19 @@ void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t s
 	}
 }
 
-void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size, bool blocking)
+void pmix_coll_task_contrib(uint32_t localid, void *msg, uint32_t size, bool blocking)
 {
-	PMIX_DEBUG("Local task contribution %d", taskid);
-	if( !pmix_state_task_contrib_ok(taskid, blocking) ){
-		PMIX_ERROR_NO(0,"The task %d already contributed to this collective", taskid);
+	PMIX_DEBUG("Local task contribution %d", localid);
+	if( !pmix_state_task_contrib_ok(localid, blocking) ){
+		PMIX_ERROR_NO(0,"The task %d already contributed to this collective", localid);
 		return;
 	}
 	uint32_t full_size = sizeof(int)*2 + size;
-	local_data[taskid]  = xmalloc( full_size );
-	*((int*)local_data[taskid] ) = pmix_info_task_id(taskid);
-	*((int*)local_data[taskid] + 1 ) = size;
-	memcpy((void*)((int*)local_data[taskid] + 2), msg, size );
-	local_sizes[taskid] = full_size;
+	local_data[localid]  = xmalloc( full_size );
+	*((int*)local_data[localid] ) = pmix_info_task_id(localid);
+	*((int*)local_data[localid] + 1 ) = size;
+	memcpy((void*)((int*)local_data[localid] + 2), msg, size );
+	local_sizes[localid] = full_size;
 
 	if( pmix_state_coll_local_ok() ){
 		_forward();
