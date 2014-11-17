@@ -40,9 +40,10 @@
 #define PMIX_STATE_H
 
 #include "pmix_common.h"
+#include "pmix_debug.h"
 #include "pmix_io.h"
 
-typedef enum { PMIX_CLI_UNCONNECTED, PMIX_CLI_ACK, PMIX_CLI_OPERATE, PMIX_CLI_COLL } pmix_cli_state_t;
+typedef enum { PMIX_CLI_UNCONNECTED, PMIX_CLI_ACK, PMIX_CLI_OPERATE, PMIX_CLI_COLL, PMIX_CLI_COLL_NB } pmix_cli_state_t;
 
 typedef struct {
   pmix_cli_state_t state;
@@ -54,11 +55,12 @@ typedef struct {
 typedef enum { PMIX_COLL_SYNC, PMIX_COLL_GATHER, PMIX_COLL_FORWARD } pmix_coll_state_t;
 
 typedef struct {
-  pmix_coll_state_t state;
-  uint32_t local_joined;
-  uint8_t *local_contrib;
-  uint32_t nodes_joined;
-  uint8_t *nodes_contrib;
+	uint32_t generation;
+	pmix_coll_state_t state;
+	uint32_t local_joined;
+	uint8_t *local_contrib;
+	uint32_t nodes_joined;
+	uint8_t *nodes_contrib;
 } collective_state_t;
 
 typedef struct {
@@ -85,40 +87,40 @@ inline static void pmix_state_sanity_check()
  * Client state
  */
 
-inline static void pmix_state_cli_sanity_check(uint32_t taskid)
+inline static void pmix_state_cli_sanity_check(uint32_t localid)
 {
   pmix_state_sanity_check();
-  xassert( taskid < pmix_state.cli_size);
-  xassert( pmix_state.cli_state[taskid].fd >= 0 );
+  xassert( localid < pmix_state.cli_size);
+  xassert( pmix_state.cli_state[localid].fd >= 0 );
 }
 
-inline static pmix_io_engine_t *pmix_state_cli_io(int taskid)
+inline static pmix_io_engine_t *pmix_state_cli_io(int localid)
 {
-  pmix_state_cli_sanity_check(taskid);
-  return &pmix_state.cli_state[taskid].eng;
+  pmix_state_cli_sanity_check(localid);
+  return &pmix_state.cli_state[localid].eng;
 }
 
-inline static int pmix_state_cli_fd(int taskid)
+inline static int pmix_state_cli_fd(int localid)
 {
-  pmix_state_cli_sanity_check(taskid);
-  return pmix_state.cli_state[taskid].fd;
+  pmix_state_cli_sanity_check(localid);
+  return pmix_state.cli_state[localid].fd;
 }
 
 
-inline static pmix_cli_state_t pmix_state_cli(uint32_t taskid)
+inline static pmix_cli_state_t pmix_state_cli(uint32_t localid)
 {
-  pmix_state_cli_sanity_check(taskid);
-  client_state_t *cli = &pmix_state.cli_state[taskid];
+  pmix_state_cli_sanity_check(localid);
+  client_state_t *cli = &pmix_state.cli_state[localid];
   return cli->state;
 }
 
-inline static int pmix_state_cli_connecting(int taskid, int fd)
+inline static int pmix_state_cli_connecting(int localid, int fd)
 {
   pmix_state_sanity_check();
-  if( !( taskid < pmix_state.cli_size ) ){
+  if( !( localid < pmix_state.cli_size ) ){
 	return SLURM_ERROR;
   }
-  client_state_t *cli = &pmix_state.cli_state[taskid];
+  client_state_t *cli = &pmix_state.cli_state[localid];
   if( cli->state != PMIX_CLI_UNCONNECTED ){
 	// We already have this task connected. Shouldn't happen.
 	// FIXME: should we ignore new or old connection?
@@ -127,7 +129,7 @@ inline static int pmix_state_cli_connecting(int taskid, int fd)
   }
   // TODO: will need to implement additional step - ACK
   cli->state = PMIX_CLI_ACK;
-  cli->task_id = taskid;
+  cli->task_id = localid;
   cli->fd = fd;
   return SLURM_SUCCESS;
 }
@@ -144,10 +146,10 @@ inline static int pmix_state_cli_connected(int taskid)
   return SLURM_SUCCESS;
 }
 
-inline static void pmix_state_cli_finalize(uint32_t taskid)
+inline static void pmix_state_cli_finalize(uint32_t localid)
 {
-  pmix_state_cli_sanity_check(taskid);
-  client_state_t *cli = &pmix_state.cli_state[taskid];
+  pmix_state_cli_sanity_check(localid);
+  client_state_t *cli = &pmix_state.cli_state[localid];
   cli->fd = -1;
   cli->state = PMIX_CLI_UNCONNECTED;
   if( !pmix_io_finalized( &cli->eng ) ){
@@ -159,19 +161,47 @@ inline static void pmix_state_cli_finalize(uint32_t taskid)
  * Collective state
  */
 
-bool pmix_state_node_contrib_ok(int idx);
-bool pmix_state_task_contrib_ok(int idx);
+/*
+ * Database-related information
+ */
+
+inline static uint32_t pmix_state_data_gen()
+{
+	pmix_state_sanity_check();
+	return pmix_state.coll.generation;
+}
+
+inline static void pmix_state_data_gen_next()
+{
+	pmix_state.coll.generation++;
+	if( pmix_state.coll.generation == 0 ){
+		PMIX_ERROR_NO(EINVAL, "pmix_info_data_generation_next: generation counter overflow!");
+	}
+}
+
+bool pmix_state_node_contrib_ok(uint32_t gen, int idx);
+bool pmix_state_task_contrib_ok(int idx, bool blocking);
 bool pmix_state_coll_local_ok();
 bool pmix_state_coll_forwad();
 bool pmix_state_node_contrib_cancel(int idx);
 bool pmix_state_task_contrib_cancel(int idx);
-inline static void pmix_state_task_coll_finish(uint32_t taskid)
+
+inline static void pmix_state_task_coll_finish(uint32_t localid)
 {
-  pmix_state_cli_sanity_check(taskid);
-  client_state_t *cli = &pmix_state.cli_state[taskid];
-  xassert( cli->state == PMIX_CLI_COLL );
+  pmix_state_cli_sanity_check(localid);
+  client_state_t *cli = &pmix_state.cli_state[localid];
+  xassert( cli->state == PMIX_CLI_COLL || cli->state == PMIX_CLI_COLL_NB);
   cli->state = PMIX_CLI_OPERATE;
 }
 
+/*
+ * Direct modex
+ */
+void pmix_state_defer_local_req(uint32_t localid, uint32_t taskid);
+List pmix_state_local_reqs_to(uint32_t taskid);
+List pmix_state_local_reqs_from(uint32_t localid);
+void pmix_state_defer_remote_req(uint32_t localid, uint32_t nodeid);
+List pmix_state_remote_reqs_to(uint32_t localid);
+int pmix_state_remote_reqs_to_cnt(uint32_t localid);
 
 #endif // STATE_H

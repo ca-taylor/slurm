@@ -73,10 +73,16 @@
   if( file_base == NULL ){                            \
 	file_base = file;                                 \
   }                                                   \
-  error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
+  if( err == 0 ){                                     \
+	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format, \
+		pmix_info_this_host(), pmix_info_nodeid(),    \
+		file_base, __LINE__, __FUNCTION__, ## args);  \
+	} else {                                          \
+	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
 		pmix_info_this_host(), pmix_info_nodeid(),    \
 		file_base, __LINE__, __FUNCTION__,            \
-		## args, strerror(err), err);             \
+		## args, strerror(err), err);                 \
+  }                                                   \
 }
 #ifdef NDEBUG
 #define pmix_debug_hang(x)

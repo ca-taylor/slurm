@@ -43,10 +43,14 @@
 #include "pmix_io.h"
 #include "pmix_client.h"
 #include "pmix_server.h"
+#include "pmix_db.h"
+#include "pmix_state.h"
+#include "pmix_client.h"
 
 #define PMIX_SERVER_MSG_MAGIC 0xdeadbeef
 typedef struct {
 	uint32_t magic;
+	uint32_t gen;
 	uint32_t nodeid;
 	uint32_t paysize;
 	uint8_t cmd;
@@ -63,13 +67,17 @@ static uint32_t _recv_payload_size(void *buf);
 static int _send_pack_hdr(void *host, void *net);
 static int _recv_unpack_hdr(void *net, void *host);
 
-static bool serv_readable(eio_obj_t *obj);
-static int serv_read(eio_obj_t *obj, List objs);
-void _process_collective_request(recv_header_t *_hdr, void *payload);
+static bool _serv_readable(eio_obj_t *obj);
+static int _serv_read(eio_obj_t *obj, List objs);
+static void _process_server_request(recv_header_t *_hdr, void *payload);
+
+void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid);
+void _process_dmdx_request(send_header_t *hdr, void *payload);
+int _dmdx_response(send_header_t *hdr, void *payload);
 
 static struct io_operations peer_ops = {
-	.readable     = serv_readable,
-	.handle_read  = serv_read
+	.readable     = _serv_readable,
+	.handle_read  = _serv_read
 };
 
 pmix_io_engine_header_t srv_rcvd_header = {
@@ -124,7 +132,7 @@ int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env)
 	pmix_info_server_contacts_set(path, fd);
 	PMIX_DEBUG("srun pmi port: %hu", port);
 	env_array_overwrite_fmt(env, PMIX_SRUN_PORT_ENV, "%hu", port);
-	pmix_info_job_set_srun(job);
+	pmix_info_job_set_srun(job, env);
 	if( ( rc = pmix_coll_init(env) ) ){
 		return rc;
 	}
@@ -179,6 +187,7 @@ static int _send_pack_hdr(void *host, void *net)
 	Buf packbuf = create_buf(net, sizeof(send_header_t));
 	int size = 0;
 	pack32(ptr->magic, packbuf);
+	pack32(ptr->gen, packbuf);
 	pack32(ptr->nodeid, packbuf);
 	pack32(ptr->paysize, packbuf);
 	pack8(ptr->cmd, packbuf);
@@ -207,6 +216,10 @@ static int _recv_unpack_hdr(void *net, void *host)
 	}
 	xassert( ptr->send_hdr.magic == PMIX_SERVER_MSG_MAGIC );
 
+	if( unpack32(&ptr->send_hdr.gen, packbuf)){
+		return -EINVAL;
+	}
+
 	if( unpack32(&ptr->send_hdr.nodeid, packbuf)){
 		return -EINVAL;
 	}
@@ -233,15 +246,11 @@ void *pmix_server_alloc_msg(uint32_t size, void **payload)
 	send_header_t *hdr = msg;
 
 	hdr->magic = PMIX_SERVER_MSG_MAGIC;
+	hdr->gen = pmix_state_data_gen();
 	hdr->nodeid = pmix_info_nodeid();
 	hdr->paysize = size;
 	*payload = (char*)msg + payload_offs;
 	return msg;
-}
-
-void pmix_server_free_msg(void *msg)
-{
-	xfree(msg);
 }
 
 void pmix_server_msg_setcmd(void *msg, pmix_srv_cmd_t cmd)
@@ -272,7 +281,7 @@ void *pmix_server_msg_start(void *msg)
 	return (void*)(uhdr + 1);
 }
 
-static bool serv_readable(eio_obj_t *obj)
+static bool _serv_readable(eio_obj_t *obj)
 {
 	// TEMP
 	return !obj->shutdown;
@@ -283,23 +292,31 @@ static bool serv_readable(eio_obj_t *obj)
 	return true;
 }
 
-void _process_collective_request(recv_header_t *_hdr, void *payload)
+static void _process_server_request(recv_header_t *_hdr, void *payload)
 {
 	send_header_t *hdr = &_hdr->send_hdr;
 	switch( hdr->cmd ){
-		case PMIX_FENCE:
-			pmix_coll_node_contrib(hdr->nodeid, payload, hdr->paysize);
-			break;
-		case PMIX_FENCE_RESP:
+	case PMIX_FENCE:
+		pmix_coll_node_contrib(hdr->gen, hdr->nodeid, payload, hdr->paysize);
+		break;
+	case PMIX_FENCE_RESP:
+		// Do not update DB if we are in direct modex mode.
+		if( false == pmix_info_dmdx()){
 			pmix_coll_update_db(payload, hdr->paysize);
-			pmix_client_fence_notify();
-			break;
-		default:
-			PMIX_ERROR("Bad command %d", hdr->cmd);
+		}
+		pmix_client_fence_notify();
+		break;
+	case PMIX_DIRECT:
+		_process_dmdx_request(hdr, payload);
+		break;
+	case PMIX_DIRECT_RESP:
+		_dmdx_response(hdr, payload);
+	default:
+		PMIX_ERROR_NO(0,"Bad command %d", hdr->cmd);
 	}
 }
 
-static int serv_read(eio_obj_t *obj, List objs)
+static int _serv_read(eio_obj_t *obj, List objs)
 {
 
 	PMIX_DEBUG("fd = %d", obj->fd);
@@ -320,7 +337,8 @@ static int serv_read(eio_obj_t *obj, List objs)
 		if( pmix_io_rcvd_ready(me) ){
 			recv_header_t hdr;
 			void *msg = pmix_io_rcvd_extract(me, &hdr);
-			_process_collective_request(&hdr, msg);
+			_process_server_request(&hdr, msg);
+			xfree(msg);
 		}else{
 			// No more complete messages
 			break;
@@ -329,4 +347,114 @@ static int serv_read(eio_obj_t *obj, List objs)
 	return 0;
 }
 
+void pmix_server_dmdx_request(uint32_t taskid)
+{
+	int size = sizeof(uint32_t);
+	void *msg, *payload, *start;
+	char *host;
+	uint32_t nodeid;
+	Buf packbuf;
 
+	msg = pmix_server_alloc_msg(size, &payload);
+	packbuf = create_buf(payload, size);
+	pack32(taskid, packbuf);
+	packbuf->head = NULL;
+	free_buf(packbuf);
+	pmix_server_msg_setcmd(msg, PMIX_DIRECT);
+	pmix_server_msg_finalize(msg);
+	nodeid = pmix_info_task_node(taskid);
+	host = pmix_info_nth_host_name(nodeid);
+	size = pmix_server_msg_size(msg);
+	start = pmix_server_msg_start(msg);
+	// TODO: Try to send several times in case of error!
+	slurm_forward_data(host, (char*)pmix_info_srv_addr(), size, start);
+	xfree(host);
+	xfree(msg);
+}
+
+void pmix_server_dmdx_notify(uint32_t localid)
+{
+	uint32_t *nodeid;
+	List requests;
+	if( !pmix_state_remote_reqs_to_cnt(localid) ){
+		// there was no requests to this task
+		return;
+	}
+	requests = pmix_state_remote_reqs_to(localid);
+	while( (nodeid = list_dequeue(requests)) ){
+		_dmdx_reply_to_node(localid, *nodeid);
+		xfree(nodeid);
+	}
+
+}
+
+void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
+{
+	int size;
+	void *blob, *msg, *start, *payload;
+	char *host;
+	uint32_t taskid, gen;
+
+	taskid = pmix_info_task_id(localid);
+
+	size = pmix_db_get_blob(taskid, &blob, &gen);
+	if( !gen || gen < pmix_state_data_gen() ){
+		// We didn't have information about this task or
+		// the data is stalled
+		pmix_state_defer_remote_req(localid, nodeid);
+		return;
+	}
+	msg = pmix_server_alloc_msg(size + sizeof(uint32_t), &payload);
+	*(uint32_t*)payload = taskid;
+	memcpy((uint32_t*)payload + 1, blob, size);
+	// Convert the header into network byte order
+	pmix_server_msg_setcmd(msg, PMIX_DIRECT_RESP);
+	pmix_server_msg_finalize(msg);
+	host = pmix_info_nth_host_name(nodeid);
+	size = pmix_server_msg_size(msg);
+	start = pmix_server_msg_start(msg);
+	// TODO: Try to send several times in case of error!
+	slurm_forward_data(host, (char*)pmix_info_srv_addr(), size, start);
+	xfree(host);
+}
+
+void _process_dmdx_request(send_header_t *hdr, void *payload)
+{
+	uint32_t taskid;
+	uint32_t localid;
+
+	Buf packbuf = create_buf(payload, hdr->paysize);
+	if( unpack32(&taskid, packbuf) ){
+		PMIX_ERROR_NO(EINVAL,"DMDX: Cannot unpack requested global task id");
+		// TODO: respond with the error
+		return;
+	}
+
+	if( (localid = pmix_info_lid2gid(taskid)) < 0 ){
+		PMIX_ERROR_NO(ENOENT,"DMDX: Cannot find requested global task ID on this node");
+		// TODO: respond with the error
+		return;
+	}
+	_dmdx_reply_to_node(localid, hdr->nodeid);
+}
+
+int _dmdx_response(send_header_t *hdr, void *payload)
+{
+	Buf packbuf = create_buf(payload, hdr->paysize);
+	void *blob, *blob_copy;
+	uint32_t taskid;
+	int size;
+
+	if( unpack32(&taskid, packbuf) ){
+		PMIX_ERROR_NO(EINVAL,"DMDX response: Cannut unpack task global id");
+		return SLURM_ERROR;
+	}
+	blob = (char*)payload + get_buf_offset(packbuf);
+	size = remaining_buf(packbuf);
+	blob_copy = xmalloc( size );
+	memcpy(blob_copy, blob, size);
+	pmix_db_add_blob(taskid,blob_copy,size);
+	// Reply to the clients
+	pmix_client_taskid_reply(taskid);
+	return SLURM_SUCCESS;
+}

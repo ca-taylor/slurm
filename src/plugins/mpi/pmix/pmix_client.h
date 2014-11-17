@@ -46,6 +46,7 @@
 
 void pmix_client_new_conn(int fd);
 void pmix_client_fence_notify();
+void pmix_client_taskid_reply(uint32_t taskid);
 
 
 #endif // CLIENT_H
