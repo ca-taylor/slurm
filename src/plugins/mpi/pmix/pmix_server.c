@@ -301,7 +301,7 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 		// keep the payload!
 		return;
 	case PMIX_FENCE_RESP:
-		// Do not update DB if we are in direct modex mode.
+		// Skip DB update if we are in direct modex mode.
 		if( false == pmix_info_dmdx()){
 			pmix_coll_update_db(payload, hdr->paysize);
 		}
@@ -312,6 +312,7 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 		break;
 	case PMIX_DIRECT_RESP:
 		_dmdx_response(hdr, payload);
+		break;
 	default:
 		PMIX_ERROR_NO(0,"Bad command %d", hdr->cmd);
 	}
@@ -348,19 +349,48 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	return 0;
 }
 
+/*
+ * Direct modex service
+ */
+
+int _put_taskid(void *payload, uint32_t taskid)
+{
+	int size = sizeof(uint32_t);
+	int offset;
+	Buf packbuf = create_buf(payload, size);
+	pack32(taskid, packbuf);
+	offset = get_buf_offset(packbuf);
+	packbuf->head = NULL;
+	free_buf(packbuf);
+	return offset;
+}
+
+int _get_taskid(void *payload, uint32_t *taskid)
+{
+	int size = sizeof(uint32_t);
+	int offset;
+	Buf packbuf = create_buf(payload, size);
+	if( unpack32(taskid, packbuf) ){
+		PMIX_ERROR_NO(EINVAL,"DMDX: Cannot unpack requested global task id");
+		return SLURM_ERROR;
+	}
+	offset = get_buf_offset(packbuf);
+	packbuf->head = NULL;
+	free_buf(packbuf);
+	return offset;
+}
+
+
 void pmix_server_dmdx_request(uint32_t taskid)
 {
 	int size = sizeof(uint32_t);
 	void *msg, *payload, *start;
 	char *host;
 	uint32_t nodeid;
-	Buf packbuf;
 
 	msg = pmix_server_alloc_msg(size, &payload);
-	packbuf = create_buf(payload, size);
-	pack32(taskid, packbuf);
-	packbuf->head = NULL;
-	free_buf(packbuf);
+	//offset = _put_taskid(payload, taskid);
+	_put_taskid(payload, taskid);
 	pmix_server_msg_setcmd(msg, PMIX_DIRECT);
 	pmix_server_msg_finalize(msg);
 	nodeid = pmix_info_task_node(taskid);
@@ -391,7 +421,7 @@ void pmix_server_dmdx_notify(uint32_t localid)
 
 void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 {
-	int size;
+	int size, offset;
 	void *blob, *msg, *start, *payload;
 	char *host;
 	uint32_t taskid, gen;
@@ -406,8 +436,8 @@ void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 		return;
 	}
 	msg = pmix_server_alloc_msg(size + sizeof(uint32_t), &payload);
-	*(uint32_t*)payload = taskid;
-	memcpy((uint32_t*)payload + 1, blob, size);
+	offset = _put_taskid(payload, taskid);
+	memcpy((char*)payload + offset, blob, size);
 	// Convert the header into network byte order
 	pmix_server_msg_setcmd(msg, PMIX_DIRECT_RESP);
 	pmix_server_msg_finalize(msg);
@@ -421,11 +451,11 @@ void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 
 void _process_dmdx_request(send_header_t *hdr, void *payload)
 {
+	int offset;
 	uint32_t taskid;
 	uint32_t localid;
 
-	Buf packbuf = create_buf(payload, hdr->paysize);
-	if( unpack32(&taskid, packbuf) ){
+	if( SLURM_ERROR == (offset = _get_taskid(payload, &taskid) ) ){
 		PMIX_ERROR_NO(EINVAL,"DMDX: Cannot unpack requested global task id");
 		// TODO: respond with the error
 		return;
@@ -441,17 +471,16 @@ void _process_dmdx_request(send_header_t *hdr, void *payload)
 
 int _dmdx_response(send_header_t *hdr, void *payload)
 {
-	Buf packbuf = create_buf(payload, hdr->paysize);
 	void *blob, *blob_copy;
 	uint32_t taskid;
-	int size;
+	int size, offset;
 
-	if( unpack32(&taskid, packbuf) ){
-		PMIX_ERROR_NO(EINVAL,"DMDX response: Cannut unpack task global id");
+	if( SLURM_ERROR == (offset = _get_taskid(payload, &taskid) ) ){
+		PMIX_ERROR_NO(EINVAL,"DMDX response: Cannot unpack task global id");
 		return SLURM_ERROR;
 	}
-	blob = (char*)payload + get_buf_offset(packbuf);
-	size = remaining_buf(packbuf);
+	blob = (char*)payload + offset;
+	size = hdr->paysize - offset;
 	blob_copy = xmalloc( size );
 	memcpy(blob_copy, blob, size);
 	pmix_db_add_blob(taskid,blob_copy,size);

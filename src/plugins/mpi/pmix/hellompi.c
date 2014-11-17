@@ -354,20 +354,22 @@ int main(int argc, char* argv[])
 	sprintf(buf,"My size is %d", size);
 	PMIx_Put("the-size",buf);
 
-	// 3nd key
+	// 3rd key
 	sprintf(buf,"My appnum is %d", appnum);
 	PMIx_Put("the-appnum",buf);
 
 	printf("Fence result: %d\n", PMIx_Fence_nb());
 
-//	{
-//		int delay = 1;
-//		while( delay ){
-//		sleep(1);
-//		}
-//	}
-
 	for(i=0;i<size;i++){
+
+//		if( i == 1 ){
+//			{
+//				int delay = 1;
+//				while( delay ){
+//					sleep(1);
+//				}
+//			}
+//		}
 		char *ptr;
 		char buf[1024] = "";
 		PMIx_Get(i, "the-rank",&ptr);
