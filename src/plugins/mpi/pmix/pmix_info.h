@@ -65,7 +65,8 @@ typedef struct {
   int node_id_job;      /* relative position of this node in SLURM job  */
   uint32_t node_tasks;  /* number of tasks on *this* node               */
   uint32_t *gtids;      /* global ids of tasks located on *this* node   */
-  /*uint32_t task_dist; Dont need it for now                            */
+  bool	direct_modex;	/* direct modex mode enabled/disabled           */
+  uint32_t *task_map;	/* i'th task is located on task_map[i] node     */
 } pmix_jobinfo_t;
 
 extern pmix_jobinfo_t _pmix_job_info;
@@ -105,7 +106,7 @@ static inline int pmix_info_is_stepd()
 
 // Job information
 int pmix_info_job_set_stepd(const stepd_step_rec_t *job, char ***env);
-void pmix_info_job_set_srun(const mpi_plugin_client_info_t *job);
+void pmix_info_job_set_srun(const mpi_plugin_client_info_t *job, char ***env);
 
 inline static uint32_t pmix_info_jobid(){
   xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
@@ -168,7 +169,35 @@ inline static uint32_t pmix_info_task_id(uint32_t i){
   return _pmix_job_info.gtids[i];
 }
 
+/*
+ * Since tasks array in SLURM job structure is uint16_t
+ * task local id can't be grater than 2^16. So we can
+ * safely return int here. We need (-1) for the not-found case
+ */
+inline static int pmix_info_lid2gid(uint32_t gid){
+	int i;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	xassert( gid < _pmix_job_info.ntasks );
 
+	for(i=0; i<_pmix_job_info.node_tasks; i++){
+		if( _pmix_job_info.gtids[i] == gid )
+			return i;
+	}
+	return -1;
+}
+
+inline static bool pmix_info_dmdx(){
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.direct_modex;
+}
+
+inline static uint32_t pmix_info_task_node(uint32_t gid)
+{
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	xassert( gid < _pmix_job_info.ntasks );
+
+	return _pmix_job_info.task_map[gid];
+}
 
 /*
  *
@@ -194,7 +223,7 @@ typedef struct {
 
 extern parent_type_t _pmix_parent_type;
 extern char *_pmix_this_host;
-extern char *_pmix_nodes_list;
+extern char *_pmix_step_nodes_list;
 extern int _pmix_child_num;
 extern int *_pmix_child_list;
 extern char *_pmix_parent_host;
@@ -214,8 +243,8 @@ inline static char *pmix_info_step_hosts(){
   // xassert( _pmix_parent_type != PMIX_PARENT_NONE );
   // This information is essential in determinig of the parent type
   // The only thign that's important - did we initialize _pmix_nodes_list itself?
-  xassert( _pmix_nodes_list != NULL );
-  return _pmix_nodes_list;
+  xassert( _pmix_step_nodes_list != NULL );
+  return _pmix_step_nodes_list;
 }
 
 inline static char *pmix_info_this_host(){
