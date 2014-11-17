@@ -120,6 +120,8 @@ static struct io_operations peer_ops = {
 	.handle_write = _peer_write
 };
 
+inline static void _send_blob_to(uint32_t localid, uint32_t taskid);
+
 static uint32_t payload_size(void *buf)
 {
 	message_header_t *ptr = (message_header_t*)buf;
@@ -446,8 +448,6 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 		// Currently we just put the GID of the requested process
 		// in the first 4 bytes of the message
 		int taskid = *((int*)msg + 1);
-		void *blob, *payload;
-		uint32_t gen;
 
 		if( taskid >= pmix_info_tasks() ){
 			// return error!
@@ -463,28 +463,16 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 			break;
 		}
 
-
-		int size = pmix_db_get_blob(taskid, &blob, &gen);
-		if( !gen || gen < pmix_state_data_gen() ){
-			// We don't have information about this task or
-			// the data is stalled
-			// FIXME: In case of non-blocking GET, just reply with ENOENT
-			// or somwthing like that
-			pmix_state_defer_local_req(hdr.localid,taskid);
-			pmix_server_dmdx_request(taskid);
-			goto free_message;
-		}
-		rmsg = _new_msg_tag(taskid, tag, size, &payload);
-		memcpy(payload, blob, size);
-		pmix_io_send_enqueue(eng, rmsg);
+		_send_blob_to(hdr.localid, taskid);
 		goto free_message;
 	}
 	case PMIX_FENCE_CMD:
 	case PMIX_FENCENB_CMD:{
 		// remove cmd contribution
 		int size = hdr.nbytes - sizeof(uint32_t);
+		bool blocking = (cmd == PMIX_FENCE_CMD);
 		if( !pmix_info_dmdx() ){
-			pmix_coll_task_contrib(taskid, (void*)&ptr[1], size, true);
+			pmix_coll_task_contrib(taskid, (void*)&ptr[1], size, blocking);
 			goto free_message;
 		} else {
 			// In direct modex we don't send blobs with collective
@@ -492,7 +480,7 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 			void *blob = xmalloc(size);
 			memcpy(blob,(void*)&ptr[1], size);
 			// Note: we need to contribute first to increment data generation counter
-			pmix_coll_task_contrib(taskid, &taskid, sizeof(taskid), true);
+			pmix_coll_task_contrib(taskid, &taskid, sizeof(taskid), blocking);
 			// Now new blob will belong to the new generation of the data
 			pmix_db_add_blob(taskid,blob,size);
 		}
