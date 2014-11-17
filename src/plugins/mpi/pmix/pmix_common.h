@@ -58,6 +58,7 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xassert.h"
 #include "src/common/eio.h"
+#include "src/common/mapping.h"
 #include "src/common/fd.h"
 #include "src/common/net.h"
 
@@ -77,10 +78,13 @@
 #define PMIX_SRUN_HOST_ENV "SLURM_SRUN_COMM_HOST"
 #define PMIX_SRUN_PORT_ENV "SLURM_PMIX_SRUN_PORT"
 // Job/step resource description
+#define PMIX_SLURM_MAPPING_ENV "PMIX_TASK_NODE_MAPPING"
 #define PMIX_STEP_NODES_ENV "SLURM_STEP_NODELIST"
 #define PMIX_JOB_NODES_ENV "SLURM_JOB_NODELIST"
 #define PMIX_CPUS_PER_NODE_ENV "SLURM_JOB_CPUS_PER_NODE"
 #define PMIX_CPUS_PER_TASK "SLURM_CPUS_PER_TASK"
+// Mode
+#define PMIX_DIRECT_MODEX_ENV "PMIX_DIRECT_MODEX"
 
 // For future spawn implementation
 #define PMIX_SPAWN_BASE_STEP "SLURM_PMIX_SPAWN_BASE_STEP"
