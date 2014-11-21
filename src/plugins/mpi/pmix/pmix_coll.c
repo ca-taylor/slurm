@@ -38,6 +38,7 @@
 
 #include "pmix_common.h"
 #include "src/slurmd/common/reverse_tree_math.h"
+#include "src/common/slurm_protocol_api.h"
 #include "pmix_info.h"
 #include "pmix_debug.h"
 #include "pmix_state.h"
@@ -88,6 +89,7 @@ char *_pack_the_data()
 
 static void _forward()
 {
+	int rc;
 	xassert( pmix_state_coll_local_ok() );
 
 	pmix_state_coll_forwad();
@@ -101,28 +103,31 @@ static void _forward()
 			// We have complete dataset. Broadcast it to others
 			pmix_server_msg_setcmd(msg, PMIX_FENCE_RESP);
 			pmix_server_msg_finalize(msg);
-			slurm_forward_data(pmix_info_step_hosts(), (char*)pmix_info_srv_addr(), size, msg_begin);
+			rc = pmix_stepd_send(pmix_info_step_hosts(), (char*)pmix_info_srv_addr(), size, msg_begin);
+			if( rc != SLURM_SUCCESS ){
+				PMIX_ERROR_NO(EAGAIN, "Cannot broadcast collective data to childrens");
+				// xassert here?
+			}
 			break;
 		case PMIX_PARENT_SRUN:{
 				int fd, rc;
 				pmix_server_msg_setcmd(msg, PMIX_FENCE);
 				pmix_server_msg_finalize(msg);
-				fd = slurm_open_stream(pmix_info_parent_addr(), true);
-				if (fd < 0){
-					PMIX_ERROR("Cannot send collective data to srun (slurm_open_stream)");
+				rc = pmix_srun_send(pmix_info_parent_addr(),size, msg_begin);
+				if( rc != SLURM_SUCCESS ){
+					PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion to my parent (srun)");
+					// xassert here?
 				}
-
-				rc = slurm_msg_sendto(fd, msg_begin, size, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
-				if (rc != pmix_server_msg_size(msg)){ /* all data sent */
-					PMIX_ERROR("Cannot send collective data to srun (slurm_msg_sendto)");
-				}
-				close(fd);
 				break;
 			}
 		case PMIX_PARENT_STEPD:
 			pmix_server_msg_setcmd(msg, PMIX_FENCE);
 			pmix_server_msg_finalize(msg);
-			slurm_forward_data(pmix_info_parent_host(), (char*)pmix_info_srv_addr(), size, msg_begin);
+			rc = pmix_stepd_send(pmix_info_parent_host(), (char*)pmix_info_srv_addr(), size, msg_begin);
+			if( rc != SLURM_SUCCESS ){
+				PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion to my parent %s", pmix_info_parent_host());
+				// xassert here?
+			}
 			break;
 		default:
 			PMIX_ERROR("Inconsistent parent type value");
