@@ -45,6 +45,8 @@ size_t pmix_read_buf(int fd, void *buf, size_t count, int *shutdown, bool blocki
 size_t pmix_write_buf(int fd, void *buf, size_t count, int *shutdown);
 bool pmix_fd_read_ready(int fd, int *shutdown);
 bool pmix_fd_write_ready(int fd, int *shutdown);
+int pmix_srun_send(slurm_addr_t *addr, uint32_t len, char *data);
+int pmix_stepd_send(char *nodelist, char *address, uint32_t len, char *data);
 
 
 #endif // PMIX_UTILS_H
