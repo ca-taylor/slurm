@@ -164,11 +164,10 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
 		if (!pmix_fd_read_ready(obj->fd, &shutdown)){
 			if( shutdown ){
 				// The error occurs or fd was closed
-				obj->shutdown = true;
 				if( shutdown < 0 ){
+					obj->shutdown = true;
 					PMIX_ERROR_NO(-shutdown, "sd=%d failure", obj->fd);
 				}
-
 			}
 			return 0;
 		}
