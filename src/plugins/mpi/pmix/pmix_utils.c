@@ -43,10 +43,13 @@
 #include <sys/un.h>
 #include <errno.h>
 #include <poll.h>
+#include <time.h>
 
 #include "pmix_common.h"
 #include "pmix_utils.h"
 #include "pmix_debug.h"
+
+#define PMIX_MAX_RETRY 10
 
 void pmix_xfree_buffer(void *x){
 	xfree(x);
@@ -202,4 +205,65 @@ bool pmix_fd_write_ready(int fd, int *shutdown)
 	  }
   }
   return ((rc == 1) && (pfd[0].revents & POLLOUT));
+}
+
+
+int pmix_stepd_send(char *nodelist, char *address, uint32_t len, char *data)
+{
+	int retry = 0, rc;
+	unsigned int delay = 100; /* in milliseconds */
+	while (1) {
+		if (retry == 1) {
+			PMIX_DEBUG("send failed, rc=%d, retrying", rc);
+		}
+
+		rc = slurm_forward_data(nodelist, address, len, data);
+
+		if (rc == SLURM_SUCCESS)
+			break;
+		retry++;
+		if (retry >= PMIX_MAX_RETRY )
+			break;
+		/* wait with constantly increasing delay */
+		struct timespec ts = { (delay/1000), ((delay % 1000) * 1000000) };
+		nanosleep(&ts, NULL);
+		delay *= 2;
+	}
+	return rc;
+}
+
+int pmix_srun_send(slurm_addr_t *addr, uint32_t len, char *data)
+{
+	int retry = 0, rc;
+	unsigned int delay = 100; /* in milliseconds */
+	int fd;
+	fd = slurm_open_stream(addr, true);
+	if (fd < 0){
+		PMIX_ERROR("Cannot send collective data to srun (slurm_open_stream)");
+		return SLURM_ERROR;
+	}
+
+	while (1) {
+		if (retry == 1) {
+			PMIX_DEBUG("send failed, rc=%d, retrying", rc);
+		}
+
+		rc = slurm_msg_sendto(fd, data, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+		if (rc == len ){ /* all data sent */
+			rc = SLURM_SUCCESS;
+			break;
+		}
+		rc = SLURM_ERROR;
+
+		retry++;
+		if (retry >= PMIX_MAX_RETRY )
+			break;
+		/* wait with constantly increasing delay */
+		struct timespec ts = { (delay/1000), ((delay % 1000) * 1000000) };
+		nanosleep(&ts, NULL);
+		delay *= 2;
+	}
+	close(fd);
+
+	return rc;
 }
