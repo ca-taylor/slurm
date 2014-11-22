@@ -246,7 +246,7 @@ void *pmix_server_alloc_msg(uint32_t size, void **payload)
 	send_header_t *hdr = msg;
 
 	hdr->magic = PMIX_SERVER_MSG_MAGIC;
-	hdr->gen = pmix_state_data_gen();
+	hdr->gen = pmix_db_generation();
 	hdr->nodeid = pmix_info_nodeid();
 	hdr->paysize = size;
 	*payload = (char*)msg + payload_offs;
@@ -302,9 +302,7 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 		return;
 	case PMIX_FENCE_RESP:
 		// Skip DB update if we are in direct modex mode.
-		if( false == pmix_info_dmdx()){
-			pmix_coll_update_db(payload, hdr->paysize);
-		}
+		pmix_coll_update_db(payload, hdr->paysize);
 		pmix_client_fence_notify();
 		break;
 	case PMIX_DIRECT:
@@ -384,10 +382,15 @@ int _get_taskid(void *payload, uint32_t *taskid)
 void pmix_server_dmdx_request(uint32_t taskid)
 {
 	int size = sizeof(uint32_t);
+	int rc;
 	void *msg, *payload, *start;
 	char *host;
 	uint32_t nodeid;
 
+	if( pmix_state_local_reqs_to_posted(taskid) ){
+		// Request was already send. Nothing to do
+		return;
+	}
 	msg = pmix_server_alloc_msg(size, &payload);
 	//offset = _put_taskid(payload, taskid);
 	_put_taskid(payload, taskid);
@@ -398,40 +401,27 @@ void pmix_server_dmdx_request(uint32_t taskid)
 	size = pmix_server_msg_size(msg);
 	start = pmix_server_msg_start(msg);
 	// TODO: Try to send several times in case of error!
-	slurm_forward_data(host, (char*)pmix_info_srv_addr(), size, start);
+	rc = pmix_stepd_send(host, (char*)pmix_info_srv_addr(), size, start);
+	if( rc != SLURM_SUCCESS ){
+		PMIX_ERROR_NO(EAGAIN, "Cannot send DMDX request to node %s", host);
+	}
 	xfree(host);
 	xfree(msg);
 }
 
-void pmix_server_dmdx_notify(uint32_t localid)
-{
-	uint32_t *nodeid;
-	List requests;
-	if( !pmix_state_remote_reqs_to_cnt(localid) ){
-		// there was no requests to this task
-		return;
-	}
-	requests = pmix_state_remote_reqs_to(localid);
-	while( (nodeid = list_dequeue(requests)) ){
-		_dmdx_reply_to_node(localid, *nodeid);
-		xfree(nodeid);
-	}
 
-}
 
 void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 {
-	int size, offset;
+	int size, offset, rc;
 	void *blob, *msg, *start, *payload;
 	char *host;
-	uint32_t taskid, gen;
+	uint32_t taskid;
 
 	taskid = pmix_info_task_id(localid);
-
-	size = pmix_db_get_blob(taskid, &blob, &gen);
-	if( !gen || gen < pmix_state_data_gen() ){
-		// We didn't have information about this task or
-		// the data is stalled
+	size = pmix_db_get_blob(taskid, &blob);
+	if( blob == NULL ){
+		// We do not have information about this task yet
 		pmix_state_defer_remote_req(localid, nodeid);
 		return;
 	}
@@ -445,7 +435,10 @@ void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 	size = pmix_server_msg_size(msg);
 	start = pmix_server_msg_start(msg);
 	// TODO: Try to send several times in case of error!
-	slurm_forward_data(host, (char*)pmix_info_srv_addr(), size, start);
+	rc = pmix_stepd_send(host, (char*)pmix_info_srv_addr(), size, start);
+	if( rc != SLURM_SUCCESS ){
+		PMIX_ERROR_NO(EAGAIN, "Cannot send DMDX request to node %s", host);
+	}
 	xfree(host);
 }
 
@@ -466,7 +459,23 @@ void _process_dmdx_request(send_header_t *hdr, void *payload)
 		// TODO: respond with the error
 		return;
 	}
-	_dmdx_reply_to_node(localid, hdr->nodeid);
+	if( hdr->gen == pmix_db_generation() ){
+		// We have the same DB generation. Respond now
+		_dmdx_reply_to_node(localid, hdr->nodeid);
+	} else if( hdr->gen == (pmix_db_generation() + 1) ){
+		// The client is one step hared. Wait when we will reach it.
+		pmix_state_defer_remote_req(localid, hdr->nodeid);
+	} else if( hdr->gen > pmix_db_generation()){
+		// The client is more than one step ahared. Can this happen?
+		// Maybe if we will do more complex collective scopes in future.
+		PMIX_ERROR_NO(0,"Get DMDX request from the _future_: our generation = %d,"
+					  "Request generation = %d", pmix_db_generation(), hdr->gen);
+	} else {
+		// The client is more than one step behind us. Can this happen?
+		// Maybe if we will do more complex collective scopes in future.
+		PMIX_ERROR_NO(0,"Get DMDX request from the _past_: our generation = %d,"
+					  "Request generation = %d", pmix_db_generation(), hdr->gen);
+	}
 }
 
 int _dmdx_response(send_header_t *hdr, void *payload)
@@ -483,8 +492,24 @@ int _dmdx_response(send_header_t *hdr, void *payload)
 	size = hdr->paysize - offset;
 	blob_copy = xmalloc( size );
 	memcpy(blob_copy, blob, size);
-	pmix_db_add_blob(taskid,blob_copy,size);
+	pmix_db_dmdx_add_blob(hdr->gen, taskid,blob_copy,size);
 	// Reply to the clients
 	pmix_client_taskid_reply(taskid);
 	return SLURM_SUCCESS;
+}
+
+void pmix_server_dmdx_notify(uint32_t localid)
+{
+	uint32_t *nodeid;
+	List requests;
+	if( !pmix_state_remote_reqs_to_cnt(localid) ){
+		// there was no requests to this task
+		return;
+	}
+	requests = pmix_state_remote_reqs_to(localid);
+	while( (nodeid = list_dequeue(requests)) ){
+		_dmdx_reply_to_node(localid, *nodeid);
+		xfree(nodeid);
+	}
+
 }
