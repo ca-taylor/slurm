@@ -109,7 +109,7 @@ int connect_to_server_usock(char *path)
 	strcpy(sa.sun_path, path);
 	while( 1 ){
 		if( !connect(fd,(struct sockaddr*) &sa, SUN_LEN(&sa) ) ){
-		    break;
+			break;
 		}
 		perror("Cannot connect");
 		sleep(1);
@@ -129,7 +129,7 @@ static int pmix_recv_bytes(int fd, char *buf, int size)
 		int cnt = read(fd, buf + count, size - count);
 		if( cnt < 0 ){
 			fprintf(stderr,"%d: errno = %d, cnt = %d, size = %d, count = %d, fd = %d\n",
-				    jattr.grank, errno, cnt, size, count, fd);
+					jattr.grank, errno, cnt, size, count, fd);
 			perror("read");
 			return -1;
 		}
@@ -369,14 +369,14 @@ int main(int argc, char* argv[])
 
 	for(i=0;i<size;i++){
 
-//		if( i == 1 ){
-//			{
-//				int delay = 1;
-//				while( delay ){
-//					sleep(1);
-//				}
-//			}
-//		}
+		//		if( i == 1 ){
+		//			{
+		//				int delay = 1;
+		//				while( delay ){
+		//					sleep(1);
+		//				}
+		//			}
+		//		}
 		char *ptr;
 		char buf[1024] = "";
 		PMIx_Get(i, "the-rank",&ptr);
