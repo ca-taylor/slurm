@@ -110,7 +110,7 @@ static void _forward()
 			}
 			break;
 		case PMIX_PARENT_SRUN:{
-				int fd, rc;
+				int rc;
 				pmix_server_msg_setcmd(msg, PMIX_FENCE);
 				pmix_server_msg_finalize(msg);
 				rc = pmix_srun_send(pmix_info_parent_addr(),size, msg_begin);
