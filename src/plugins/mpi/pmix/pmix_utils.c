@@ -167,6 +167,10 @@ bool pmix_fd_read_ready(int fd, int *shutdown)
 	int    rc;
 	pfd[0].fd     = fd;
 	pfd[0].events = POLLIN;
+
+	// Drop shutdown before the check
+	*shutdown = 0;
+
 	rc = poll(pfd, 1, 10);
 	if( rc < 0 ){
 		*shutdown = -errno;
