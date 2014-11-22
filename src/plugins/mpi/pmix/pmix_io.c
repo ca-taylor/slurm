@@ -275,7 +275,7 @@ void pmix_io_rcvd(pmix_io_engine_t *eng)
 	size = eng->rcvd_pay_size;
 	remain = size - eng->rcvd_pay_offs;
 	eng->rcvd_pay_offs += pmix_read_buf(fd, eng->rcvd_payload + eng->rcvd_pay_offs,
-									   remain, &shutdown, false);
+										remain, &shutdown, false);
 	if( shutdown ){
 		pmix_io_finalize(eng, 0);
 		return;

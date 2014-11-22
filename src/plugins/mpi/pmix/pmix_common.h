@@ -68,8 +68,8 @@
 #define PMIX_CLI_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_cli.%u.%u"
 
 #define MAX_USOCK_PATH                                      \
-  ( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) - \
-    (size_t)&(((struct sockaddr_un *)0)->sun_path) )
+	( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) - \
+	(size_t)&(((struct sockaddr_un *)0)->sun_path) )
 
 #define SERVER_URI_ENV "PMIX_SERVER_URI"
 #define JOBID_ENV "PMIX_ID"

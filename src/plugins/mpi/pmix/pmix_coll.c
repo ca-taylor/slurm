@@ -99,39 +99,39 @@ static void _forward()
 	uint32_t size = pmix_server_msg_size(msg);
 
 	switch( pmix_info_parent_type() ){
-		case PMIX_PARENT_ROOT:
-			// We have complete dataset. Broadcast it to others
-			pmix_server_msg_setcmd(msg, PMIX_FENCE_RESP);
-			pmix_server_msg_finalize(msg);
-			rc = pmix_stepd_send(pmix_info_step_hosts(), (char*)pmix_info_srv_addr(), size, msg_begin);
-			if( rc != SLURM_SUCCESS ){
-				PMIX_ERROR_NO(EAGAIN, "Cannot broadcast collective data to childrens");
-				// xassert here?
-			}
-			break;
-		case PMIX_PARENT_SRUN:{
-				int rc;
-				pmix_server_msg_setcmd(msg, PMIX_FENCE);
-				pmix_server_msg_finalize(msg);
-				rc = pmix_srun_send(pmix_info_parent_addr(),size, msg_begin);
-				if( rc != SLURM_SUCCESS ){
-					PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion my portion of  collective data to childrens");
-					// xassert here?
-				}
-				break;
-			}
-		case PMIX_PARENT_STEPD:
-			pmix_server_msg_setcmd(msg, PMIX_FENCE);
-			pmix_server_msg_finalize(msg);
-			rc = pmix_stepd_send(pmix_info_parent_host(), (char*)pmix_info_srv_addr(), size, msg_begin);
-			if( rc != SLURM_SUCCESS ){
-				PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion to my parent %s", pmix_info_parent_host());
-				// xassert here?
-			}
-			break;
-		default:
-			PMIX_ERROR("Inconsistent parent type value");
-			xassert(0);
+	case PMIX_PARENT_ROOT:
+		// We have complete dataset. Broadcast it to others
+		pmix_server_msg_setcmd(msg, PMIX_FENCE_RESP);
+		pmix_server_msg_finalize(msg);
+		rc = pmix_stepd_send(pmix_info_step_hosts(), (char*)pmix_info_srv_addr(), size, msg_begin);
+		if( rc != SLURM_SUCCESS ){
+			PMIX_ERROR_NO(EAGAIN, "Cannot broadcast collective data to childrens");
+			// xassert here?
+		}
+		break;
+	case PMIX_PARENT_SRUN:{
+		int rc;
+		pmix_server_msg_setcmd(msg, PMIX_FENCE);
+		pmix_server_msg_finalize(msg);
+		rc = pmix_srun_send(pmix_info_parent_addr(),size, msg_begin);
+		if( rc != SLURM_SUCCESS ){
+			PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion my portion of  collective data to childrens");
+			// xassert here?
+		}
+		break;
+	}
+	case PMIX_PARENT_STEPD:
+		pmix_server_msg_setcmd(msg, PMIX_FENCE);
+		pmix_server_msg_finalize(msg);
+		rc = pmix_stepd_send(pmix_info_parent_host(), (char*)pmix_info_srv_addr(), size, msg_begin);
+		if( rc != SLURM_SUCCESS ){
+			PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion to my parent %s", pmix_info_parent_host());
+			// xassert here?
+		}
+		break;
+	default:
+		PMIX_ERROR("Inconsistent parent type value");
+		xassert(0);
 	}
 }
 
