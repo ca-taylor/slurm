@@ -323,7 +323,7 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	PMIX_DEBUG("fd = %d", obj->fd);
 	pmix_io_engine_t *me = (pmix_io_engine_t *)obj->arg;
 
-//	pmix_debug_hang(1);
+	//	pmix_debug_hang(1);
 
 	// Read and process all received messages
 	while( 1 ){

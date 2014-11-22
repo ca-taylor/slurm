@@ -51,22 +51,22 @@
 typedef struct {
 #ifndef NDEBUG
 #       define PMIX_INFO_MAGIC 0xdeadbeef
-  int  magic;
+	int  magic;
 #endif
-  uint32_t jobid;       /* Current SLURM job id                         */
-  uint32_t stepid;      /* Current step id (or NO_VAL)                  */
-  uint32_t nnodes;      /* number of nodes in current step              */
-  uint32_t nnodes_job;  /* number of nodes in current job               */
-  uint32_t ntasks;      /* total number of tasks in current step        */
-  uint32_t ntasks_job;  /* total possible number of tasks in job		*/
-  uint32_t ncpus_job;   /* total possible number of cpus in job		    */
-  uint16_t *task_cnts;  /* Number of tasks on each node in this step    */
-  int node_id;          /* relative position of this node in this step  */
-  int node_id_job;      /* relative position of this node in SLURM job  */
-  uint32_t node_tasks;  /* number of tasks on *this* node               */
-  uint32_t *gtids;      /* global ids of tasks located on *this* node   */
-  bool	direct_modex;	/* direct modex mode enabled/disabled           */
-  uint32_t *task_map;	/* i'th task is located on task_map[i] node     */
+	uint32_t jobid;       /* Current SLURM job id                         */
+	uint32_t stepid;      /* Current step id (or NO_VAL)                  */
+	uint32_t nnodes;      /* number of nodes in current step              */
+	uint32_t nnodes_job;  /* number of nodes in current job               */
+	uint32_t ntasks;      /* total number of tasks in current step        */
+	uint32_t ntasks_job;  /* total possible number of tasks in job		*/
+	uint32_t ncpus_job;   /* total possible number of cpus in job		    */
+	uint16_t *task_cnts;  /* Number of tasks on each node in this step    */
+	int node_id;          /* relative position of this node in this step  */
+	int node_id_job;      /* relative position of this node in SLURM job  */
+	uint32_t node_tasks;  /* number of tasks on *this* node               */
+	uint32_t *gtids;      /* global ids of tasks located on *this* node   */
+	bool	direct_modex;	/* direct modex mode enabled/disabled           */
+	uint32_t *task_map;	/* i'th task is located on task_map[i] node     */
 } pmix_jobinfo_t;
 
 extern pmix_jobinfo_t _pmix_job_info;
@@ -94,14 +94,14 @@ eio_handle_t *pmix_info_io();
 // Agent location
 static inline int pmix_info_is_srun()
 {
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return (_pmix_job_info.node_id < 0 );
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return (_pmix_job_info.node_id < 0 );
 }
 
 static inline int pmix_info_is_stepd()
 {
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return ( _pmix_job_info.node_id >= 0 );
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return ( _pmix_job_info.node_id >= 0 );
 }
 
 // Job information
@@ -109,64 +109,64 @@ int pmix_info_job_set_stepd(const stepd_step_rec_t *job, char ***env);
 void pmix_info_job_set_srun(const mpi_plugin_client_info_t *job, char ***env);
 
 inline static uint32_t pmix_info_jobid(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.jobid;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.jobid;
 }
 
 inline static uint32_t pmix_info_stepid(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.stepid;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.stepid;
 }
 
 inline static uint32_t pmix_info_nodeid(){
-  // xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  // This routine is called from PMIX_DEBUG/ERROR and
-  // this CAN happen before initialization. Relax demand to have
-  // _pmix_job_info.magic == PMIX_INFO_MAGIC
-  return _pmix_job_info.node_id;
+	// xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	// This routine is called from PMIX_DEBUG/ERROR and
+	// this CAN happen before initialization. Relax demand to have
+	// _pmix_job_info.magic == PMIX_INFO_MAGIC
+	return _pmix_job_info.node_id;
 }
 
 inline static uint32_t pmix_info_nodes(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.nnodes;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.nnodes;
 }
 
 inline static uint32_t pmix_info_nodes_uni(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.nnodes_job;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.nnodes_job;
 }
 
 inline static uint32_t pmix_info_tasks(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.ntasks;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.ntasks;
 }
 
 inline static uint32_t pmix_info_tasks_uni(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.ntasks_job;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.ntasks_job;
 }
 
 inline static uint32_t pmix_info_cpus(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.ncpus_job;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.ncpus_job;
 }
 
 inline static uint32_t pmix_info_node_taskcnt(uint32_t i){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  xassert( i < _pmix_job_info.nnodes);
-  return _pmix_job_info.task_cnts[i];
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	xassert( i < _pmix_job_info.nnodes);
+	return _pmix_job_info.task_cnts[i];
 }
 
 
 inline static uint32_t pmix_info_ltasks(){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  return _pmix_job_info.node_tasks;
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmix_job_info.node_tasks;
 }
 
 inline static uint32_t pmix_info_task_id(uint32_t i){
-  xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
-  xassert( i < _pmix_job_info.node_tasks );
-  return _pmix_job_info.gtids[i];
+	xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	xassert( i < _pmix_job_info.node_tasks );
+	return _pmix_job_info.gtids[i];
 }
 
 /*
@@ -235,70 +235,70 @@ int  pmix_info_parent_set_srun(char *phost, uint16_t port);
 int pmix_info_parent_set_stepd(char *phost);
 
 inline static parent_type_t pmix_info_parent_type(){
-  xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  return _pmix_parent_type;
+	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	return _pmix_parent_type;
 }
 
 inline static char *pmix_info_step_hosts(){
-  // xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  // This information is essential in determinig of the parent type
-  // The only thign that's important - did we initialize _pmix_nodes_list itself?
-  xassert( _pmix_step_nodes_list != NULL );
-  return _pmix_step_nodes_list;
+	// xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	// This information is essential in determinig of the parent type
+	// The only thign that's important - did we initialize _pmix_nodes_list itself?
+	xassert( _pmix_step_nodes_list != NULL );
+	return _pmix_step_nodes_list;
 }
 
 inline static char *pmix_info_this_host(){
-  // xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  // This routine is called from PMIX_DEBUG/ERROR and
-  // this CAN happen before initialization. Relax demand to have
-  // _pmix_parent_type != PMIX_PARENT_NONE
-  if( _pmix_this_host == NULL ){
-    return "unknown";
-  } else {
-    return _pmix_this_host;
-  }
+	// xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	// This routine is called from PMIX_DEBUG/ERROR and
+	// this CAN happen before initialization. Relax demand to have
+	// _pmix_parent_type != PMIX_PARENT_NONE
+	if( _pmix_this_host == NULL ){
+		return "unknown";
+	} else {
+		return _pmix_this_host;
+	}
 }
 
 inline static char *pmix_info_parent_host()
 {
-  // Check for initialization
-  xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  return _pmix_parent_host;
+	// Check for initialization
+	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	return _pmix_parent_host;
 }
 
 inline static slurm_addr_t *pmix_info_parent_addr()
 {
-  // Check for initialization
-  xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  return _pmix_parent_addr;
+	// Check for initialization
+	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	return _pmix_parent_addr;
 }
 
 inline static int pmix_info_childs()
 {
-  // Check for initialization
-  xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  return _pmix_child_num;
+	// Check for initialization
+	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	return _pmix_child_num;
 }
 
 inline static int pmix_info_nth_child(int n)
 {
-  // Check for initialization
-  xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  xassert( n < _pmix_child_num );
-  return _pmix_child_list[n];
+	// Check for initialization
+	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	xassert( n < _pmix_child_num );
+	return _pmix_child_list[n];
 }
 
 inline static int pmix_info_is_child_no(int id)
 {
-  // Check for initialization
-  xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-  int i;
-  for(i=0;i<_pmix_child_num; i++){
-    if( id == _pmix_child_list[i] ){
-      return i;
-    }
-  }
-  return -1;
+	// Check for initialization
+	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
+	int i;
+	for(i=0;i<_pmix_child_num; i++){
+		if( id == _pmix_child_list[i] ){
+			return i;
+		}
+	}
+	return -1;
 }
 
 #endif // INFO_H

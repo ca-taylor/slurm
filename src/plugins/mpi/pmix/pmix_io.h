@@ -58,51 +58,51 @@ typedef struct {
 typedef struct {
 #ifndef NDEBUG
 #       define PMIX_MSGSTATE_MAGIC 0xdeadbeef
-  int  magic;
+	int  magic;
 #endif
-  // User supplied information
-  int fd;
-  int error;
-  pmix_io_engine_header_t header;
-  bool operating;
-  // receiver
-  uint32_t rcvd_hdr_offs;
-  void *rcvd_hdr;
-  void *rcvd_hdr_host;
-  uint32_t rcvd_pay_size;
-  uint32_t rcvd_pay_offs;
-  void *rcvd_payload;
-  uint32_t rcvd_padding;
-  uint32_t rcvd_pad_recvd;
-  // sender
-  void *send_current;
-  void *send_hdr_net;
-  uint32_t send_hdr_offs;
-  uint32_t send_hdr_size;
-  void *send_payload;
-  uint32_t send_pay_offs;
-  uint32_t send_pay_size;
-  List send_queue;
+	// User supplied information
+	int fd;
+	int error;
+	pmix_io_engine_header_t header;
+	bool operating;
+	// receiver
+	uint32_t rcvd_hdr_offs;
+	void *rcvd_hdr;
+	void *rcvd_hdr_host;
+	uint32_t rcvd_pay_size;
+	uint32_t rcvd_pay_offs;
+	void *rcvd_payload;
+	uint32_t rcvd_padding;
+	uint32_t rcvd_pad_recvd;
+	// sender
+	void *send_current;
+	void *send_hdr_net;
+	uint32_t send_hdr_offs;
+	uint32_t send_hdr_size;
+	void *send_payload;
+	uint32_t send_pay_offs;
+	uint32_t send_pay_size;
+	List send_queue;
 } pmix_io_engine_t;
 
 inline static void pmix_io_rcvd_padding(pmix_io_engine_t *eng, uint32_t padsize){
-  xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
-  eng->rcvd_padding = padsize;
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	eng->rcvd_padding = padsize;
 }
 
 inline static bool pmix_io_rcvd_ready(pmix_io_engine_t *eng){
-  xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
-  return (eng->rcvd_hdr_offs == eng->header.net_size) && (eng->rcvd_pay_size == eng->rcvd_pay_offs);
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	return (eng->rcvd_hdr_offs == eng->header.net_size) && (eng->rcvd_pay_size == eng->rcvd_pay_offs);
 }
 
 inline static bool pmix_io_finalized(pmix_io_engine_t *eng){
-  xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
-  return !(eng->operating);
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	return !(eng->operating);
 }
 
 inline static int pmix_io_error(pmix_io_engine_t *eng){
-  xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
-  return eng->error;
+	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
+	return eng->error;
 }
 
 void pmix_io_init(pmix_io_engine_t *eng, int fd, pmix_io_engine_header_t header);

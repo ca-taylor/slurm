@@ -231,10 +231,10 @@ static int _peer_read(eio_obj_t *obj, List objs)
 			message_header_t hdr;
 			void *msg = pmix_io_rcvd_extract(eng, &hdr);
 			xassert( hdr.localid == localid );
-//			{
-//				static int delay = 1;
-//				pmix_debug_hang(delay);
-//			}
+			//			{
+			//				static int delay = 1;
+			//				pmix_debug_hang(delay);
+			//			}
 			if( _process_message(hdr, msg) ){
 				break;
 			}
@@ -443,7 +443,7 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 		pmix_io_send_enqueue(eng, rmsg);
 		goto free_message;
 	}
-	// FIXME: Is it blocking? Do we need non-blocking version?
+		// FIXME: Is it blocking? Do we need non-blocking version?
 	case PMIX_GET_CMD:{
 		// Currently we just put the GID of the requested process
 		// in the first 4 bytes of the message
