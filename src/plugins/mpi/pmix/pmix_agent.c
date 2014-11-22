@@ -205,7 +205,7 @@ static void *_agent(void * unused)
 	PMIX_DEBUG("Start agent thread");
 	eio_obj_t *srv_obj, *cli_obj;
 
-	pmix_io_handle = eio_handle_create();
+	pmix_io_handle = eio_handle_create(0);
 
 	//fd_set_nonblocking(tree_sock);
 	srv_obj = eio_obj_create(pmix_info_srv_fd(), &srv_ops, (void *)(-1));
