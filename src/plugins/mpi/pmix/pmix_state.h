@@ -168,6 +168,7 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx);
 bool pmix_state_task_contrib_ok(int idx, bool blocking);
 bool pmix_state_coll_local_ok();
 bool pmix_state_coll_forwad();
+bool pmix_state_coll_sync();
 bool pmix_state_node_contrib_cancel(int idx);
 bool pmix_state_task_contrib_cancel(int idx);
 

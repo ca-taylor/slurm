@@ -513,8 +513,8 @@ inline static void _send_blob_to(uint32_t localid, uint32_t taskid)
 		// the data is stalled
 		// FIXME: In case of non-blocking GET, just reply with ENOENT
 		// or somwthing like that
-		pmix_state_defer_local_req(localid,taskid);
 		pmix_server_dmdx_request(taskid);
+		pmix_state_defer_local_req(localid,taskid);
 		return;
 	}
 	msize = size + sizeof(uint32_t);

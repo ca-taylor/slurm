@@ -108,6 +108,7 @@ static void _forward()
 			PMIX_ERROR_NO(EAGAIN, "Cannot broadcast collective data to childrens");
 			// xassert here?
 		}
+		pmix_state_coll_sync();
 		break;
 	case PMIX_PARENT_SRUN:{
 		int rc;
@@ -282,4 +283,5 @@ void pmix_coll_update_db(void *msg, uint32_t size)
 		}
 	}
 	pmix_db_commit();
+	pmix_state_coll_sync();
 }
