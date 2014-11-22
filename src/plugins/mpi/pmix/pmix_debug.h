@@ -87,11 +87,11 @@
 #ifdef NDEBUG
 #define pmix_debug_hang(x)
 #else
-inline static void
-pmix_debug_hang(int delay){
-  while( delay ){
-    sleep(1);
-  }
+inline static void pmix_debug_hang(int delay)
+{
+	while (delay) {
+		sleep(1);
+	}
 }
 #endif
-#endif // PMIX_DEBUG_H
+#endif				// PMIX_DEBUG_H
