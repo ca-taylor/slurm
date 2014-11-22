@@ -115,7 +115,7 @@ static void _forward()
 				pmix_server_msg_finalize(msg);
 				rc = pmix_srun_send(pmix_info_parent_addr(),size, msg_begin);
 				if( rc != SLURM_SUCCESS ){
-					PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion to my parent (srun)");
+					PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion my portion of  collective data to childrens");
 					// xassert here?
 				}
 				break;
@@ -268,16 +268,18 @@ void pmix_coll_update_db(void *msg, uint32_t size)
 	int i = 0;
 	char *pay = (char*)msg;
 
-	while( i < size ){
-		int taskid = *(int*)pay;
-		pay += sizeof(int);
-		int blob_size = *(int*)pay;
-		pay += sizeof(int);
-		int *blob = xmalloc(blob_size);
-		memcpy(blob, pay, blob_size);
-		pay += blob_size;
-		pmix_db_add_blob(taskid, blob, blob_size );
-		i += blob_size + 2*sizeof(int);
+	if( false == pmix_info_dmdx() ){
+		while( i < size ){
+			int taskid = *(int*)pay;
+			pay += sizeof(int);
+			int blob_size = *(int*)pay;
+			pay += sizeof(int);
+			int *blob = xmalloc(blob_size);
+			memcpy(blob, pay, blob_size);
+			pay += blob_size;
+			pmix_db_add_blob(taskid, blob, blob_size );
+			i += blob_size + 2*sizeof(int);
+		}
 	}
-	pmix_db_update_verify();
+	pmix_db_commit();
 }
