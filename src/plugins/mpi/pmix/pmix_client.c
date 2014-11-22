@@ -505,10 +505,10 @@ free_message:
 inline static void _send_blob_to(uint32_t localid, uint32_t taskid)
 {
 	void *msg, *payload, *blob;
-	uint32_t size, msize, gen;
+	uint32_t size, msize;
 
-	size = pmix_db_get_blob(taskid, &blob, &gen);
-	if( !gen || gen < pmix_state_data_gen() ){
+	size = pmix_db_get_blob(taskid, &blob);
+	if( blob == NULL ){
 		// We don't have information about this task or
 		// the data is stalled
 		// FIXME: In case of non-blocking GET, just reply with ENOENT

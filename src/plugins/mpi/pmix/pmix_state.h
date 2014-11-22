@@ -55,7 +55,6 @@ typedef struct {
 typedef enum { PMIX_COLL_SYNC, PMIX_COLL_GATHER, PMIX_COLL_FORWARD } pmix_coll_state_t;
 
 typedef struct {
-	uint32_t generation;
 	pmix_coll_state_t state;
 	uint32_t local_joined;
 	uint8_t *local_contrib;
@@ -165,20 +164,6 @@ inline static void pmix_state_cli_finalize(uint32_t localid)
  * Database-related information
  */
 
-inline static uint32_t pmix_state_data_gen()
-{
-	pmix_state_sanity_check();
-	return pmix_state.coll.generation;
-}
-
-inline static void pmix_state_data_gen_next()
-{
-	pmix_state.coll.generation++;
-	if( pmix_state.coll.generation == 0 ){
-		PMIX_ERROR_NO(EINVAL, "pmix_info_data_generation_next: generation counter overflow!");
-	}
-}
-
 bool pmix_state_node_contrib_ok(uint32_t gen, int idx);
 bool pmix_state_task_contrib_ok(int idx, bool blocking);
 bool pmix_state_coll_local_ok();
@@ -198,6 +183,7 @@ inline static void pmix_state_task_coll_finish(uint32_t localid)
  * Direct modex
  */
 void pmix_state_defer_local_req(uint32_t localid, uint32_t taskid);
+bool pmix_state_local_reqs_to_posted(uint32_t taskid);
 List pmix_state_local_reqs_to(uint32_t taskid);
 List pmix_state_local_reqs_from(uint32_t localid);
 void pmix_state_defer_remote_req(uint32_t localid, uint32_t nodeid);

@@ -107,8 +107,12 @@ int connect_to_server_usock(char *path)
 	memset(&sa, 0, sizeof(sa));
 	sa.sun_family = AF_UNIX;
 	strcpy(sa.sun_path, path);
-
-	if( ret = connect(fd,(struct sockaddr*) &sa, SUN_LEN(&sa) ) ){
+	while( 1 ){
+		if( !connect(fd,(struct sockaddr*) &sa, SUN_LEN(&sa) ) ){
+		    break;
+		}
+		perror("Cannot connect");
+		sleep(1);
 	}
 	return fd;
 }
@@ -124,6 +128,8 @@ static int pmix_recv_bytes(int fd, char *buf, int size)
 	while( count < size ){
 		int cnt = read(fd, buf + count, size - count);
 		if( cnt < 0 ){
+			fprintf(stderr,"%d: errno = %d, cnt = %d, size = %d, count = %d, fd = %d\n",
+				    jattr.grank, errno, cnt, size, count, fd);
 			perror("read");
 			return -1;
 		}
@@ -194,6 +200,7 @@ int PMIx_Init(int *rank, int *jsize, int *appnum)
 	*rank = jattr.grank;
 	*jsize = jattr.jsize;
 	*appnum = jattr.appnum;
+	fprintf(stderr,"%d: connected, fd = %d\n",jattr.grank, PMI_fd);
 	return 0;
 }
 

@@ -40,6 +40,7 @@
 #include "pmix_debug.h"
 #include "pmix_info.h"
 #include "pmix_state.h"
+#include "pmix_db.h"
 
 pmix_state_t pmix_state;
 // Deferred requests
@@ -54,7 +55,6 @@ void pmix_state_init()
 #ifndef NDEBUG
   pmix_state.magic = PMIX_STATE_MAGIC;
 #endif
-  pmix_state.coll.generation = 0;
   pmix_state.cli_size = pmix_info_ltasks();
   size = pmix_state.cli_size * sizeof(client_state_t);
   pmix_state.cli_state = xmalloc( size );
@@ -83,8 +83,6 @@ static int _coll_new_contrib()
   case PMIX_COLL_SYNC:
     PMIX_DEBUG("Start collective");
     pmix_state.coll.state = PMIX_COLL_GATHER;
-	// Increment generation counter
-	pmix_state_data_gen_next();
   case PMIX_COLL_GATHER:
 	PMIX_DEBUG("New contribution");
     return SLURM_SUCCESS;
@@ -153,7 +151,10 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
     return false;
   }
 
-  if( pmix_state_data_gen() != gen){
+  // If we still in consistent state - add 1 to the next generation counter
+  // It will be updated once
+  uint32_t my_gen = pmix_db_generation_next();
+  if( my_gen != gen){
 	  // TODO: respond with error!
 	  char *p = pmix_info_nth_child_name(idx);
 	  PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
@@ -272,6 +273,23 @@ void pmix_state_defer_local_req(uint32_t dst_lid, uint32_t src_gid)
 	elem->taskid = src_gid;
 	// TODO: use hash table here (key = src_gid)
 	list_enqueue(cli_req,elem);
+}
+
+bool pmix_state_local_reqs_to_posted(uint32_t taskid)
+{
+	bool ret = false;
+	ListIterator i;
+	deferred_t *elem;
+
+	i  = list_iterator_create(cli_req);
+	while ((elem = list_next(i))) {
+		if ( elem->taskid == taskid ) {
+			ret = true;
+			break;
+		}
+	}
+	list_iterator_destroy(i);
+	return ret;
 }
 
 List pmix_state_local_reqs_to(uint32_t taskid)
