@@ -282,6 +282,6 @@ void pmix_coll_update_db(void *msg, uint32_t size)
 			i += blob_size + 2*sizeof(int);
 		}
 	}
-	pmix_db_commit();
 	pmix_state_coll_sync();
+
 }
