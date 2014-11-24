@@ -174,7 +174,7 @@ static int _coll_sync()
 		PMIX_DEBUG("Go to SYNC state");
 		pmix_state.coll.state = PMIX_COLL_SYNC;
 		// Check if we seen new contributions from our childrens
-		if( pmix_state.coll.nodes_contrib > 0 ){
+		if( pmix_state.coll.nodes_joined > 0 ){
 			// Next Fence already started
 
 			// 1. Emulate node contribution (need just one such emulation)
@@ -208,11 +208,7 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 
 	// Initiate new collective only if we are in synced state
 	// Otherwise - just save this contribution
-	if( pmix_state.coll.state == PMIX_COLL_SYNC ){
-		if( !_prepare_new_coll(gen, idx) ){
-			return false;
-		}
-	}else{
+	if( pmix_state.coll.state == PMIX_COLL_FORWARD ){
 		// Check that DB generation matches our expectations.
 		if( gen != pmix_db_generation() + 2) {
 			// TODO: respond with error!
@@ -220,6 +216,10 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 			PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
 					   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
 			xfree(p);
+			return false;
+		}
+	} else {
+		if( !_prepare_new_coll(gen, idx) ){
 			return false;
 		}
 	}

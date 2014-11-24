@@ -283,5 +283,4 @@ void pmix_coll_update_db(void *msg, uint32_t size)
 		}
 	}
 	pmix_state_coll_sync();
-
 }
