@@ -520,7 +520,7 @@ inline static void _send_blob_to(uint32_t localid, uint32_t taskid)
 	msize = size + sizeof(uint32_t);
 	msg = _new_msg(localid, msize, &payload);
 	*(uint32_t*)payload = taskid;
-	memcpy((uint32_t*)payload + 1, blob, msize );
+	memcpy((uint32_t*)payload + 1, blob, size );
 	pmix_io_engine_t *me = pmix_state_cli_io(localid);
 	pmix_io_send_enqueue(me, msg);
 }
