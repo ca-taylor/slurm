@@ -138,6 +138,18 @@ static int pmix_recv_bytes(int fd, char *buf, int size)
 	return 0;
 }
 
+void print_jattr()
+{
+	printf("Job ID %s\n", jattr.jobid);
+	printf("\thost: %s\n", jattr.hname);
+	printf("\ttmpdir = %s\n",jattr.tmpdir);
+	printf("\tlrank = %u\n", jattr.lrank);
+	printf("\tnrank = %u\n", jattr.nrank);
+	printf("\tjob size = %u\n", jattr.jsize);
+	printf("\tlocal size = %u\n", jattr.lsize);
+	printf("\tuniverse size = %u\n",jattr.usize);
+}
+
 int PMIx_Init(int *rank, int *jsize, int *appnum)
 {
 	void *msg, *payload;
@@ -177,7 +189,6 @@ int PMIx_Init(int *rank, int *jsize, int *appnum)
 		return -1;
 	}
 
-	// get job attributes
 	size = 4;
 	msg = _new_msg(lrank, size ,&payload);
 	*(int*)payload = PMIX_GETATTR_CMD;
@@ -204,16 +215,32 @@ int PMIx_Init(int *rank, int *jsize, int *appnum)
 	return 0;
 }
 
-void print_jattr()
+int PMIx_Get_job_attr()
 {
-	printf("Job ID %s\n", jattr.jobid);
-	printf("\thost: %s\n", jattr.hname);
-	printf("\ttmpdir = %s\n",jattr.tmpdir);
-	printf("\tlrank = %u\n", jattr.lrank);
-	printf("\tnrank = %u\n", jattr.nrank);
-	printf("\tjob size = %u\n", jattr.jsize);
-	printf("\tlocal size = %u\n", jattr.lsize);
-	printf("\tuniverse size = %u\n",jattr.usize);
+	void *msg, *payload;
+	message_header_t hdr;
+	// get job attributes
+	int size = 4;
+	msg = _new_msg(jattr.lrank, size ,&payload);
+	*(int*)payload = PMIX_GETATTR_CMD;
+	write(PMI_fd,msg, size + sizeof(message_header_t));
+	free(msg);
+
+	if( pmix_recv_bytes(PMI_fd, (char*)&hdr, sizeof(message_header_t)) ){
+		printf("PMIx_Init: error reading get_attr header\n");
+		return -1;
+	}
+	if( hdr.nbytes != sizeof(jattr) ){
+		printf("PMIx_Init: error get_attr body size mismatch\n");
+		return -1;
+	}
+	if( pmix_recv_bytes(PMI_fd,(char*)&jattr,hdr.nbytes) ){
+		printf("PMIx_Init: error reading get_attr body\n");
+		return -1;
+	}
+
+	print_jattr();
+
 }
 
 int PMIx_Put(char *key, char *val)
@@ -315,7 +342,7 @@ int PMIx_Get(int rank, char *key, char **ptr)
 	}
 	char *p = strstr(proc_blobs[rank],key);
 	if( p == NULL ){
-		printf("PMIx_Get: key %s wasn't found\n", key);
+		printf("PMIx_Get: key %s wasn't found: %s\n", key, proc_blobs[rank]);
 		return -1;
 	}
 	p = strchr(p, '=');
@@ -337,8 +364,6 @@ int main(int argc, char* argv[])
 	int rank, size, appnum;
 	int i = 1;
 	char buf[64];
-
-
 
 	if( PMIx_Init(&rank, &size, &appnum) ){
 		printf("PMIx_Init error\n");
@@ -365,7 +390,18 @@ int main(int argc, char* argv[])
 	sprintf(buf,"My appnum is %d", appnum);
 	PMIx_Put("the-appnum",buf);
 
-	printf("Fence result: %d\n", PMIx_Fence_nb());
+	printf("Fence result: %d\n", PMIx_Fence());
+//	sleep(1);
+
+	for(i=0;i<size;i++){
+		PMIx_Get_job_attr();
+	}
+//	sleep(1);
+
+	printf("Fence result: %d\n", PMIx_Fence());
+
+//	exit(0);
+//A	sleep(1);
 
 	for(i=0;i<size;i++){
 
@@ -379,17 +415,34 @@ int main(int argc, char* argv[])
 		//		}
 		char *ptr;
 		char buf[1024] = "";
-		PMIx_Get(i, "the-rank",&ptr);
+		if( PMIx_Get(i, "the-rank",&ptr) ){
+			printf("PMIx_Get: Fatal error\n");
+			exit(0);
+		}
 		sprintf(buf,"%s%d: the-rank = %s, ", buf, i, ptr);
 		free(ptr);
-		PMIx_Get(i, "the-size",&ptr);
+		if( PMIx_Get(i, "the-size",&ptr) ){
+			printf("PMIx_Get: Fatal error\n");
+			exit(0);
+		}
+
 		sprintf(buf, "%sthe-size = %s, ",buf, ptr);
 		free(ptr);
-		PMIx_Get(i, "the-appnum",&ptr);
+		if( PMIx_Get(i, "the-appnum",&ptr) ){
+			printf("PMIx_Get: Fatal error\n");
+			exit(0);
+		}
 		sprintf(buf, "%sthe-appnum = %s\n", buf, ptr);
 		free(ptr);
 		printf("%s",buf);
 	}
+
+//	sleep(1);
+
+	printf("Fence result: %d\n", PMIx_Fence());
+
+	exit(0);
+
 	return 0;
 }
 
