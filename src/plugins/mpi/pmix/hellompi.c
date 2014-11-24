@@ -400,7 +400,7 @@ int main(int argc, char* argv[])
 
 	printf("Fence result: %d\n", PMIx_Fence());
 
-//	exit(0);
+	exit(0);
 //A	sleep(1);
 
 	for(i=0;i<size;i++){
