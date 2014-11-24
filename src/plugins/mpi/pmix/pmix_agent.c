@@ -162,12 +162,10 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
 	while (1) {
 		// Return early if fd is not now ready
 		if (!pmix_fd_read_ready(obj->fd, &shutdown)){
-			if( shutdown ){
-				// The error occurs or fd was closed
-				if( shutdown < 0 ){
-					obj->shutdown = true;
-					PMIX_ERROR_NO(-shutdown, "sd=%d failure", obj->fd);
-				}
+			// The error occurs or fd was closed
+			if( shutdown < 0 ){
+				obj->shutdown = true;
+				PMIX_ERROR_NO(-shutdown, "sd=%d failure", obj->fd);
 			}
 			return 0;
 		}

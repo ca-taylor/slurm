@@ -89,6 +89,8 @@ void pmix_io_finalize(pmix_io_engine_t *eng, int error)
 	if( !eng->operating ){
 		return;
 	}
+	eng->operating = false;
+
 	// Free transmitter
 	if( list_count(eng->send_queue) ){
 		list_destroy(eng->send_queue);
@@ -120,7 +122,7 @@ void pmix_io_finalize(pmix_io_engine_t *eng, int error)
 	eng->rcvd_payload = NULL;
 	eng->rcvd_hdr_offs = eng->rcvd_pay_offs = 0;
 
-	eng->operating = false;
+
 	if( error < 0 ){
 		eng->error = -error;
 	} else {
@@ -343,6 +345,7 @@ inline static void _send_free_current(pmix_io_engine_t *eng)
 	}
 	eng->send_hdr_size = eng->send_hdr_offs = 0;
 	xfree( eng->send_current );
+	eng->send_current = NULL;
 }
 
 inline static int _send_header_ok(pmix_io_engine_t *eng)
@@ -414,7 +417,6 @@ void pmix_io_send_progress(pmix_io_engine_t *eng)
 
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->operating );
-
 
 	while( pmix_io_send_pending(eng) ){
 		// try to send everything untill fd became blockable

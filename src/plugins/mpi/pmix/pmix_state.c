@@ -76,8 +76,25 @@ void pmix_state_init()
 	memset(pmix_state.coll.nodes_contrib, 0, sizeof(uint8_t) * pmix_info_childs());
 }
 
+static bool _prepare_new_coll(uint32_t gen, int idx)
+{
+	// If we are in synced state - add 1 to the next generation counter
+	// It will be updated once
+	pmix_db_start_update();
+	uint32_t my_gen = pmix_db_generation_next();
+	if( my_gen != gen){
+		// TODO: respond with error!
+		char *p = pmix_info_nth_child_name(idx);
+		PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
+				   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
+		xfree(p);
+		return false;
+	}
+	return true;
+}
+
 // Check events
-static int _coll_new_contrib()
+static int _coll_new_task_contrib()
 {
 	switch( pmix_state.coll.state ){
 	case PMIX_COLL_SYNC:
@@ -87,9 +104,33 @@ static int _coll_new_contrib()
 		PMIX_DEBUG("New contribution");
 		return SLURM_SUCCESS;
 	case PMIX_COLL_FORWARD:
-		// This is not ok. Node shouldn't contribute during forward phase
-		PMIX_ERROR("New contribution during FORWARD phase");
+		// This is not ok. Task shouldn't contribute during forward phase
+		PMIX_ERROR_NO(0,"New task contribution during FORWARD phase");
 		return SLURM_ERROR;
+	default:
+		PMIX_ERROR("pmix_state.coll.state has incomplete value %d", pmix_state.coll.state);
+		xassert( 0 );
+		return SLURM_ERROR;
+	}
+}
+
+// Check events
+static int _coll_new_node_contrib()
+{
+	switch( pmix_state.coll.state ){
+	case PMIX_COLL_SYNC:
+		PMIX_DEBUG("Start collective");
+		pmix_state.coll.state = PMIX_COLL_GATHER;
+	case PMIX_COLL_GATHER:
+		PMIX_DEBUG("New contribution");
+		return SLURM_SUCCESS;
+	case PMIX_COLL_FORWARD:
+		// Node might contribute during forward phase. This may happen if our children receives
+		// broadcast from the srun before us and somehow enters next Fence while this node
+		// still waiting for the previous Fence result.
+		// The reason is that upward and downward flows are implemented differently.
+		PMIX_DEBUG("NOTE: New node contribution during FORWARD phase");
+		return SLURM_SUCCESS;
 	default:
 		PMIX_ERROR("pmix_state.coll.state has incomplete value %d", pmix_state.coll.state);
 		xassert( 0 );
@@ -121,6 +162,7 @@ static int _coll_forward()
 // Check events
 static int _coll_sync()
 {
+	pmix_db_commit();
 	switch( pmix_state.coll.state ){
 	case PMIX_COLL_SYNC:
 		PMIX_ERROR("SYNC phase is already enabled");
@@ -131,6 +173,19 @@ static int _coll_sync()
 	case PMIX_COLL_FORWARD:
 		PMIX_DEBUG("Go to SYNC state");
 		pmix_state.coll.state = PMIX_COLL_SYNC;
+		// Check if we seen new contributions from our childrens
+		if( pmix_state.coll.nodes_contrib > 0 ){
+			// Next Fence already started
+
+			// 1. Emulate node contribution (need just one such emulation)
+			if( SLURM_SUCCESS != _coll_new_node_contrib() ){
+				return SLURM_ERROR;
+			}
+			// 2. Prepare database to the next collective
+			if( !_prepare_new_coll(pmix_db_generation()+1,0) ){
+				return SLURM_ERROR;
+			}
+		}
 		return SLURM_SUCCESS;
 	default:
 		PMIX_ERROR("pmix_state.coll.state has incomplete value %d", pmix_state.coll.state);
@@ -142,7 +197,7 @@ static int _coll_sync()
 bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 {
 	// Check state consistence
-	if( _coll_new_contrib() ){
+	if( _coll_new_node_contrib() ){
 		// TODO: respond with error!
 		char *p = pmix_info_nth_child_name(idx);
 		PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]",
@@ -151,16 +206,22 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 		return false;
 	}
 
-	// If we still in consistent state - add 1 to the next generation counter
-	// It will be updated once
-	uint32_t my_gen = pmix_db_generation_next();
-	if( my_gen != gen){
-		// TODO: respond with error!
-		char *p = pmix_info_nth_child_name(idx);
-		PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
-				   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
-		xfree(p);
-		return false;
+	// Initiate new collective only if we are in synced state
+	// Otherwise - just save this contribution
+	if( pmix_state.coll.state == PMIX_COLL_SYNC ){
+		if( !_prepare_new_coll(gen, idx) ){
+			return false;
+		}
+	}else{
+		// Check that DB generation matches our expectations.
+		if( gen != pmix_db_generation() + 2) {
+			// TODO: respond with error!
+			char *p = pmix_info_nth_child_name(idx);
+			PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
+					   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
+			xfree(p);
+			return false;
+		}
 	}
 
 	if( pmix_state.coll.nodes_contrib[idx] ){
@@ -180,17 +241,20 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 bool pmix_state_task_contrib_ok(int idx, bool blocking)
 {
 	// Check state consistence
-	if( _coll_new_contrib() ){
+	if( _coll_new_task_contrib() ){
 		PMIX_ERROR("%s [%d]: Inconsistent contribution from task %d",
 				   pmix_info_this_host(), pmix_info_nodeid(), pmix_info_task_id(idx) );
 		return false;
 	}
+
+	pmix_db_start_update();
 
 	if( pmix_state.coll.local_contrib[idx] ){
 		PMIX_ERROR("%s [%d]: Task %d already contributed to the collective",
 				   pmix_info_this_host(), pmix_info_nodeid(), pmix_info_task_id(idx) );
 		return false;
 	}
+
 	if( blocking ){
 		pmix_state.cli_state[idx].state = PMIX_CLI_COLL;
 	} else {
