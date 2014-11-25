@@ -390,17 +390,17 @@ int main(int argc, char* argv[])
 	sprintf(buf,"My appnum is %d", appnum);
 	PMIx_Put("the-appnum",buf);
 
-	printf("Fence result: %d\n", PMIx_Fence());
+//	printf("Fence result: %d\n", PMIx_Fence());
 //	sleep(1);
 
-	for(i=0;i<size;i++){
-		PMIx_Get_job_attr();
-	}
+//	for(i=0;i<size;i++){
+//		PMIx_Get_job_attr();
+//	}
 //	sleep(1);
 
 	printf("Fence result: %d\n", PMIx_Fence());
 
-	exit(0);
+//	exit(0);
 //A	sleep(1);
 
 	for(i=0;i<size;i++){
