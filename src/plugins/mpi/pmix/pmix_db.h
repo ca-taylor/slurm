@@ -91,13 +91,15 @@ static inline uint32_t pmix_db_generation_next(){
 }
 
 static inline uint32_t pmix_db_consistent(){
-	return (pmix_db.next_gen && (pmix_db.cur_gen == pmix_db.next_gen));
+	return (pmix_db.cur_gen == pmix_db.next_gen);
 }
 
 static inline void pmix_db_start_update()
 {
 	if( pmix_db_consistent() ){
 		pmix_db.next_gen++;
+		PMIX_DEBUG("DB: current = %d, next = %d",
+				   pmix_db.cur_gen, pmix_db.next_gen);
 	}
 }
 
@@ -124,6 +126,9 @@ static inline void pmix_db_commit()
 	}
 	// Move entire database forward
 	pmix_db.cur_gen = pmix_db.next_gen;
+	PMIX_DEBUG("DB: current = %d, next = %d",
+			   pmix_db.cur_gen, pmix_db.next_gen);
+
 }
 
 static inline void pmix_db_add_blob(int taskid, void *blob, int size)
