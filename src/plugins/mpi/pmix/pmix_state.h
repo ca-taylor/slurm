@@ -183,12 +183,20 @@ inline static void pmix_state_task_coll_finish(uint32_t localid)
 /*
  * Direct modex
  */
-void pmix_state_defer_local_req(uint32_t localid, uint32_t taskid);
-bool pmix_state_local_reqs_to_posted(uint32_t taskid);
-List pmix_state_local_reqs_to(uint32_t taskid);
-List pmix_state_local_reqs_from(uint32_t localid);
-void pmix_state_defer_remote_req(uint32_t localid, uint32_t nodeid);
-List pmix_state_remote_reqs_to(uint32_t localid);
-int pmix_state_remote_reqs_to_cnt(uint32_t localid);
+
+// DMDX requests tracking
+bool pmix_state_remote_sent(uint32_t taskid);
+void pmix_state_remote_received(uint32_t taskid);
+
+// Client interest in blob tracking
+void pmix_state_remote_wait(uint32_t localid, uint32_t taskid);
+List pmix_state_remote_to(uint32_t taskid);
+List pmix_state_remote_from(uint32_t localid);
+
+// Requests to local data tracking
+void pmix_state_local_defer(uint32_t src_lid, uint32_t nodeid);
+int pmix_state_local_reqs_cnt(uint32_t localid);
+List pmix_state_local_reqs_to(uint32_t localid);
+
 
 #endif // STATE_H
