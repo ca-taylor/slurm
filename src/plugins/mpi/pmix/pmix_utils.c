@@ -49,7 +49,7 @@
 #include "pmix_utils.h"
 #include "pmix_debug.h"
 
-#define PMIX_MAX_RETRY 10
+#define PMIX_MAX_RETRY 7
 
 void pmix_xfree_buffer(void *x){
 	xfree(x);

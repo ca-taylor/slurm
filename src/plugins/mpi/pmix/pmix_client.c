@@ -457,12 +457,6 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 			goto free_message;
 		}
 
-		if( inconsistent ){
-			// Save that local cli asked about this task
-			pmix_state_defer_local_req(hdr.localid,taskid);
-			break;
-		}
-
 		_send_blob_to(hdr.localid, taskid);
 		goto free_message;
 	}
@@ -502,26 +496,32 @@ free_message:
 	return rc;
 }
 
-inline static void _send_blob_to(uint32_t localid, uint32_t taskid)
+inline static void _send_blob_to(uint32_t to_localid, uint32_t taskid)
 {
 	void *msg, *payload, *blob;
 	uint32_t size, msize;
 
 	size = pmix_db_get_blob(taskid, &blob);
 	if( blob == NULL ){
-		// We don't have information about this task or
-		// the data is stalled
-		// FIXME: In case of non-blocking GET, just reply with ENOENT
-		// or somwthing like that
-		pmix_server_dmdx_request(taskid);
-		pmix_state_defer_local_req(localid,taskid);
+		// We don't have information about this task
+		if( pmix_state_cli(to_localid) == PMIX_CLI_OPERATE ){
+			// If we are operating - we are in direct modex mode => send request
+			PMIX_DEBUG("Blob not found: localid=%d, taskid=%d, state=%d (send request)",
+					   to_localid, taskid, pmix_state_cli(to_localid));
+			pmix_server_dmdx_request(to_localid, taskid);
+		} else {
+			PMIX_DEBUG("Blob not found: localid=%d, taskid=%d, state=%d (wait till fence end)",
+					   to_localid, taskid, pmix_state_cli(to_localid));
+		}
+		// Save that localid was interested in taskid
+		pmix_state_remote_wait(to_localid,taskid);
 		return;
 	}
 	msize = size + sizeof(uint32_t);
-	msg = _new_msg(localid, msize, &payload);
+	msg = _new_msg(to_localid, msize, &payload);
 	*(uint32_t*)payload = taskid;
 	memcpy((uint32_t*)payload + 1, blob, size );
-	pmix_io_engine_t *me = pmix_state_cli_io(localid);
+	pmix_io_engine_t *me = pmix_state_cli_io(to_localid);
 	pmix_io_send_enqueue(me, msg);
 }
 
@@ -534,7 +534,10 @@ void pmix_client_fence_notify()
 	// This will work for both blocking and non-blocking fence
 	// By now we only send ones to all clients
 	for(localid = 0; localid < pmix_info_ltasks(); localid++){
-		if( pmix_state_cli(localid) == PMIX_CLI_COLL ){
+		pmix_cli_state_t state = pmix_state_cli(localid);
+		pmix_state_task_coll_finish(localid);
+		pmix_server_dmdx_notify(localid);
+		if( state == PMIX_CLI_COLL ){
 			// Client is waiting for notification that collective
 			// is finished.
 			int *payload;
@@ -542,34 +545,39 @@ void pmix_client_fence_notify()
 			pmix_io_engine_t *me = pmix_state_cli_io(localid);
 			*payload = 0;
 			pmix_io_send_enqueue(me, msg);
-		} else if( pmix_state_cli(localid) == PMIX_CLI_COLL_NB ){
+		} else if( state == PMIX_CLI_COLL_NB ){
 			// Client might already send us request about some tasks.
 			// Reply to them.
-			List requests = pmix_state_local_reqs_from(localid);
+			PMIX_DEBUG("Deal with non-blocking fence response for %d", localid);
+			List requests = pmix_state_remote_from(localid);
 			if( list_count(requests) ){
 				int *taskid;
 				while ( (taskid = list_dequeue(requests)) ) {
+					// If we are in direct modex mode we won't send anything
+					// we will send the request and resubmit them into queue
+					PMIX_DEBUG("Send %d data about %d", localid, *taskid);
 					_send_blob_to(localid, *taskid);
 					xfree(taskid);
 				}
 			}
 			list_destroy(requests);
 		}
-		pmix_state_task_coll_finish(localid);
 	}
 }
 
 void pmix_client_taskid_reply(uint32_t taskid)
 {
 	int *localid;
-	List requests = pmix_state_local_reqs_to(taskid);
+	List requests = pmix_state_remote_to(taskid);
 	if( list_count(requests) == 0 ){
-		list_destroy(requests);
-		return;
+		goto exit;
 	}
 
 	while( (localid = list_dequeue(requests)) ){
 		_send_blob_to(*localid,taskid);
 		xfree(localid);
 	}
+
+exit:
+	list_destroy(requests);
 }

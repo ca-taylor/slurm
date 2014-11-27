@@ -48,10 +48,13 @@ int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
 void pmix_server_new_conn(int fd);
 
 void *pmix_server_alloc_msg(uint32_t size, void **payload);
+void *pmix_server_alloc_msg_next(uint32_t size, void **payload);
+
 void pmix_server_msg_setcmd(void *msg, pmix_srv_cmd_t cmd);
 void pmix_server_msg_finalize(void *msg);
 uint32_t pmix_server_msg_size(void *msg);
 void *pmix_server_msg_start(void *msg);
-void pmix_server_dmdx_request(uint32_t gid);
+void pmix_server_dmdx_request(uint32_t localid, uint32_t taskid);
+void pmix_server_dmdx_notify(uint32_t localid);
 
 #endif // SERVER_H

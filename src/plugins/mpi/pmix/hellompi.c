@@ -398,7 +398,8 @@ int main(int argc, char* argv[])
 //	}
 //	sleep(1);
 
-	printf("Fence result: %d\n", PMIx_Fence());
+//	printf("Fence result: %d\n", PMIx_Fence());
+	printf("Fence result: %d\n", PMIx_Fence_nb());
 
 //	exit(0);
 //A	sleep(1);
@@ -439,7 +440,7 @@ int main(int argc, char* argv[])
 
 //	sleep(1);
 
-	printf("Fence result: %d\n", PMIx_Fence());
+	printf("Fence result: %d\n", PMIx_Fence_nb());
 
 	exit(0);
 

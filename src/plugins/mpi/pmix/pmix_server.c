@@ -246,7 +246,23 @@ void *pmix_server_alloc_msg(uint32_t size, void **payload)
 	send_header_t *hdr = msg;
 
 	hdr->magic = PMIX_SERVER_MSG_MAGIC;
-	hdr->gen = pmix_db_generation();
+	hdr->gen = 	pmix_db_generation();
+	hdr->nodeid = pmix_info_nodeid();
+	hdr->paysize = size;
+	*payload = (char*)msg + payload_offs;
+	return msg;
+}
+
+void *pmix_server_alloc_msg_next(uint32_t size, void **payload)
+{
+	uint32_t payload_offs = sizeof(send_header_t) + SEND_HDR_SIZE;
+	// Allocate more space than need to save unpacked header too
+	void *msg = xmalloc(payload_offs + size);
+	send_header_t *hdr = msg;
+
+	hdr->magic = PMIX_SERVER_MSG_MAGIC;
+	// This may be request with non-blocking fence.
+	hdr->gen = 	pmix_db_generation_next();
 	hdr->nodeid = pmix_info_nodeid();
 	hdr->paysize = size;
 	*payload = (char*)msg + payload_offs;
@@ -379,7 +395,7 @@ int _get_taskid(void *payload, uint32_t *taskid)
 }
 
 
-void pmix_server_dmdx_request(uint32_t taskid)
+void pmix_server_dmdx_request(uint32_t localid, uint32_t taskid)
 {
 	int size = sizeof(uint32_t);
 	int rc;
@@ -387,10 +403,14 @@ void pmix_server_dmdx_request(uint32_t taskid)
 	char *host;
 	uint32_t nodeid;
 
-	if( pmix_state_local_reqs_to_posted(taskid) ){
+	PMIX_DEBUG("from %d to %d", localid, taskid);
+
+	if( pmix_state_remote_sent(taskid) ){
 		// Request was already send. Nothing to do
+		PMIX_DEBUG("Already have request for taskid=%d ...", taskid);
 		return;
 	}
+
 	msg = pmix_server_alloc_msg(size, &payload);
 	//offset = _put_taskid(payload, taskid);
 	_put_taskid(payload, taskid);
@@ -420,11 +440,10 @@ void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 
 	taskid = pmix_info_task_id(localid);
 	size = pmix_db_get_blob(taskid, &blob);
-	if( blob == NULL ){
-		// We do not have information about this task yet
-		pmix_state_defer_remote_req(localid, nodeid);
-		return;
-	}
+
+	// If we have the DB of proper generation we MUST have the blob.
+	xassert( blob != NULL );
+
 	msg = pmix_server_alloc_msg(size + sizeof(uint32_t), &payload);
 	offset = _put_taskid(payload, taskid);
 	memcpy((char*)payload + offset, blob, size);
@@ -459,13 +478,23 @@ void _process_dmdx_request(send_header_t *hdr, void *payload)
 		// TODO: respond with the error
 		return;
 	}
+
+	char *node = pmix_info_nth_host_name(hdr->nodeid);
+	PMIX_DEBUG("Get DMDX request from %d (%s) on the task %d(%d), DB generation: %d",
+			   hdr->nodeid, node, taskid, localid, hdr->gen);
+	xfree(node);
+
+	// More sophisticated DB generations scheme is needed.
+	// Will need to fix this in future.
 	if( hdr->gen == pmix_db_generation() ){
 		// We have the same DB generation. Respond now
+		PMIX_DEBUG("DMDX request: reply immediately");
 		_dmdx_reply_to_node(localid, hdr->nodeid);
 	} else if( hdr->gen == (pmix_db_generation() + 1) ){
-		// The client is one step hared. Wait when we will reach it.
-		pmix_state_defer_remote_req(localid, hdr->nodeid);
-	} else if( hdr->gen > pmix_db_generation()){
+		// The client is one step ahared. Wait until we reach it too.
+		PMIX_DEBUG("DMDX request: defer response");
+		pmix_state_local_defer(localid, hdr->nodeid);
+	} else if( hdr->gen > pmix_db_generation() + 1){
 		// The client is more than one step ahared. Can this happen?
 		// Maybe if we will do more complex collective scopes in future.
 		PMIX_ERROR_NO(0,"Get DMDX request from the _future_: our generation = %d,"
@@ -493,6 +522,8 @@ int _dmdx_response(send_header_t *hdr, void *payload)
 	blob_copy = xmalloc( size );
 	memcpy(blob_copy, blob, size);
 	pmix_db_dmdx_add_blob(hdr->gen, taskid,blob_copy,size);
+	// Mark DMDX request as completed
+	pmix_state_remote_received(taskid);
 	// Reply to the clients
 	pmix_client_taskid_reply(taskid);
 	return SLURM_SUCCESS;
@@ -502,14 +533,13 @@ void pmix_server_dmdx_notify(uint32_t localid)
 {
 	uint32_t *nodeid;
 	List requests;
-	if( !pmix_state_remote_reqs_to_cnt(localid) ){
+	if( !pmix_state_local_reqs_cnt(localid) ){
 		// there was no requests to this task
 		return;
 	}
-	requests = pmix_state_remote_reqs_to(localid);
+	requests = pmix_state_local_reqs_to(localid);
 	while( (nodeid = list_dequeue(requests)) ){
 		_dmdx_reply_to_node(localid, *nodeid);
 		xfree(nodeid);
 	}
-
 }
