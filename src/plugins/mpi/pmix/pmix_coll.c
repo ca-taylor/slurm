@@ -65,7 +65,8 @@ char *_pack_the_data()
 	}
 
 	char *payload;
-	char *msg = pmix_server_alloc_msg( cum_size , (void**)&payload);
+	// Put zero generation. Targets would be able to figure out the proper value.
+	char *msg = pmix_server_alloc_msg_next(cum_size, (void**)&payload);
 
 	for(i = 0; i < pmix_info_childs(); i++ ){
 		memcpy(payload, node_data[i], node_sizes[i]);
