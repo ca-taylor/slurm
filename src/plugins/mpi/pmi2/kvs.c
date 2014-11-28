@@ -93,9 +93,9 @@ _hash(char *key)
 	uint8_t shift;
 
 	len = strlen(key);
-	for (i = 0; i < len; i++) {
-		shift = (uint8_t) (hash >> 24);
-		hash = (hash << 8) | (uint32_t) (shift ^ (uint8_t) key[i]);
+	for (i = 0; i < len; i ++) {
+		shift = (uint8_t)(hash >> 24);
+		hash = (hash << 8) | (uint32_t) (shift ^ (uint8_t)key[i]);
 	}
 	return hash;
 }
