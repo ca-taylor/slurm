@@ -219,7 +219,8 @@ resp:
 	if( frame_cnt == (frame_seq + 1) ){
 		send_kvs_fence_resp_to_clients(rc, errmsg);
 		if (rc != SLURM_SUCCESS) {
-			slurm_kill_job_step(job_info.jobid, job_info.stepid, SIGKILL);
+			slurm_kill_job_step(job_info.jobid,
+					    job_info.stepid, SIGKILL);
 		}
 	}
 	return rc;
