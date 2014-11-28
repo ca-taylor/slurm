@@ -393,7 +393,8 @@ extern int kvs_init(void)
 /*
  * returned value is not dup-ed
  */
-extern char *kvs_get(char *key)
+extern char *
+kvs_get(char *key)
 {
 	kvs_bucket_t *bucket;
 	char *val = NULL;
@@ -416,7 +417,8 @@ extern char *kvs_get(char *key)
 	return val;
 }
 
-extern int kvs_put(char *key, char *val)
+extern int
+kvs_put(char *key, char *val)
 {
 	kvs_bucket_t *bucket;
 	int i;
@@ -450,7 +452,8 @@ extern int kvs_put(char *key, char *val)
 	return SLURM_SUCCESS;
 }
 
-extern int kvs_clear(void)
+extern int
+kvs_clear(void)
 {
 	kvs_bucket_t *bucket;
 	int i, j;
