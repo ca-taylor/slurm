@@ -4,6 +4,10 @@
  *  Copyright (C) 2011-2012 National University of Defense Technology.
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
+ *  Portions copyright (C) 2014 Institute of Semiconductor Physics
+ *                     Siberian Branch of Russian Academy of Science
+ *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -48,7 +52,7 @@
 /* for fence */
 int tasks_to_wait = 0;
 int children_to_wait = 0;
-int kvs_seq = 1; /* starting from 1 */
+int kvs_seq = 1;		/* starting from 1 */
 int waiting_kvs_resp = 0;
 
 
@@ -62,9 +66,14 @@ typedef struct kvs_bucket {
 static kvs_bucket_t *kvs_hash = NULL;
 static uint32_t hash_size = 0;
 
-static char *temp_kvs_buf = NULL;
-static int temp_kvs_cnt = 0;
-static int temp_kvs_size = 0;
+typedef struct {
+	char *buf;
+	int payload;
+	int size;
+} temp_kvs_buf_t;
+static List temp_kvs_buffers;
+static int max_msg_size = MAX_PACK_MEM_LEN;
+static int buf_offset = 0;
 
 static int no_dup_keys = 0;
 
@@ -75,6 +84,7 @@ static int no_dup_keys = 0;
 #define VAL_INDEX(i) (i * 2 + 1)
 #define HASH(key) ( _hash(key) % hash_size)
 
+
 inline static uint32_t
 _hash(char *key)
 {
@@ -83,25 +93,38 @@ _hash(char *key)
 	uint8_t shift;
 
 	len = strlen(key);
-	for (i = 0; i < len; i ++) {
-		shift = (uint8_t)(hash >> 24);
-		hash = (hash << 8) | (uint32_t)(shift ^ (uint8_t)key[i]);
+	for (i = 0; i < len; i++) {
+		shift = (uint8_t) (hash >> 24);
+		hash = (hash << 8) | (uint32_t) (shift ^ (uint8_t) key[i]);
 	}
 	return hash;
 }
 
-extern int
-temp_kvs_init(void)
+
+inline static void
+_temp_kvs_buf_free(void *buf)
+{
+	temp_kvs_buf_t *elem = buf;
+	xfree(elem->buf);
+	xfree(buf);
+}
+
+inline static void
+_temp_kvs_buf_new()
+{
+	temp_kvs_buf_t *elem = xmalloc(sizeof(*elem));
+	elem->buf = xmalloc(TEMP_KVS_SIZE_INC);
+	// Reserve the space for the header (will be packed later)
+	elem->payload = buf_offset;
+	elem->size = TEMP_KVS_SIZE_INC;
+	list_push(temp_kvs_buffers, elem);
+}
+
+static inline int
+_pack_header(Buf buf, uint32_t seq, uint32_t size)
 {
 	uint16_t cmd;
-	uint32_t nodeid, num_children, size;
-	Buf buf = NULL;
-
-	xfree(temp_kvs_buf);
-	temp_kvs_cnt = 0;
-	temp_kvs_size = TEMP_KVS_SIZE_INC;
-	temp_kvs_buf = xmalloc(temp_kvs_size);
-
+	uint32_t nodeid, num_children;
 	/* put the tree cmd here to simplify message sending */
 	if (in_stepd()) {
 		cmd = TREE_CMD_KVS_FENCE;
@@ -109,32 +132,159 @@ temp_kvs_init(void)
 		cmd = TREE_CMD_KVS_FENCE_RESP;
 	}
 
-	buf = init_buf(1024);
 	pack16(cmd, buf);
+	pack32(size, buf);
+	pack32(seq, buf);
 	if (in_stepd()) {
 		nodeid = job_info.nodeid;
 		/* XXX: TBC */
 		num_children = tree_info.num_children + 1;
 
-		pack32((uint32_t)nodeid, buf); /* from_nodeid */
-		packstr(tree_info.this_node, buf); /* from_node */
-		pack32((uint32_t)num_children, buf); /* num_children */
+		pack32((uint32_t) nodeid, buf);	/* from_nodeid */
+		packstr(tree_info.this_node, buf);	/* from_node */
+		pack32((uint32_t) num_children, buf);	/* num_children */
 		pack32(kvs_seq, buf);
 	} else {
 		pack32(kvs_seq, buf);
 	}
-	size = get_buf_offset(buf);
-	if (temp_kvs_cnt + size > temp_kvs_size) {
-		temp_kvs_size += TEMP_KVS_SIZE_INC;
-		xrealloc(temp_kvs_buf, temp_kvs_size);
+	return SLURM_SUCCESS;
+}
+
+inline static temp_kvs_buf_t*
+_temp_kvs_buf_inc(temp_kvs_buf_t * elem, uint32_t size)
+{
+	// Switch to the new buffer if nessesary
+	if ((elem->payload + size) >= max_msg_size) {
+		list_push(temp_kvs_buffers, elem);
+		// Switch to the new one
+		_temp_kvs_buf_new();
+		elem = list_pop(temp_kvs_buffers);
 	}
-	memcpy(&temp_kvs_buf[temp_kvs_cnt], get_buf_data(buf), size);
-	temp_kvs_cnt += size;
-	free_buf(buf);
+	// Increase buffer if nessesary
+	if (elem->payload + size > elem->size) {
+		while (elem->payload + size > elem->size) {
+			elem->size += TEMP_KVS_SIZE_INC;
+		}
+		xrealloc(elem->buf, elem->size);
+	}
+	return elem;
+}
+
+inline static void
+_temp_kvs_buf_add_size(Buf buf, uint32_t size)
+{
+	temp_kvs_buf_t *elem = list_pop(temp_kvs_buffers);
+	char *data = NULL;
+	data = (char *) get_buf_data(buf);
+	data += get_buf_offset(buf);
+
+	if (elem->payload + size > elem->size) {
+		elem = _temp_kvs_buf_inc(elem, size);
+	}
+	memcpy(elem->buf + elem->payload, data, size);
+	elem->payload += size;
+	list_push(temp_kvs_buffers, elem);
+}
+
+inline static void
+_temp_kvs_buf_add(Buf buf)
+{
+	_temp_kvs_buf_add_size(buf, remaining_buf(buf));
+}
+
+static inline bool
+_temp_kvs_try_merge(temp_kvs_buf_t * elem, temp_kvs_buf_t * elem2)
+{
+	int32_t size = elem2->payload - buf_offset;
+	if ((elem->payload + size) < max_msg_size) {
+		// merge buffer payloads
+		char *data = elem2->buf + buf_offset;
+		if (elem->size < elem->payload + size) {
+			xrealloc(elem->buf, elem->payload + size);
+			elem->size = elem->payload + size;
+		}
+		memcpy(elem->buf + elem->payload, data, size);
+		elem->payload += size;
+		return true;
+	}
+	return false;
+}
+
+inline static void
+_temp_kvs_buf_finalize()
+{
+	temp_kvs_buf_t *elem;
+	List tmp;
+	int frame_seq = 0, frame_cnt = 0;
+
+	frame_seq = list_count(temp_kvs_buffers);
+	// Change from stack order to the queue one
+	// And merge small messages together
+	tmp = list_create(_temp_kvs_buf_free);
+	while ((elem = list_pop(temp_kvs_buffers))) {
+		// if the message is bigger than 90% of possible size - it's OK
+		uint32_t treshold = (int) (max_msg_size * 0.9);
+		if (elem->payload < treshold) {
+			// try to merge it with other elements
+			ListIterator iter =
+			    list_iterator_create(temp_kvs_buffers);
+			temp_kvs_buf_t *elem2;
+			while ((elem2 = list_next(iter))
+			       && elem->payload < treshold) {
+				if (_temp_kvs_try_merge(elem, elem2)) {
+					list_delete_item(iter);
+				}
+			}
+			list_iterator_destroy(iter);
+		}
+		list_push(tmp, elem);
+	}
+
+	// Setup message headers in the frames
+	frame_cnt = list_count(tmp);
+	debug("Reduce number of messages from %d to %d",
+	      frame_seq, frame_cnt);
+	frame_seq = 0;
+	while ((elem = list_dequeue(tmp))) {
+		Buf buf = create_buf(elem->buf, elem->size);
+		_pack_header(buf, frame_seq, frame_cnt);
+		list_enqueue(temp_kvs_buffers, elem);
+		frame_seq++;
+	}
+	list_destroy(tmp);
+}
+
+static inline int
+_temp_kvs_reset(void)
+{
+	list_flush(temp_kvs_buffers);
+	_temp_kvs_buf_new();
 
 	tasks_to_wait = 0;
 	children_to_wait = 0;
 
+	return SLURM_SUCCESS;
+}
+
+
+extern int
+temp_kvs_init()
+{
+	temp_kvs_buffers = list_create(_temp_kvs_buf_free);
+	// Estimate the header offset
+	Buf buf = init_buf(1024);
+	_pack_header(buf, 0, 1);
+	buf_offset = get_buf_offset(buf);
+	free_buf(buf);
+	// Reset the buffers
+	_temp_kvs_reset();
+	return SLURM_SUCCESS;
+}
+
+extern int
+temp_kvs_merge(Buf buf)
+{
+	_temp_kvs_buf_add(buf);
 	return SLURM_SUCCESS;
 }
 
@@ -144,93 +294,93 @@ temp_kvs_add(char *key, char *val)
 	Buf buf;
 	uint32_t size;
 
-	if ( key == NULL || val == NULL )
+	if (key == NULL || val == NULL)
 		return SLURM_SUCCESS;
-
-	buf = init_buf(PMI2_MAX_KEYLEN + PMI2_MAX_VALLEN + 2 * sizeof(uint32_t));
+	buf =
+	    init_buf(PMI2_MAX_KEYLEN + PMI2_MAX_VALLEN +
+		     2 * sizeof(uint32_t));
 	packstr(key, buf);
 	packstr(val, buf);
 	size = get_buf_offset(buf);
-	if (temp_kvs_cnt + size > temp_kvs_size) {
-		temp_kvs_size += TEMP_KVS_SIZE_INC;
-		xrealloc(temp_kvs_buf, temp_kvs_size);
-	}
-	memcpy(&temp_kvs_buf[temp_kvs_cnt], get_buf_data(buf), size);
-	temp_kvs_cnt += size;
-	free_buf(buf);
-
+	set_buf_offset(buf, 0);
+	_temp_kvs_buf_add_size(buf, size);
 	return SLURM_SUCCESS;
 }
 
-extern int
-temp_kvs_merge(Buf buf)
+static int
+_send_reliable(char *buf, uint32_t size)
 {
-	char *data;
-	uint32_t offset, size;
-
-	size = remaining_buf(buf);
-	if (size == 0) {
-		return SLURM_SUCCESS;
-	}
-	data = get_buf_data(buf);
-	offset = get_buf_offset(buf);
-
-	if (temp_kvs_cnt + size > temp_kvs_size) {
-		temp_kvs_size += size;
-		xrealloc(temp_kvs_buf, temp_kvs_size);
-	}
-	memcpy(&temp_kvs_buf[temp_kvs_cnt], &data[offset], size);
-	temp_kvs_cnt += size;
-
-	return SLURM_SUCCESS;
-}
-
-extern int
-temp_kvs_send(void)
-{
-	int rc = SLURM_ERROR, retry = 0;
-	unsigned int delay = 1;
-
-	/* cmd included in temp_kvs_buf */
-	kvs_seq ++; /* expecting new kvs after now */
-
+	int rc = SLURM_ERROR;
+	unsigned int delay = 1, retry = 0;
 	while (1) {
 		if (retry == 1) {
-			verbose("failed to send temp kvs, rc=%d, retrying", rc);
+			verbose("failed to send temp kvs"
+				", rc=%d, retrying", rc);
 		}
-		if (! in_stepd()) {	/* srun */
+		if (!in_stepd()) {	/* srun */
 			rc = tree_msg_to_stepds(job_info.step_nodelist,
-						temp_kvs_cnt,
-						temp_kvs_buf);
+						size, buf);
 		} else if (tree_info.parent_node != NULL) {
 			/* non-first-level stepds */
 			rc = tree_msg_to_stepds(tree_info.parent_node,
-						temp_kvs_cnt,
-						temp_kvs_buf);
-		} else {		/* first level stepds */
-			rc = tree_msg_to_srun(temp_kvs_cnt, temp_kvs_buf);
+						size, buf);
+		} else {	/* first level stepds */
+			rc = tree_msg_to_srun(size, buf);
 		}
-		if (rc == SLURM_SUCCESS)
+		if (SLURM_SUCCESS == rc)
 			break;
-		retry ++;
-		if (retry >= MAX_RETRIES)
+		retry++;
+		if (MAX_RETRIES <= retry)
 			break;
 		/* wait, in case parent stepd / srun not ready */
 		sleep(delay);
 		delay *= 2;
 	}
-	temp_kvs_init();	/* clear old temp kvs */
+	return rc;
+}
+
+extern int
+temp_kvs_send(void)
+{
+	int rc = SLURM_ERROR;
+	ListIterator iter;
+	temp_kvs_buf_t *elem;
+	// here - for logging only
+	uint32_t frame_seq = 0, frame_cnt;
+
+	_temp_kvs_buf_finalize();
+
+	/* cmd included in temp_kvs_buf */
+	kvs_seq++;		/* expecting new kvs after now */
+
+	// Iterate over all database parts and send them one by one
+	iter = list_iterator_create(temp_kvs_buffers);
+	frame_cnt = list_count(temp_kvs_buffers);
+	while ((elem = list_next(iter))) {
+		rc = _send_reliable(elem->buf, elem->payload);
+		if (SLURM_SUCCESS != rc) {
+			// Were unable to send DB part
+			verbose("completely failed to send temp kvs"
+				"[%d/%d], rc=%d",
+				frame_seq, frame_cnt, rc);
+			break;
+		}
+		frame_seq++;
+	}
+	list_iterator_destroy(iter);
+
+	_temp_kvs_reset();	/* clear old temp kvs */
 	return rc;
 }
 
 /**************************************************************/
 
-extern int
-kvs_init(void)
+extern int kvs_init(void)
 {
 	debug3("mpi/pmi2: in kvs_init");
 
-	hash_size = ((job_info.ntasks + TASKS_PER_BUCKET - 1) / TASKS_PER_BUCKET);
+	hash_size =
+	    ((job_info.ntasks + TASKS_PER_BUCKET - 1) / TASKS_PER_BUCKET);
 
 	kvs_hash = xmalloc(hash_size * sizeof(kvs_bucket_t));
 
@@ -243,8 +393,7 @@ kvs_init(void)
 /*
  * returned value is not dup-ed
  */
-extern char *
-kvs_get(char *key)
+extern char *kvs_get(char *key)
 {
 	kvs_bucket_t *bucket;
 	char *val = NULL;
@@ -254,8 +403,8 @@ kvs_get(char *key)
 
 	bucket = &kvs_hash[HASH(key)];
 	if (bucket->count > 0) {
-		for(i = 0; i < bucket->count; i ++) {
-			if (! strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
+		for (i = 0; i < bucket->count; i++) {
+			if (!strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
 				val = bucket->pairs[VAL_INDEX(i)];
 				break;
 			}
@@ -267,8 +416,7 @@ kvs_get(char *key)
 	return val;
 }
 
-extern int
-kvs_put(char *key, char *val)
+extern int kvs_put(char *key, char *val)
 {
 	kvs_bucket_t *bucket;
 	int i;
@@ -277,9 +425,9 @@ kvs_put(char *key, char *val)
 
 	bucket = &kvs_hash[HASH(key)];
 
-	if (! no_dup_keys) {
-		for (i = 0; i < bucket->count; i ++) {
-			if (! strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
+	if (!no_dup_keys) {
+		for (i = 0; i < bucket->count; i++) {
+			if (!strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
 				/* replace the k-v pair */
 				xfree(bucket->pairs[VAL_INDEX(i)]);
 				bucket->pairs[VAL_INDEX(i)] = xstrdup(val);
@@ -296,23 +444,22 @@ kvs_put(char *key, char *val)
 	i = bucket->count;
 	bucket->pairs[KEY_INDEX(i)] = xstrdup(key);
 	bucket->pairs[VAL_INDEX(i)] = xstrdup(val);
-	bucket->count ++;
+	bucket->count++;
 
 	debug3("mpi/pmi2: put kvs %s=%s", key, val);
 	return SLURM_SUCCESS;
 }
 
-extern int
-kvs_clear(void)
+extern int kvs_clear(void)
 {
 	kvs_bucket_t *bucket;
 	int i, j;
 
-	for (i = 0; i < hash_size; i ++){
+	for (i = 0; i < hash_size; i++) {
 		bucket = &kvs_hash[i];
-		for (j = 0; j < bucket->count; j ++) {
-			xfree (bucket->pairs[KEY_INDEX(j)]);
-			xfree (bucket->pairs[VAL_INDEX(j)]);
+		for (j = 0; j < bucket->count; j++) {
+			xfree(bucket->pairs[KEY_INDEX(j)]);
+			xfree(bucket->pairs[VAL_INDEX(j)]);
 		}
 	}
 	xfree(kvs_hash);

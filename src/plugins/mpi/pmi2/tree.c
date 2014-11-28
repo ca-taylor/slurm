@@ -4,6 +4,10 @@
  *  Copyright (C) 2011-2012 National University of Defense Technology.
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
+ *  Portions copyright (C) 2014 Institute of Semiconductor Physics
+ *                     Siberian Branch of Russian Academy of Science
+ *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -92,35 +96,47 @@ static int
 _handle_kvs_fence(int fd, Buf buf)
 {
 	uint32_t from_nodeid, num_children, temp32, seq;
+	uint32_t frame_cnt, frame_seq;
 	char *from_node = NULL;
 	int rc = SLURM_SUCCESS;
 
+	safe_unpack32(&frame_cnt, buf);
+	safe_unpack32(&frame_seq, buf);
 	safe_unpack32(&from_nodeid, buf);
 	safe_unpackstr_xmalloc(&from_node, &temp32, buf);
 	safe_unpack32(&num_children, buf);
 	safe_unpack32(&seq, buf);
 
 	debug3("mpi/pmi2: in _handle_kvs_fence, from node %u(%s) representing"
-	       " %u offspring, seq=%u", from_nodeid, from_node, num_children,
-	       seq);
+		   " %u offspring, seq=%u [frame = %u/%u]", from_nodeid, from_node, num_children,
+		   seq, frame_seq, frame_cnt);
 	if (seq != kvs_seq) {
 		error("mpi/pmi2: invalid kvs seq from node %u(%s) ignored, "
 		      "expect %u got %u",
 		      from_nodeid, from_node, kvs_seq, seq);
 		goto out;
 	}
-	if (seq == tree_info.children_kvs_seq[from_nodeid]) {
+
+	if (seq == tree_info.children_kvs_seq[from_nodeid] ) {
 		info("mpi/pmi2: duplicate KVS_FENCE request from node %u(%s) "
 		      "ignored, seq=%u", from_nodeid, from_node, seq);
 		goto out;
 	}
-	tree_info.children_kvs_seq[from_nodeid] = seq;
 
 	if (tasks_to_wait == 0 && children_to_wait == 0) {
 		tasks_to_wait = job_info.ltasks;
 		children_to_wait = tree_info.num_children;
 	}
-	children_to_wait -= num_children;
+
+	// TODO: Do we want to track frame's sequence numbers to
+	// check consistency. This will lead to new children_kvs_seq-like array
+	// introduction
+	// By now just check for the last frame
+	if( frame_cnt == (frame_seq + 1) ){
+		// This is the final frame. Commit.
+		tree_info.children_kvs_seq[from_nodeid] = seq;
+		children_to_wait -= num_children;
+	}
 
 	temp_kvs_merge(buf);
 
@@ -164,9 +180,13 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	char *key, *val, *errmsg = NULL;
 	int rc = SLURM_SUCCESS;
 	uint32_t temp32, seq;
+	uint32_t frame_cnt, frame_seq;
+
 
 	debug3("mpi/pmi2: in _handle_kvs_fence_resp");
 
+	safe_unpack32(&frame_cnt, buf);
+	safe_unpack32(&frame_seq, buf);
 	safe_unpack32(&seq, buf);
 	if (seq != kvs_seq - 1) {
 		error("mpi/pmi2: invalid kvs seq from srun, expect %u"
@@ -179,7 +199,9 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 		debug("mpi/pmi2: duplicate KVS_FENCE_RESP from srun ignored");
 		return rc;
 	} else {
-		waiting_kvs_resp = 0;
+		if( (frame_seq + 1) == frame_cnt ){
+			waiting_kvs_resp = 0;
+		}
 	}
 
 	temp32 = remaining_buf(buf);
@@ -189,15 +211,16 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 		safe_unpackstr_xmalloc(&key, &temp32, buf);
 		safe_unpackstr_xmalloc(&val, &temp32, buf);
 		kvs_put(key, val);
-		//temp32 = remaining_buf(buf);
 		xfree(key);
 		xfree(val);
 	}
 
 resp:
-	send_kvs_fence_resp_to_clients(rc, errmsg);
-	if (rc != SLURM_SUCCESS) {
-		slurm_kill_job_step(job_info.jobid, job_info.stepid, SIGKILL);
+	if( frame_cnt == (frame_seq + 1) ){
+		send_kvs_fence_resp_to_clients(rc, errmsg);
+		if (rc != SLURM_SUCCESS) {
+			slurm_kill_job_step(job_info.jobid, job_info.stepid, SIGKILL);
+		}
 	}
 	return rc;
 
