@@ -71,13 +71,7 @@
 #include "spawn.h"
 #include "kvs.h"
 
-/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
- * FIXME: RETURN TO INITIAL FILE. THIS IS FOR DEBUG ONLY ON ONE NODE MACHINE!!
- * !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
- */
-//#define PMI2_SOCK_ADDR_FMT "/tmp/sock.pmi2.%u.%u"
-#define PMI2_SOCK_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmi2.%u.%u"
-
+#define PMI2_SOCK_ADDR_FMT "/tmp/sock.pmi2.%u.%u"
 
 extern char **environ;
 
