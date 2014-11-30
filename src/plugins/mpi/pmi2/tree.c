@@ -260,8 +260,7 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	/* 3. We may receive duplicating frames in case of
 	 * tree_msg_to_stepds failures. */
 	if( _resp_frame_seq != frame_seq ){
-		/*debug*/
-		error("mpi/pmi2(%s): duplicate KVS_FENCE_RESP frame"
+		debug3("mpi/pmi2(%s): duplicate KVS_FENCE_RESP frame"
 		      " from srun ignored, get %d expect %d",
 		      tree_info.this_node, frame_seq, _resp_frame_seq);
 		return rc;
