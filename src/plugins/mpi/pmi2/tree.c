@@ -153,9 +153,9 @@ _handle_kvs_fence(int fd, Buf buf)
 	if (tree_info.children_frame_seq[localid] != frame_seq) {
 		/*info*/
 		error("mpi/pmi2: duplicate KVS_FENCE frame from node %u(%s) "
-		      "ignored, expect %u get %u",
+		      "ignored, expect %u get %u from %u, seq = %u, myseq=%u",
 		     from_nodeid, from_node, tree_info.children_frame_seq[localid],
-		      frame_cnt);
+		      frame_seq, frame_cnt, seq, kvs_seq);
 		goto out;
 	} else {
 		tree_info.children_frame_seq[localid]++;
@@ -170,9 +170,6 @@ _handle_kvs_fence(int fd, Buf buf)
 	temp_kvs_merge(buf);
 
 	if (children_to_wait == 0 && tasks_to_wait == 0) {
-		/* drop the frame counter for the next fence */
-		memset(tree_info.children_frame_seq, 0,
-		       sizeof(uint32_t) * tree_info.num_direct);
 		/* send database upward */
 		rc = temp_kvs_send();
 		if (rc != SLURM_SUCCESS) {

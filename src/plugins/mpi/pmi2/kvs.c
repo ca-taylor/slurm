@@ -370,6 +370,11 @@ temp_kvs_send(void)
 	list_iterator_destroy(iter);
 
 	_temp_kvs_reset();	/* clear old temp kvs */
+
+	/* drop the frame counter for the next fence */
+	memset(tree_info.children_frame_seq, 0,
+	       sizeof(uint32_t) * tree_info.num_direct);
+
 	return rc;
 }
 
