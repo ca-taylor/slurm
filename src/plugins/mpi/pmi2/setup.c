@@ -4,6 +4,10 @@
  *  Copyright (C) 2011-2012 National University of Defense Technology.
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
+ *  Portions copyright (C) 2014 Institute of Semiconductor Physics
+ *                     Siberian Branch of Russian Academy of Science
+ *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -67,7 +71,12 @@
 #include "spawn.h"
 #include "kvs.h"
 
-#define PMI2_SOCK_ADDR_FMT "/tmp/sock.pmi2.%u.%u"
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ * FIXME: RETURN TO INITIAL FILE. THIS IS FOR DEBUG ONLY ON ONE NODE MACHINE!!
+ * !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ */
+//#define PMI2_SOCK_ADDR_FMT "/tmp/sock.pmi2.%u.%u"
+#define PMI2_SOCK_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmi2.%u.%u"
 
 
 extern char **environ;
@@ -90,6 +99,78 @@ static void
 _remove_tree_sock(void)
 {
 	unlink(tree_sock_addr);
+}
+
+void _setup_children_info(char ***env)
+{
+	int *children_ids, tree_width, rank;
+	char *p;
+
+	if( !in_stepd() ){
+		rank = 0;
+	} else {
+		rank = job_info.nodeid + 1;
+	}
+
+	/* this only controls the upward communication tree width */
+	p = getenvp(*env, PMI2_TREE_WIDTH_ENV);
+	if (p) {
+		tree_width = atoi(p);
+		if (tree_width < 2) {
+			info("invalid PMI2 tree width value (%d) detected. "
+			     "fallback to default value.", tree_width);
+			tree_width = slurm_get_tree_width();
+		}
+	} else {
+		tree_width = slurm_get_tree_width();
+	}
+
+	/* TODO: cannot launch 0 tasks on node */
+
+	/*
+	 * In tree position calculation, root of the tree is srun with id 0.
+	 * Stepd's id will be its nodeid plus 1.
+	 */
+	reverse_tree_info(rank, job_info.nnodes + 1,
+			  tree_width, &tree_info.parent_id,
+			  &tree_info.num_children, &tree_info.depth,
+			  &tree_info.max_depth);
+	tree_info.parent_id --;	       /* restore real nodeid */
+
+	/* setup children information */
+	children_ids = xmalloc(sizeof(int)*tree_width);
+	tree_info.num_direct =
+			reverse_tree_direct_children(rank,
+						     job_info.nnodes + 1,
+						     tree_width, tree_info.depth,
+						     children_ids);
+	tree_info.children_map = NULL;
+	tree_info.children_kvs_seq = NULL;
+	tree_info.children_frame_seq = NULL;
+	if( tree_info.num_direct > 0 ){
+		/* fill children map with direct nodeid's */
+		int i;
+		tree_info.children_map = xmalloc(sizeof(uint32_t) *
+						 tree_info.num_direct);
+		for(i=0; i<tree_info.num_direct; i++){
+			/* fix indexes: they should be less by one (+ 1 - srun) */
+			tree_info.children_map[i] = (uint32_t)children_ids[i] - 1;
+		}
+
+		/* children_kvs_seq is used to track children states at
+		 * fence request time */
+		tree_info.children_kvs_seq = xmalloc(sizeof(uint32_t) *
+						     tree_info.num_direct);
+		memset(tree_info.children_kvs_seq, 0,
+		       sizeof(uint32_t) * tree_info.num_direct);
+		/* children_frame_seq is used to track children frames at
+		 * fence request time */
+		tree_info.children_frame_seq = xmalloc(sizeof(uint32_t) *
+						       tree_info.num_direct);
+		memset(tree_info.children_frame_seq, 0,
+		       sizeof(uint32_t) * tree_info.num_direct);
+	}
+	xfree(children_ids);
 }
 
 static int
@@ -183,41 +264,17 @@ _setup_stepd_tree_info(const stepd_step_rec_t *job, char ***env)
 	char srun_host[64];
 	uint16_t port;
 	char *p;
-	int tree_width;
-
-	/* job info available */
 
 	memset(&tree_info, 0, sizeof(tree_info));
 
+	/* setup children information */
 	hl = hostlist_create(job_info.step_nodelist);
 	p = hostlist_nth(hl, job_info.nodeid); /* strdup-ed */
 	tree_info.this_node = xstrdup(p);
 	free(p);
 
-	/* this only controls the upward communication tree width */
-	p = getenvp(*env, PMI2_TREE_WIDTH_ENV);
-	if (p) {
-		tree_width = atoi(p);
-		if (tree_width < 2) {
-			info("invalid PMI2 tree width value (%d) detected. "
-			     "fallback to default value.", tree_width);
-			tree_width = slurm_get_tree_width();
-		}
-	} else {
-		tree_width = slurm_get_tree_width();
-	}
+	_setup_children_info(env);
 
-	/* TODO: cannot launch 0 tasks on node */
-
-	/*
-	 * In tree position calculation, root of the tree is srun with id 0.
-	 * Stepd's id will be its nodeid plus 1.
-	 */
-	reverse_tree_info(job_info.nodeid + 1, job_info.nnodes + 1,
-			  tree_width, &tree_info.parent_id,
-			  &tree_info.num_children, &tree_info.depth,
-			  &tree_info.max_depth);
-	tree_info.parent_id --;	       /* restore real nodeid */
 	if (tree_info.parent_id < 0) {	/* parent is srun */
 		tree_info.parent_node = NULL;
 	} else {
@@ -246,10 +303,6 @@ _setup_stepd_tree_info(const stepd_step_rec_t *job, char ***env)
 	}
 	tree_info.srun_addr = xmalloc(sizeof(slurm_addr_t));
 	slurm_set_addr(tree_info.srun_addr, port, srun_host);
-
-	/* init kvs seq to 0. TODO: reduce array size */
-	tree_info.children_kvs_seq = xmalloc(sizeof(uint32_t) *
-					     job_info.nnodes);
 
 	return SLURM_SUCCESS;
 }
@@ -592,19 +645,13 @@ _setup_srun_job_info(const mpi_plugin_client_info_t *job)
 }
 
 static int
-_setup_srun_tree_info(const mpi_plugin_client_info_t *job)
+_setup_srun_tree_info(const mpi_plugin_client_info_t *job, char ***env)
 {
 	char *p;
 	uint16_t p_port;
 
 	memset(&tree_info, 0, sizeof(tree_info));
 
-	tree_info.this_node = "launcher"; /* not used */
-	tree_info.parent_id = -2;   /* not used */
-	tree_info.parent_node = NULL; /* not used */
-	tree_info.num_children = job_info.nnodes;
-	tree_info.depth = 0;	 /* not used */
-	tree_info.max_depth = 0; /* not used */
 	/* pmi_port set in _setup_srun_sockets */
 	p = getenv(PMI2_SPAWNER_PORT_ENV);
 	if (p) {		/* spawned */
@@ -618,9 +665,11 @@ _setup_srun_tree_info(const mpi_plugin_client_info_t *job)
 	snprintf(tree_sock_addr, 128, PMI2_SOCK_ADDR_FMT,
 		 job->jobid, job->stepid);
 
-	/* init kvs seq to 0. TODO: reduce array size */
-	tree_info.children_kvs_seq = xmalloc(sizeof(uint32_t) *
-					     job_info.nnodes);
+	/* setup children information */
+	tree_info.this_node = "launcher"; /* not used */
+	tree_info.parent_node = NULL; /* not used */
+	_setup_children_info(env);
+
 
 	return SLURM_SUCCESS;
 }
@@ -745,7 +794,7 @@ pmi2_setup_srun(const mpi_plugin_client_info_t *job, char ***env)
 	if (rc != SLURM_SUCCESS)
 		return rc;
 
-	rc = _setup_srun_tree_info(job);
+	rc = _setup_srun_tree_info(job, env);
 	if (rc != SLURM_SUCCESS)
 		return rc;
 

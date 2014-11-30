@@ -68,7 +68,7 @@ static int _handle_name_lookup(int fd, Buf buf);
 
 static uint32_t  spawned_srun_ports_size = 0;
 static uint16_t *spawned_srun_ports = NULL;
-
+static int _resp_frame_seq = 0;
 
 static int (*tree_cmd_handlers[]) (int fd, Buf buf) = {
 	_handle_kvs_fence,
@@ -92,11 +92,23 @@ static char *tree_cmd_names[] = {
 	NULL,
 };
 
+static int _map_nodeid(uint32_t nodeid)
+{
+	int i;
+	for(i=0; i < tree_info.num_direct; i++){
+		if( tree_info.children_map[i] == nodeid ){
+			return i;
+		}
+	}
+	return -1;
+}
+
 static int
 _handle_kvs_fence(int fd, Buf buf)
 {
 	uint32_t from_nodeid, num_children, temp32, seq;
 	uint32_t frame_cnt, frame_seq;
+	int localid = 0;
 	char *from_node = NULL;
 	int rc = SLURM_SUCCESS;
 
@@ -110,6 +122,7 @@ _handle_kvs_fence(int fd, Buf buf)
 	debug3("mpi/pmi2: in _handle_kvs_fence, from node %u(%s) representing"
 		   " %u offspring, seq=%u [frame = %u/%u]", from_nodeid, from_node, num_children,
 		   seq, frame_seq, frame_cnt);
+
 	if (seq != kvs_seq) {
 		error("mpi/pmi2: invalid kvs seq from node %u(%s) ignored, "
 		      "expect %u got %u",
@@ -117,7 +130,14 @@ _handle_kvs_fence(int fd, Buf buf)
 		goto out;
 	}
 
-	if (seq == tree_info.children_kvs_seq[from_nodeid] ) {
+	if( (localid = _map_nodeid(from_nodeid) ) < 0 ){
+		/* this shouldn't happen */
+		error("mpi/pmi2(%s): invalid from_node field: %d. Node %s is not my children",
+		      tree_info.this_node, from_nodeid, from_node);
+		return SLURM_ERROR;
+	}
+
+	if (seq == tree_info.children_kvs_seq[localid] ) {
 		info("mpi/pmi2: duplicate KVS_FENCE request from node %u(%s) "
 		      "ignored, seq=%u", from_nodeid, from_node, seq);
 		goto out;
@@ -128,14 +148,25 @@ _handle_kvs_fence(int fd, Buf buf)
 		children_to_wait = tree_info.num_children;
 	}
 
-	// TODO: Do we want to track frame's sequence numbers to
-	// check consistency. This will lead to new children_kvs_seq-like array
-	// introduction
-	// By now just check for the last frame
-	if( frame_cnt == (frame_seq + 1) ){
-		// This is the final frame. Commit.
-		tree_info.children_kvs_seq[from_nodeid] = seq;
+	/* Check that we receive frame that we expect */
+	if( tree_info.children_frame_seq[localid] != frame_seq ){
+		/*info*/
+		error("mpi/pmi2: duplicate KVS_FENCE frame from node %u(%s) "
+		      "ignored, expect %u get %u",
+		     from_nodeid, from_node, tree_info.children_frame_seq[localid],
+		      frame_cnt);
+		goto out;
+	} else {
+		tree_info.children_frame_seq[localid]++;
+	}
+
+	if( frame_cnt == tree_info.children_frame_seq[localid] ){
+		/* this is the final frame, commit */
+		tree_info.children_kvs_seq[localid] = seq;
 		children_to_wait -= num_children;
+		/* drop the frame counter for the next fence */
+		memset(tree_info.children_frame_seq, 0,
+		       sizeof(uint32_t) * tree_info.num_direct);
 	}
 
 	temp_kvs_merge(buf);
@@ -182,26 +213,62 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	uint32_t temp32, seq;
 	uint32_t frame_cnt, frame_seq;
 
-
 	debug3("mpi/pmi2: in _handle_kvs_fence_resp");
 
 	safe_unpack32(&frame_cnt, buf);
 	safe_unpack32(&frame_seq, buf);
 	safe_unpack32(&seq, buf);
-	if (seq != kvs_seq - 1) {
-		error("mpi/pmi2: invalid kvs seq from srun, expect %u"
-		      " got %u", kvs_seq - 1, seq);
-		rc = SLURM_ERROR;;
+
+	/* Ignore duplicating messages that may occur under
+	 * load or if messages are lost. For example if
+	 * tree_msg_to_stepds failed on some of the nodes
+	 * (other than this).
+	 * Consider 3 important cases:
+	 */
+
+	/* 1. We may already exit collective while others are
+	 * still finishing it */
+	if (! waiting_kvs_resp) {
+		/* We can receive duplicating */
+		/*debug3*/
+		error("mpi/pmi2(%s): duplicate KVS_FENCE_RESP from srun ignored",
+		      tree_info.this_node);
+		return rc;
+	}
+
+	/* 2. We may enter new collective while srun trying to
+	 * complete last DB frame send to others. In this case
+	 * we may see previous kvs_seq numbers. Just ignore it.
+	 * srun is blocked in temp_kvs_send and won't start new
+	 * collective until it finished (kvs_seq - 2) one or fail.
+	 */
+	if (seq == kvs_seq - 2) {
+		/*debug3*/
+		error("mpi/pmi2 [%s] invalid kvs seq from srun, expect %u"
+		      " got %u. Some processes are still in previous collective."
+		      " Ignore.",
+		      tree_info.this_node, kvs_seq - 1, seq);
+		return rc;
+	}else if (seq != kvs_seq - 1) {
+		error("mpi/pmi2 [%s] invalid kvs seq from srun, expect %u"
+		      " got %u. Impossible collective seq number.",
+		      tree_info.this_node, kvs_seq - 1, seq);
+		rc = SLURM_ERROR;
 		errmsg = "mpi/pmi2: invalid kvs seq from srun";
 		goto resp;
 	}
-	if (! waiting_kvs_resp) {
-		debug("mpi/pmi2: duplicate KVS_FENCE_RESP from srun ignored");
+
+	/* 3. We may receive duplicating frames in case of
+	 * tree_msg_to_stepds failures. */
+	if( _resp_frame_seq != frame_seq ){
+		/*debug*/
+		error("mpi/pmi2(%s): duplicate KVS_FENCE_RESP frame"
+		      " from srun ignored, get %d expect %d",
+		      tree_info.this_node, frame_seq, _resp_frame_seq);
 		return rc;
-	} else {
-		if( (frame_seq + 1) == frame_cnt ){
-			waiting_kvs_resp = 0;
-		}
+	}else{
+		/* Save that we already received this frame */
+		_resp_frame_seq++;
 	}
 
 	temp32 = remaining_buf(buf);
@@ -216,7 +283,11 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	}
 
 resp:
-	if( frame_cnt == (frame_seq + 1) ){
+	if( _resp_frame_seq == frame_cnt ){
+		/* prepare to the next fence */
+		_resp_frame_seq = 0;
+		waiting_kvs_resp = 0;
+		/* wakeup clients */
 		send_kvs_fence_resp_to_clients(rc, errmsg);
 		if (rc != SLURM_SUCCESS) {
 			slurm_kill_job_step(job_info.jobid,

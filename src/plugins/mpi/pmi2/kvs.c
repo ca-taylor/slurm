@@ -314,8 +314,10 @@ _send_reliable(char *buf, uint32_t size)
 	unsigned int delay = 1, retry = 0;
 	while (1) {
 		if (retry == 1) {
-			verbose("failed to send temp kvs"
-				", rc=%d, retrying", rc);
+			/*verbose*/
+			error("%s: failed to send temp kvs"
+				", rc=%d, retrying. try #%d",
+			      tree_info.this_node, rc, retry);
 		}
 		if (!in_stepd()) {	/* srun */
 			rc = tree_msg_to_stepds(job_info.step_nodelist,
@@ -360,8 +362,9 @@ temp_kvs_send(void)
 		rc = _send_reliable(elem->buf, elem->payload);
 		if (SLURM_SUCCESS != rc) {
 			// Were unable to send DB part
-			verbose("completely failed to send temp kvs"
-				"[%d/%d], rc=%d",
+			/*verbose*/
+			error("%s: completely failed to send temp kvs"
+				"[%d/%d], rc=%d", tree_info.this_node,
 				frame_seq, frame_cnt, rc);
 			break;
 		}

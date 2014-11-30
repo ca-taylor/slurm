@@ -4,6 +4,10 @@
  *  Copyright (C) 2011-2012 National University of Defense Technology.
  *  Written by Hongjia Cao <hjcao@nudt.edu.cn>.
  *  All rights reserved.
+ *  Portions copyright (C) 2014 Institute of Semiconductor Physics
+ *                     Siberian Branch of Russian Academy of Science
+ *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -92,11 +96,14 @@ typedef struct pmi2_tree_info {
 	char *parent_node;	/* parent nodename */
 	int   parent_id;	/* parent nodeid */
 	int   num_children;	/* number of children stepds */
+	int   num_direct;	/* number of direct children */
 	int   depth;		/* depth in tree */
 	int   max_depth;	/* max depth of the tree */
 	uint16_t pmi_port;	 /* PMI2 comm port of this srun */
 	slurm_addr_t *srun_addr; /* PMI2 comm address parent srun */
+	uint32_t *children_map;  /* map of nodeid's to this node cnild numbers */
 	uint32_t *children_kvs_seq; /* sequence number of children nodes */
+	uint32_t *children_frame_seq; /* seq. number of frame received from child nodes */
 } pmi2_tree_info_t;
 
 
