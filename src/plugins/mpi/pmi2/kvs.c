@@ -458,7 +458,7 @@ kvs_clear(void)
 	kvs_bucket_t *bucket;
 	int i, j;
 
-	for (i = 0; i < hash_size; i ++) {
+	for (i = 0; i < hash_size; i ++){
 		bucket = &kvs_hash[i];
 		for (j = 0; j < bucket->count; j ++) {
 			xfree (bucket->pairs[KEY_INDEX(j)]);
