@@ -106,7 +106,7 @@ void _setup_children_info(char ***env)
 	int *children_ids, tree_width, rank;
 	char *p;
 
-	if( !in_stepd() ){
+	if (!in_stepd()) {
 		rank = 0;
 	} else {
 		rank = job_info.nodeid + 1;
@@ -117,8 +117,8 @@ void _setup_children_info(char ***env)
 	if (p) {
 		tree_width = atoi(p);
 		if (tree_width < 2) {
-			info("invalid PMI2 tree width value (%d) detected. "
-			     "fallback to default value.", tree_width);
+			info("invalid PMI2 tree width value (%d) detected."
+			     " Fallback to default value.", tree_width);
 			tree_width = slurm_get_tree_width();
 		}
 	} else {
@@ -147,14 +147,15 @@ void _setup_children_info(char ***env)
 	tree_info.children_map = NULL;
 	tree_info.children_kvs_seq = NULL;
 	tree_info.children_frame_seq = NULL;
-	if( tree_info.num_direct > 0 ){
+	if (tree_info.num_direct > 0) {
 		/* fill children map with direct nodeid's */
 		int i;
 		tree_info.children_map = xmalloc(sizeof(uint32_t) *
 						 tree_info.num_direct);
-		for(i=0; i<tree_info.num_direct; i++){
+		for (i = 0; i < tree_info.num_direct; i++) {
 			/* fix indexes: they should be less by one (+ 1 - srun) */
-			tree_info.children_map[i] = (uint32_t)children_ids[i] - 1;
+			tree_info.children_map[i] =
+					(uint32_t)children_ids[i] - 1;
 		}
 
 		/* children_kvs_seq is used to track children states at
@@ -165,8 +166,8 @@ void _setup_children_info(char ***env)
 		       sizeof(uint32_t) * tree_info.num_direct);
 		/* children_frame_seq is used to track children frames at
 		 * fence request time */
-		tree_info.children_frame_seq = xmalloc(sizeof(uint32_t) *
-						       tree_info.num_direct);
+		tree_info.children_frame_seq =
+				xmalloc(sizeof(uint32_t) * tree_info.num_direct);
 		memset(tree_info.children_frame_seq, 0,
 		       sizeof(uint32_t) * tree_info.num_direct);
 	}
@@ -249,10 +250,12 @@ _setup_stepd_job_info(const stepd_step_rec_t *job, char ***env)
 	 */
 	p = getenvp(*env, SLURM_STEP_RESV_PORTS);
 	if (!p) {
-		debug("%s: %s not found in env", __func__, SLURM_STEP_RESV_PORTS);
+		debug("%s: %s not found in env", __func__,
+		      SLURM_STEP_RESV_PORTS);
 	} else {
 		job_info.resv_ports = xstrdup(p);
-		info("%s: SLURM_STEP_RESV_PORTS found %s", __func__, p);
+		info("%s: SLURM_STEP_RESV_PORTS found %s",
+		     __func__, p);
 	}
 	return SLURM_SUCCESS;
 }

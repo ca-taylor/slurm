@@ -95,8 +95,8 @@ static char *tree_cmd_names[] = {
 static int _map_nodeid(uint32_t nodeid)
 {
 	int i;
-	for(i=0; i < tree_info.num_direct; i++){
-		if( tree_info.children_map[i] == nodeid ){
+	for (i = 0; i < tree_info.num_direct; i++) {
+		if (tree_info.children_map[i] == nodeid) {
 			return i;
 		}
 	}
@@ -119,9 +119,10 @@ _handle_kvs_fence(int fd, Buf buf)
 	safe_unpack32(&num_children, buf);
 	safe_unpack32(&seq, buf);
 
-	debug3("mpi/pmi2: in _handle_kvs_fence, from node %u(%s) representing"
-		   " %u offspring, seq=%u [frame = %u/%u]", from_nodeid, from_node, num_children,
-		   seq, frame_seq, frame_cnt);
+	debug3("mpi/pmi2: in _handle_kvs_fence, from node %u(%s) "
+	       "representing %u offspring, seq=%u [frame = %u/%u]",
+	       from_nodeid, from_node, num_children, seq, frame_seq,
+	       frame_cnt);
 
 	if (seq != kvs_seq) {
 		error("mpi/pmi2: invalid kvs seq from node %u(%s) ignored, "
@@ -130,7 +131,7 @@ _handle_kvs_fence(int fd, Buf buf)
 		goto out;
 	}
 
-	if( (localid = _map_nodeid(from_nodeid) ) < 0 ){
+	if ((localid = _map_nodeid(from_nodeid) ) < 0) {
 		/* this shouldn't happen */
 		error("mpi/pmi2(%s): invalid from_node field: %d. Node %s is not my children",
 		      tree_info.this_node, from_nodeid, from_node);
@@ -149,7 +150,7 @@ _handle_kvs_fence(int fd, Buf buf)
 	}
 
 	/* Check that we receive frame that we expect */
-	if( tree_info.children_frame_seq[localid] != frame_seq ){
+	if (tree_info.children_frame_seq[localid] != frame_seq) {
 		/*info*/
 		error("mpi/pmi2: duplicate KVS_FENCE frame from node %u(%s) "
 		      "ignored, expect %u get %u",
@@ -160,7 +161,7 @@ _handle_kvs_fence(int fd, Buf buf)
 		tree_info.children_frame_seq[localid]++;
 	}
 
-	if( frame_cnt == tree_info.children_frame_seq[localid] ){
+	if (frame_cnt == tree_info.children_frame_seq[localid]) {
 		/* this is the final frame, commit */
 		tree_info.children_kvs_seq[localid] = seq;
 		children_to_wait -= num_children;
@@ -230,8 +231,7 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	 * still finishing it */
 	if (! waiting_kvs_resp) {
 		/* We can receive duplicating */
-		/*debug3*/
-		error("mpi/pmi2(%s): duplicate KVS_FENCE_RESP from srun ignored",
+		debug3("mpi/pmi2(%s): duplicate KVS_FENCE_RESP from srun ignored",
 		      tree_info.this_node);
 		return rc;
 	}
@@ -243,8 +243,7 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	 * collective until it finished (kvs_seq - 2) one or fail.
 	 */
 	if (seq == kvs_seq - 2) {
-		/*debug3*/
-		error("mpi/pmi2 [%s] invalid kvs seq from srun, expect %u"
+		debug3("mpi/pmi2 [%s] invalid kvs seq from srun, expect %u"
 		      " got %u. Some processes are still in previous collective."
 		      " Ignore.",
 		      tree_info.this_node, kvs_seq - 1, seq);
@@ -283,7 +282,7 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	}
 
 resp:
-	if( _resp_frame_seq == frame_cnt ){
+	if (_resp_frame_seq == frame_cnt) {
 		/* prepare to the next fence */
 		_resp_frame_seq = 0;
 		waiting_kvs_resp = 0;
