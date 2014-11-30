@@ -114,7 +114,7 @@ _temp_kvs_buf_new()
 {
 	temp_kvs_buf_t *elem = xmalloc(sizeof(*elem));
 	elem->buf = xmalloc(TEMP_KVS_SIZE_INC);
-	// Reserve the space for the header (will be packed later)
+	/* Reserve the space for the header (will be packed later) */
 	elem->payload = buf_offset;
 	elem->size = TEMP_KVS_SIZE_INC;
 	list_push(temp_kvs_buffers, elem);
@@ -139,7 +139,6 @@ _pack_header(Buf buf, uint32_t seq, uint32_t size)
 		nodeid = job_info.nodeid;
 		/* XXX: TBC */
 		num_children = tree_info.num_children + 1;
-
 		pack32((uint32_t) nodeid, buf);	/* from_nodeid */
 		packstr(tree_info.this_node, buf);	/* from_node */
 		pack32((uint32_t) num_children, buf);	/* num_children */
@@ -153,14 +152,13 @@ _pack_header(Buf buf, uint32_t seq, uint32_t size)
 inline static temp_kvs_buf_t*
 _temp_kvs_buf_inc(temp_kvs_buf_t * elem, uint32_t size)
 {
-	// Switch to the new buffer if nessesary
+	/* Switching to the new buffer if necessary */
 	if ((elem->payload + size) >= max_msg_size) {
 		list_push(temp_kvs_buffers, elem);
-		// Switch to the new one
 		_temp_kvs_buf_new();
 		elem = list_pop(temp_kvs_buffers);
 	}
-	// Increase buffer if nessesary
+	/* Increasing the buffer if necessary */
 	if (elem->payload + size > elem->size) {
 		while (elem->payload + size > elem->size) {
 			elem->size += TEMP_KVS_SIZE_INC;
@@ -197,7 +195,7 @@ _temp_kvs_try_merge(temp_kvs_buf_t * elem, temp_kvs_buf_t * elem2)
 {
 	int32_t size = elem2->payload - buf_offset;
 	if ((elem->payload + size) < max_msg_size) {
-		// merge buffer payloads
+		/* merging buffers payload */
 		char *data = elem2->buf + buf_offset;
 		if (elem->size < elem->payload + size) {
 			xrealloc(elem->buf, elem->payload + size);
@@ -218,14 +216,15 @@ _temp_kvs_buf_finalize()
 	int frame_seq = 0, frame_cnt = 0;
 
 	frame_seq = list_count(temp_kvs_buffers);
-	// Change from stack order to the queue one
-	// And merge small messages together
+	/* - switching from stack order to the queue order
+	 * - merging small messages together */
 	tmp = list_create(_temp_kvs_buf_free);
 	while ((elem = list_pop(temp_kvs_buffers))) {
-		// if the message is bigger than 90% of possible size - it's OK
+		/* if the message is bigger than 90%
+		 * of possible size - leave it alone */
 		uint32_t treshold = (int) (max_msg_size * 0.9);
 		if (elem->payload < treshold) {
-			// try to merge it with other elements
+			/* trying to merge it with other elements */
 			ListIterator iter =
 			    list_iterator_create(temp_kvs_buffers);
 			temp_kvs_buf_t *elem2;
@@ -240,9 +239,9 @@ _temp_kvs_buf_finalize()
 		list_push(tmp, elem);
 	}
 
-	// Setup message headers in the frames
+	/* Setup message headers in the frames */
 	frame_cnt = list_count(tmp);
-	debug("Reduce number of messages from %d to %d",
+	debug3("Reduce number of messages from %d to %d",
 	      frame_seq, frame_cnt);
 	frame_seq = 0;
 	while ((elem = list_dequeue(tmp))) {
@@ -271,12 +270,12 @@ extern int
 temp_kvs_init()
 {
 	temp_kvs_buffers = list_create(_temp_kvs_buf_free);
-	// Estimate the header offset
+	/* Estimate the header offset */
 	Buf buf = init_buf(1024);
 	_pack_header(buf, 0, 1);
 	buf_offset = get_buf_offset(buf);
 	free_buf(buf);
-	// Reset the buffers
+	/* Reset the buffers */
 	_temp_kvs_reset();
 	return SLURM_SUCCESS;
 }
@@ -314,8 +313,7 @@ _send_reliable(char *buf, uint32_t size)
 	unsigned int delay = 1, retry = 0;
 	while (1) {
 		if (retry == 1) {
-			/*verbose*/
-			error("%s: failed to send temp kvs"
+			verbose("%s: failed to send temp kvs"
 				", rc=%d, retrying. try #%d",
 			      tree_info.this_node, rc, retry);
 		}
@@ -347,22 +345,21 @@ temp_kvs_send(void)
 	int rc = SLURM_ERROR;
 	ListIterator iter;
 	temp_kvs_buf_t *elem;
-	// here - for logging only
+	/* for logging only */
 	uint32_t frame_seq = 0, frame_cnt;
 
 	_temp_kvs_buf_finalize();
 
-	/* cmd included in temp_kvs_buf */
-	kvs_seq++;		/* expecting new kvs after now */
+	/* expecting new kvs after now */
+	kvs_seq++;
 
-	// Iterate over all database parts and send them one by one
+	/* Iterate over all database parts and send them one by one */
 	iter = list_iterator_create(temp_kvs_buffers);
 	frame_cnt = list_count(temp_kvs_buffers);
 	while ((elem = list_next(iter))) {
 		rc = _send_reliable(elem->buf, elem->payload);
 		if (SLURM_SUCCESS != rc) {
-			// Were unable to send DB part
-			/*verbose*/
+			/* Were unable to send DB part */
 			error("%s: completely failed to send temp kvs"
 				"[%d/%d], rc=%d", tree_info.this_node,
 				frame_seq, frame_cnt, rc);
