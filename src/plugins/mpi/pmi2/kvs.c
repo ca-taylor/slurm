@@ -314,8 +314,8 @@ _send_reliable(char *buf, uint32_t size)
 	while (1) {
 		if (retry == 1) {
 			verbose("%s: failed to send temp kvs"
-				", rc=%d, retrying. try #%d",
-			      tree_info.this_node, rc, retry);
+				", rc=%d, retrying.",
+			      tree_info.this_node, rc);
 		}
 		if (! in_stepd()) {	/* srun */
 			rc = tree_msg_to_stepds(job_info.step_nodelist,
@@ -404,7 +404,7 @@ kvs_get(char *key)
 
 	bucket = &kvs_hash[HASH(key)];
 	if (bucket->count > 0) {
-		for (i = 0; i < bucket->count; i ++) {
+		for(i = 0; i < bucket->count; i ++) {
 			if (! strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
 				val = bucket->pairs[VAL_INDEX(i)];
 				break;
@@ -446,7 +446,7 @@ kvs_put(char *key, char *val)
 	i = bucket->count;
 	bucket->pairs[KEY_INDEX(i)] = xstrdup(key);
 	bucket->pairs[VAL_INDEX(i)] = xstrdup(val);
-	bucket->count++;
+	bucket->count ++;
 
 	debug3("mpi/pmi2: put kvs %s=%s", key, val);
 	return SLURM_SUCCESS;
@@ -458,11 +458,11 @@ kvs_clear(void)
 	kvs_bucket_t *bucket;
 	int i, j;
 
-	for (i = 0; i < hash_size; i++) {
+	for (i = 0; i < hash_size; i ++) {
 		bucket = &kvs_hash[i];
-		for (j = 0; j < bucket->count; j++) {
-			xfree(bucket->pairs[KEY_INDEX(j)]);
-			xfree(bucket->pairs[VAL_INDEX(j)]);
+		for (j = 0; j < bucket->count; j ++) {
+			xfree (bucket->pairs[KEY_INDEX(j)]);
+			xfree (bucket->pairs[VAL_INDEX(j)]);
 		}
 	}
 	xfree(kvs_hash);
