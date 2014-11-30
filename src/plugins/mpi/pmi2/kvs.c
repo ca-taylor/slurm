@@ -52,7 +52,7 @@
 /* for fence */
 int tasks_to_wait = 0;
 int children_to_wait = 0;
-int kvs_seq = 1;		/* starting from 1 */
+int kvs_seq = 1; /* starting from 1 */
 int waiting_kvs_resp = 0;
 
 
@@ -139,9 +139,9 @@ _pack_header(Buf buf, uint32_t seq, uint32_t size)
 		nodeid = job_info.nodeid;
 		/* XXX: TBC */
 		num_children = tree_info.num_children + 1;
-		pack32((uint32_t) nodeid, buf);	/* from_nodeid */
-		packstr(tree_info.this_node, buf);	/* from_node */
-		pack32((uint32_t) num_children, buf);	/* num_children */
+		pack32((uint32_t)nodeid, buf); /* from_nodeid */
+		packstr(tree_info.this_node, buf); /* from_node */
+		pack32((uint32_t)num_children, buf); /* num_children */
 		pack32(kvs_seq, buf);
 	} else {
 		pack32(kvs_seq, buf);
@@ -317,7 +317,7 @@ _send_reliable(char *buf, uint32_t size)
 				", rc=%d, retrying. try #%d",
 			      tree_info.this_node, rc, retry);
 		}
-		if (!in_stepd()) {	/* srun */
+		if (! in_stepd()) {	/* srun */
 			rc = tree_msg_to_stepds(job_info.step_nodelist,
 						size, buf);
 		} else if (tree_info.parent_node != NULL) {
@@ -375,12 +375,12 @@ temp_kvs_send(void)
 
 /**************************************************************/
 
-extern int kvs_init(void)
+extern int
+kvs_init(void)
 {
 	debug3("mpi/pmi2: in kvs_init");
 
-	hash_size =
-	    ((job_info.ntasks + TASKS_PER_BUCKET - 1) / TASKS_PER_BUCKET);
+	hash_size = ((job_info.ntasks + TASKS_PER_BUCKET - 1) / TASKS_PER_BUCKET);
 
 	kvs_hash = xmalloc(hash_size * sizeof(kvs_bucket_t));
 
@@ -404,8 +404,8 @@ kvs_get(char *key)
 
 	bucket = &kvs_hash[HASH(key)];
 	if (bucket->count > 0) {
-		for (i = 0; i < bucket->count; i++) {
-			if (!strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
+		for (i = 0; i < bucket->count; i ++) {
+			if (! strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
 				val = bucket->pairs[VAL_INDEX(i)];
 				break;
 			}
@@ -427,9 +427,9 @@ kvs_put(char *key, char *val)
 
 	bucket = &kvs_hash[HASH(key)];
 
-	if (!no_dup_keys) {
-		for (i = 0; i < bucket->count; i++) {
-			if (!strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
+	if (! no_dup_keys) {
+		for (i = 0; i < bucket->count; i ++) {
+			if (! strcmp(key, bucket->pairs[KEY_INDEX(i)])) {
 				/* replace the k-v pair */
 				xfree(bucket->pairs[VAL_INDEX(i)]);
 				bucket->pairs[VAL_INDEX(i)] = xstrdup(val);
