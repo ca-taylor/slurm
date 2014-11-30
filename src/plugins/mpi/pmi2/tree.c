@@ -164,6 +164,9 @@ _handle_kvs_fence(int fd, Buf buf)
 	if (frame_cnt == tree_info.children_frame_seq[localid]) {
 		/* this is the final frame, commit */
 		tree_info.children_kvs_seq[localid] = seq;
+		/* now duplication is protected with children_kvs_seq
+		 * drop children_frame_seq for the next fence */
+		tree_info.children_frame_seq[localid] = 0;
 		children_to_wait -= num_children;
 	}
 
