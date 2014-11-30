@@ -165,14 +165,15 @@ _handle_kvs_fence(int fd, Buf buf)
 		/* this is the final frame, commit */
 		tree_info.children_kvs_seq[localid] = seq;
 		children_to_wait -= num_children;
-		/* drop the frame counter for the next fence */
-		memset(tree_info.children_frame_seq, 0,
-		       sizeof(uint32_t) * tree_info.num_direct);
 	}
 
 	temp_kvs_merge(buf);
 
 	if (children_to_wait == 0 && tasks_to_wait == 0) {
+		/* drop the frame counter for the next fence */
+		memset(tree_info.children_frame_seq, 0,
+		       sizeof(uint32_t) * tree_info.num_direct);
+		/* send database upward */
 		rc = temp_kvs_send();
 		if (rc != SLURM_SUCCESS) {
 			if (in_stepd()) {
