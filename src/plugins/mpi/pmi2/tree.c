@@ -135,7 +135,7 @@ _handle_kvs_fence(int fd, Buf buf)
 		/* this shouldn't happen */
 		error("mpi/pmi2(%s): invalid from_node field: %d. Node %s is not my children",
 		      tree_info.this_node, from_nodeid, from_node);
-		return SLURM_ERROR;
+		goto unpack_error;
 	}
 
 	if (seq == tree_info.children_kvs_seq[localid] ) {
@@ -151,8 +151,7 @@ _handle_kvs_fence(int fd, Buf buf)
 
 	/* Check that we receive frame that we expect */
 	if (tree_info.children_frame_seq[localid] != frame_seq) {
-		/*info*/
-		error("mpi/pmi2: duplicate KVS_FENCE frame from node %u(%s) "
+		info("mpi/pmi2: duplicate KVS_FENCE frame from node %u(%s) "
 		      "ignored, expect %u get %u from %u, seq = %u, myseq=%u",
 		     from_nodeid, from_node, tree_info.children_frame_seq[localid],
 		      frame_seq, frame_cnt, seq, kvs_seq);
@@ -222,7 +221,7 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	safe_unpack32(&seq, buf);
 
 	/* Ignore duplicating messages that may occur under
-	 * load or if messages are lost. For example if
+	 * load or if messages were lost. For example if
 	 * tree_msg_to_stepds failed on some of the nodes
 	 * (other than this).
 	 * Consider 3 important cases:
@@ -231,7 +230,6 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	/* 1. We may already exit collective while others are
 	 * still finishing it */
 	if (! waiting_kvs_resp) {
-		/* We can receive duplicating */
 		debug3("mpi/pmi2(%s): duplicate KVS_FENCE_RESP from srun ignored",
 		      tree_info.this_node);
 		return rc;
@@ -241,9 +239,10 @@ _handle_kvs_fence_resp(int fd, Buf buf)
 	 * complete last DB frame send to others. In this case
 	 * we may see previous kvs_seq numbers. Just ignore it.
 	 * srun is blocked in temp_kvs_send and won't start new
-	 * collective until it finished (kvs_seq - 2) one or fail.
+	 * collective until it finishes #(kvs_seq - 2) or fail.
 	 */
 	if (seq == kvs_seq - 2) {
+		/* treat this case specially (see (2) description) */
 		debug3("mpi/pmi2 [%s] invalid kvs seq from srun, expect %u"
 		      " got %u. Some processes are still in previous collective."
 		      " Ignore.",
