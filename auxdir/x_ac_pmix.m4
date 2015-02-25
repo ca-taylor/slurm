@@ -28,12 +28,12 @@ AC_DEFUN([X_AC_PMIX],
         test -d "$d/include" || continue
         test -f "$d/include/pmix_common.h" || continue
         test -f "$d/include/pmix_server.h" || continue
-        for libdir in $_x_ac_pmix_libs; do
-          test -d "$d/$libdir" || continue
+        for d1 in $_x_ac_pmix_libs; do
+          test -d "$d/$d1" || continue
           _x_ac_pmix_cppflags_save="$CPPFLAGS"
           CPPFLAGS="-I$d/include $CPPFLAGS"
           _x_ac_pmix_libs_save="$LIBS"
-          LIBS="-L$d/$libdir -lpmix-server $LIBS"
+          LIBS="-L$d/$d1 -lpmix-server $LIBS"
           AC_LINK_IFELSE(
             [AC_LANG_CALL([], PMIx_Get_version)],
             AS_VAR_SET(x_ac_cv_pmix_dir, $d))
@@ -48,17 +48,30 @@ AC_DEFUN([X_AC_PMIX],
   if test -z "$x_ac_cv_pmix_dir"; then
     AC_MSG_WARN([unable to locate pmix installation])
   else
+    AC_CACHE_CHECK(
+      [for pmix library directory],
+      [x_ac_cv_pmix_libdir],
+      [
+        for d1 in $_x_ac_pmix_libs; do
+          d="$x_ac_cv_pmix_dir/$d1"
+          test -d "$d" || continue
+          _x_ac_pmix_cppflags_save="$CPPFLAGS"
+          CPPFLAGS="-I$x_ac_cv_pmix_dir/include $CPPFLAGS"
+          _x_ac_pmix_libs_save="$LIBS"
+          LIBS="-L$d -lpmix-server $LIBS"
+          AC_LINK_IFELSE(
+            [AC_LANG_CALL([], PMIx_Get_version)],
+            AS_VAR_SET(x_ac_cv_pmix_libdir, $d))
+          CPPFLAGS="$_x_ac_pmix_cppflags_save"
+          LIBS="$_x_ac_pmix_libs_save"
+          test -n "$x_ac_cv_pmix_libdir" && break
+        done
+    ])
     PMIX_CPPFLAGS="-I$x_ac_cv_pmix_dir/include"
-    _x_ac_pmix_libdir=""
-    for libdir in $_x_ac_pmix_libs; do
-      test -d "$d/$libdir" || continue
-      _x_ac_pmix_libdir=$libdir
-      break
-    done
     if test "$ac_with_rpath" = "yes"; then
-      PMIX_LDFLAGS="-Wl,-rpath -Wl,$x_ac_cv_pmix_dir/$_x_ac_pmix_libdir -L$x_ac_cv_hwloc_dir/$_x_ac_pmix_libdir"
+      PMIX_LDFLAGS="-Wl,-rpath -Wl,$x_ac_cv_pmix_libdir -L$x_ac_cv_pmix_libdir"
     else
-      PMIX_LDFLAGS="-L$x_ac_cv_hwloc_dir/$_x_ac_pmix_libdir"
+      PMIX_LDFLAGS="-L$x_ac_cv_pmix_libdir"
     fi
     PMIX_LIBS="-lpmix-server"
     AC_DEFINE(HAVE_PMIX, 1, [Define to 1 if pmix library found])
