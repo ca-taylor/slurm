@@ -51,7 +51,9 @@
 void pmix_io_init(pmix_io_engine_t *eng, int fd, pmix_io_engine_header_t header)
 {
 	// Initialize general options
-	eng->magic = PMIX_MSGSTATE_MAGIC;
+#ifndef NDEBUG
+    eng->magic = PMIX_MSGSTATE_MAGIC;
+#endif
 	eng->error = 0;
 	eng->fd = fd;
 	eng->header = header;
