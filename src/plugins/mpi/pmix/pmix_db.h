@@ -66,7 +66,9 @@ static inline void pmix_db_init()
 	uint32_t bsize = sizeof(int*) * tasks;
 	uint32_t ssize = sizeof(int) * tasks;
 
+#ifndef NDEBUG
 	pmix_db.magic = PMIX_MSGSTATE_MAGIC;
+#endif
 	pmix_db.cur_gen = pmix_db.next_gen = 0;
 
 	// Setup "current" Databse
