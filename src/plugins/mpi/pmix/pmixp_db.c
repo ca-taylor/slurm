@@ -1,5 +1,5 @@
 /*****************************************************************************\
- **  pmix_client.h - PMIx client communication code
+ **  pmix_db.c - PMIx KVS database
  *****************************************************************************
  *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
  *                     Russian Academy of Science
@@ -36,17 +36,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#include "pmixp_common.h"
+#include "pmixp_db.h"
 
-#ifndef PMIX_CLIENT_H
-#define PMIX_CLIENT_H
-
-#include "pmix_common.h"
-
-
-
-void pmix_client_new_conn(int fd);
-void pmix_client_fence_notify();
-void pmix_client_taskid_reply(uint32_t taskid);
-
-
-#endif // CLIENT_H
+pmix_db_t pmix_db;

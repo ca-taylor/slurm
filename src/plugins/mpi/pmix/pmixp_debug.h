@@ -38,8 +38,8 @@
 #ifndef PMIX_DEBUG_H
 #define PMIX_DEBUG_H
 
-#include "pmix_common.h"
-#include "pmix_info.h"
+#include "pmixp_common.h"
+#include "pmixp_info.h"
 
 #define MAX_MSG_SIZE 1024
 

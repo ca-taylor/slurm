@@ -1,5 +1,5 @@
 /*****************************************************************************\
- **  pmix_server.h - PMIx server side functionality
+ **  pmix_coll.h - PMIx collective primitives
  *****************************************************************************
  *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
  *                     Russian Academy of Science
@@ -36,25 +36,13 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_SERVER_H
-#define PMIX_SERVER_H
+#ifndef PMIX_COLL_H
+#define PMIX_COLL_H
+#include "pmixp_common.h"
 
-#include "pmix_common.h"
+int pmix_coll_init(char ***env);
+void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t size);
+void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size, bool blocking);
+void pmix_coll_update_db(void *msg, uint32_t size);
 
-typedef enum { PMIX_FENCE, PMIX_FENCE_RESP, PMIX_DIRECT, PMIX_DIRECT_RESP  } pmix_srv_cmd_t;
-
-int pmix_stepd_init(const stepd_step_rec_t *job, char ***env);
-int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
-void pmix_server_new_conn(int fd);
-
-void *pmix_server_alloc_msg(uint32_t size, void **payload);
-void *pmix_server_alloc_msg_next(uint32_t size, void **payload);
-
-void pmix_server_msg_setcmd(void *msg, pmix_srv_cmd_t cmd);
-void pmix_server_msg_finalize(void *msg);
-uint32_t pmix_server_msg_size(void *msg);
-void *pmix_server_msg_start(void *msg);
-void pmix_server_dmdx_request(uint32_t localid, uint32_t taskid);
-void pmix_server_dmdx_notify(uint32_t localid);
-
-#endif // SERVER_H
+#endif // PMIX_COLL_H

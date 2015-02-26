@@ -44,11 +44,11 @@
 #include <signal.h>
 #include <sys/types.h>
 
-#include "pmix_common.h"
-#include "pmix_server.h"
-#include "pmix_debug.h"
-#include "pmix_agent.h"
-#include "pmix_info.h"
+#include "pmixp_common.h"
+#include "pmixp_server.h"
+#include "pmixp_debug.h"
+#include "pmixp_agent.h"
+#include "pmixp_info.h"
 
 /*
  * These variables are required by the generic plugin interface.  If they

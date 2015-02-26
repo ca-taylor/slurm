@@ -39,9 +39,9 @@
 #ifndef PMIX_STATE_H
 #define PMIX_STATE_H
 
-#include "pmix_common.h"
-#include "pmix_debug.h"
-#include "pmix_io.h"
+#include "pmixp_common.h"
+#include "pmixp_debug.h"
+#include "pmixp_io.h"
 
 typedef enum { PMIX_CLI_UNCONNECTED, PMIX_CLI_ACK, PMIX_CLI_OPERATE, PMIX_CLI_COLL, PMIX_CLI_COLL_NB } pmix_cli_state_t;
 
