@@ -50,6 +50,8 @@
 #include "pmixp_agent.h"
 #include "pmixp_info.h"
 
+#include <pmix_server.h>
+
 /*
  * These variables are required by the generic plugin interface.  If they
  * are not found in the plugin, the plugin loader will ignore it.
@@ -107,6 +109,8 @@ mpi_plugin_client_state_t *
 p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 {
 	// pmix_debug_hang(1);
+
+    char *ptr = PMIx_Get_version();
 
 	PMIX_DEBUG("srun initialization");
 	if( SLURM_SUCCESS != pmix_srun_init(job,env) ){
