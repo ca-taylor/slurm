@@ -1,5 +1,5 @@
 /*****************************************************************************\
- **  pmix_coll.h - PMIx collective primitives
+ **  pmix_agent.h - PMIx agent thread
  *****************************************************************************
  *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
  *                     Russian Academy of Science
@@ -36,13 +36,12 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_COLL_H
-#define PMIX_COLL_H
-#include "pmix_common.h"
+#ifndef PMIX_AGENT_H
+#define PMIX_AGENT_H
 
-int pmix_coll_init(char ***env);
-void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t size);
-void pmix_coll_task_contrib(uint32_t taskid, void *msg, uint32_t size, bool blocking);
-void pmix_coll_update_db(void *msg, uint32_t size);
+#include "pmixp_common.h"
 
-#endif // PMIX_COLL_H
+int pmix_agent_start(void);
+void pmix_agent_task_cleanup();
+
+#endif // AGENT_H

@@ -39,10 +39,10 @@
 #ifndef PMIX_DB_H
 #define PMIX_DB_H
 
-#include "pmix_common.h"
-#include "pmix_info.h"
-#include "pmix_debug.h"
-#include "pmix_state.h"
+#include "pmixp_common.h"
+#include "pmixp_info.h"
+#include "pmixp_debug.h"
+#include "pmixp_state.h"
 
 typedef struct {
 #ifndef NDEBUG

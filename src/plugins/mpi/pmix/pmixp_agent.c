@@ -40,13 +40,13 @@
 #include <poll.h>
 #include <arpa/inet.h>
 
-#include "pmix_common.h"
-#include "pmix_server.h"
-#include "pmix_client.h"
-#include "pmix_state.h"
-#include "pmix_debug.h"
-#include "pmix_db.h"
-#include "pmix_utils.h"
+#include "pmixp_common.h"
+#include "pmixp_server.h"
+#include "pmixp_client.h"
+#include "pmixp_state.h"
+#include "pmixp_debug.h"
+#include "pmixp_db.h"
+#include "pmixp_utils.h"
 
 #define MAX_RETRIES 5
 

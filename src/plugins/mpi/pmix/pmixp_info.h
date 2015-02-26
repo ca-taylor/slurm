@@ -40,7 +40,7 @@
 #ifndef PMIX_INFO_H
 #define PMIX_INFO_H
 
-#include "pmix_common.h"
+#include "pmixp_common.h"
 
 /*
  *
