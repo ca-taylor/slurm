@@ -45,9 +45,9 @@
 #include <poll.h>
 #include <time.h>
 
-#include "pmix_common.h"
-#include "pmix_utils.h"
-#include "pmix_debug.h"
+#include "pmixp_common.h"
+#include "pmixp_utils.h"
+#include "pmixp_debug.h"
 
 #define PMIX_MAX_RETRY 7
 

@@ -36,16 +36,16 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include "pmix_common.h"
-#include "pmix_info.h"
-#include "pmix_coll.h"
-#include "pmix_debug.h"
-#include "pmix_io.h"
-#include "pmix_client.h"
-#include "pmix_server.h"
-#include "pmix_db.h"
-#include "pmix_state.h"
-#include "pmix_client.h"
+#include "pmixp_common.h"
+#include "pmixp_info.h"
+#include "pmixp_coll.h"
+#include "pmixp_debug.h"
+#include "pmixp_io.h"
+#include "pmixp_client.h"
+#include "pmixp_server.h"
+#include "pmixp_db.h"
+#include "pmixp_state.h"
+#include "pmixp_client.h"
 
 #define PMIX_SERVER_MSG_MAGIC 0xdeadbeef
 typedef struct {

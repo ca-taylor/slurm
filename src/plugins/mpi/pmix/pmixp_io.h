@@ -40,8 +40,8 @@
 #define PMIX_IO_H
 
 #include <poll.h>
-#include "pmix_common.h"
-#include "pmix_utils.h"
+#include "pmixp_common.h"
+#include "pmixp_utils.h"
 
 // Message management
 

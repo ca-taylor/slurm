@@ -37,9 +37,9 @@
 \*****************************************************************************/
 
 #include <string.h>
-#include "pmix_common.h"
-#include "pmix_debug.h"
-#include "pmix_info.h"
+#include "pmixp_common.h"
+#include "pmixp_debug.h"
+#include "pmixp_info.h"
 
 // Client communication
 static char *_cli_addr = NULL;

@@ -36,14 +36,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include "pmix_common.h"
+#include "pmixp_common.h"
 #include "src/slurmd/common/reverse_tree_math.h"
 #include "src/common/slurm_protocol_api.h"
-#include "pmix_info.h"
-#include "pmix_debug.h"
-#include "pmix_state.h"
-#include "pmix_server.h"
-#include "pmix_db.h"
+#include "pmixp_info.h"
+#include "pmixp_debug.h"
+#include "pmixp_state.h"
+#include "pmixp_server.h"
+#include "pmixp_db.h"
 
 void **node_data = NULL;
 int *node_sizes = NULL;

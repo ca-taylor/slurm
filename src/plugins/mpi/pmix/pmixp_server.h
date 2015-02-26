@@ -1,5 +1,5 @@
 /*****************************************************************************\
- **  pmix_agent.h - PMIx agent thread
+ **  pmix_server.h - PMIx server side functionality
  *****************************************************************************
  *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
  *                     Russian Academy of Science
@@ -36,12 +36,25 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_AGENT_H
-#define PMIX_AGENT_H
+#ifndef PMIX_SERVER_H
+#define PMIX_SERVER_H
 
-#include "pmix_common.h"
+#include "pmixp_common.h"
 
-int pmix_agent_start(void);
-void pmix_agent_task_cleanup();
+typedef enum { PMIX_FENCE, PMIX_FENCE_RESP, PMIX_DIRECT, PMIX_DIRECT_RESP  } pmix_srv_cmd_t;
 
-#endif // AGENT_H
+int pmix_stepd_init(const stepd_step_rec_t *job, char ***env);
+int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
+void pmix_server_new_conn(int fd);
+
+void *pmix_server_alloc_msg(uint32_t size, void **payload);
+void *pmix_server_alloc_msg_next(uint32_t size, void **payload);
+
+void pmix_server_msg_setcmd(void *msg, pmix_srv_cmd_t cmd);
+void pmix_server_msg_finalize(void *msg);
+uint32_t pmix_server_msg_size(void *msg);
+void *pmix_server_msg_start(void *msg);
+void pmix_server_dmdx_request(uint32_t localid, uint32_t taskid);
+void pmix_server_dmdx_notify(uint32_t localid);
+
+#endif // SERVER_H

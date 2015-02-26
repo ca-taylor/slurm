@@ -43,10 +43,10 @@
 #include <sys/un.h>
 #include <errno.h>
 
-#include "pmix_common.h"
-#include "pmix_io.h"
-#include "pmix_debug.h"
-#include "pmix_utils.h"
+#include "pmixp_common.h"
+#include "pmixp_io.h"
+#include "pmixp_debug.h"
+#include "pmixp_utils.h"
 
 void pmix_io_init(pmix_io_engine_t *eng, int fd, pmix_io_engine_header_t header)
 {
