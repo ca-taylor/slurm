@@ -43,7 +43,7 @@
 
 #define MAX_MSG_SIZE 1024
 
-#define PMIX_DEBUG(format, args...) {           \
+#define PMIXP_DEBUG(format, args...) {           \
   char file[] = __FILE__;                       \
   char *file_base = strrchr(file, '/');         \
   if( file_base == NULL ){                      \
@@ -55,7 +55,7 @@
         ## args);                               \
 }
 
-#define PMIX_ERROR(format, args...) {                 \
+#define PMIXP_ERROR(format, args...) {                 \
   char file[] = __FILE__;                             \
   char *file_base = strrchr(file, '/');               \
   if( file_base == NULL ){                            \
@@ -67,7 +67,7 @@
         ## args, strerror(errno), errno);             \
 }
 
-#define PMIX_ERROR_NO(err, format, args...) {                 \
+#define PMIXP_ERROR_NO(err, format, args...) {                 \
   char file[] = __FILE__;                             \
   char *file_base = strrchr(file, '/');               \
   if( file_base == NULL ){                            \
@@ -85,13 +85,16 @@
   }                                                   \
 }
 #ifdef NDEBUG
-#define pmix_debug_hang(x)
+#define pmixp_debug_hang(x)
 #else
-inline static void pmix_debug_hang(int delay)
+inline static void _pmixp_debug_hang(int delay)
 {
 	while (delay) {
 		sleep(1);
 	}
 }
+
+#define pmixp_debug_hang(x) _pmixp_debug_hang(x)
+
 #endif
 #endif				// PMIX_DEBUG_H

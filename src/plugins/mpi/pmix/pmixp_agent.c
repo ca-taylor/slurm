@@ -74,13 +74,13 @@ static struct io_operations cli_ops = {
 
 static bool _server_conn_readable(eio_obj_t *obj)
 {
-	PMIX_DEBUG("fd = %d", obj->fd);
+	PMIXP_DEBUG("fd = %d", obj->fd);
 	if (obj->shutdown == true) {
 		if (obj->fd != -1) {
 			close(obj->fd);
 			obj->fd = -1;
 		}
-		PMIX_DEBUG("    false, shutdown");
+		PMIXP_DEBUG("    false, shutdown");
 		return false;
 	}
 	return true;
@@ -96,15 +96,15 @@ _server_conn_read(eio_obj_t *obj, List objs)
 	char buf[INET_ADDRSTRLEN];
 	int shutdown = 0;
 
-	PMIX_DEBUG("fd = %d", obj->fd);
+	PMIXP_DEBUG("fd = %d", obj->fd);
 
 	while (1) {
 		// Return early if fd is not now ready
-		if (!pmix_fd_read_ready(obj->fd, &shutdown ) ){
+		if (!pmixp_fd_read_ready(obj->fd, &shutdown ) ){
 			if( shutdown ){
 				obj->shutdown = true;
 				if( shutdown < 0 ){
-					PMIX_ERROR_NO(shutdown, "sd=%d failure", obj->fd);
+					PMIXP_ERROR_NO(shutdown, "sd=%d failure", obj->fd);
 				}
 			}
 			return 0;
@@ -119,16 +119,16 @@ _server_conn_read(eio_obj_t *obj, List objs)
 					(errno == EWOULDBLOCK)) {
 				return 0;
 			}
-			PMIX_ERROR("accept()ing connection sd=%d", obj->fd);
+			PMIXP_ERROR("accept()ing connection sd=%d", obj->fd);
 			return 0;
 		}
 
-		if( pmix_info_is_srun() ){
+		if( pmixp_info_is_srun() ){
 			sin = (struct sockaddr_in *) &addr;
 			inet_ntop(AF_INET, &sin->sin_addr, buf, INET_ADDRSTRLEN);
-			PMIX_DEBUG("accepted connection: ip=%s sd=%d", buf, fd);
+			PMIXP_DEBUG("accepted connection: ip=%s sd=%d", buf, fd);
 		} else {
-			PMIX_DEBUG("accepted connection: sd=%d", fd);
+			PMIXP_DEBUG("accepted connection: sd=%d", fd);
 		}
 		/* read command from socket and handle it */
 		pmix_server_new_conn(fd);
@@ -140,13 +140,13 @@ _server_conn_read(eio_obj_t *obj, List objs)
 static bool _cli_conn_readable(eio_obj_t *obj)
 {
 	// FIXME: What should we do in addition?
-	PMIX_DEBUG("fd = %d", obj->fd);
+	PMIXP_DEBUG("fd = %d", obj->fd);
 	if (obj->shutdown == true) {
 		if (obj->fd != -1) {
 			close(obj->fd);
 			obj->fd = -1;
 		}
-		PMIX_DEBUG("    false, shutdown");
+		PMIXP_DEBUG("    false, shutdown");
 		return false;
 	}
 	return true;
@@ -157,15 +157,15 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
 	int fd;
 	int shutdown;
 
-	PMIX_DEBUG("fd = %d", obj->fd);
+	PMIXP_DEBUG("fd = %d", obj->fd);
 
 	while (1) {
 		// Return early if fd is not now ready
-		if (!pmix_fd_read_ready(obj->fd, &shutdown)){
+		if (!pmixp_fd_read_ready(obj->fd, &shutdown)){
 			// The error occurs or fd was closed
 			if( shutdown < 0 ){
 				obj->shutdown = true;
-				PMIX_ERROR_NO(-shutdown, "sd=%d failure", obj->fd);
+				PMIXP_ERROR_NO(-shutdown, "sd=%d failure", obj->fd);
 			}
 			return 0;
 		}
@@ -179,12 +179,12 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
 					(errno == EWOULDBLOCK)) {
 				return 0;
 			}
-			PMIX_ERROR("unable to accept new connection");
+			PMIXP_ERROR("unable to accept new connection");
 			return 0;
 		}
 
-		if( pmix_info_is_srun() ){
-			PMIX_ERROR("srun shouldn't be directly connected to clients");
+		if( pmixp_info_is_srun() ){
+			PMIXP_ERROR("srun shouldn't be directly connected to clients");
 			return 0;
 		}
 
@@ -200,28 +200,28 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
  */
 static void *_agent(void * unused)
 {
-	PMIX_DEBUG("Start agent thread");
+	PMIXP_DEBUG("Start agent thread");
 	eio_obj_t *srv_obj, *cli_obj;
 
 	pmix_io_handle = eio_handle_create(0);
 
-	//fd_set_nonblocking(tree_sock);
-	srv_obj = eio_obj_create(pmix_info_srv_fd(), &srv_ops, (void *)(-1));
+
+	srv_obj = eio_obj_create(pmixp_info_srv_fd(), &srv_ops, (void *)(-1));
 	eio_new_initial_obj(pmix_io_handle, srv_obj);
 
 	/* for stepd, add the sockets to tasks */
-	if( pmix_info_is_stepd() ) {
+	if( pmixp_info_is_stepd() ) {
 		cli_obj = eio_obj_create(pmix_info_cli_fd(), &cli_ops, (void*)(long)(-1));
 		eio_new_initial_obj(pmix_io_handle, cli_obj);
 	}
 
-	pmix_state_init();
+	pmixp_state_init();
 	pmix_db_init();
-	pmix_info_io_set(pmix_io_handle);
+	pmixp_info_io_set(pmix_io_handle);
 
 	eio_handle_mainloop(pmix_io_handle);
 
-	PMIX_DEBUG("agent thread exit");
+	PMIXP_DEBUG("agent thread exit");
 
 	//pmix_state_destroy();
 	eio_handle_destroy(pmix_io_handle);
@@ -238,14 +238,14 @@ int pmix_agent_start(void)
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	while ((errno = pthread_create(&pmix_agent_tid, &attr, _agent, NULL))) {
 		if (++retries > MAX_RETRIES) {
-			PMIX_ERROR("pthread_create error");
+			PMIXP_ERROR("pthread_create error");
 			slurm_attr_destroy(&attr);
 			return SLURM_ERROR;
 		}
 		sleep(1);
 	}
 	slurm_attr_destroy(&attr);
-	PMIX_DEBUG("started agent thread (%lu)", (unsigned long) pmix_agent_tid);
+	PMIXP_DEBUG("started agent thread (%lu)", (unsigned long) pmix_agent_tid);
 
 	return SLURM_SUCCESS;
 }
@@ -253,5 +253,5 @@ int pmix_agent_start(void)
 void pmix_agent_task_cleanup()
 {
 	close(pmix_info_cli_fd());
-	close(pmix_info_srv_fd());
+	close(pmixp_info_srv_fd());
 }

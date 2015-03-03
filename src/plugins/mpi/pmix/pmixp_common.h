@@ -62,11 +62,12 @@
 #include "src/common/fd.h"
 #include "src/common/net.h"
 
-#define PMIX_STEPD_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_stepd.%u.%u"
-#define PMIX_STEPD_LOCAL_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_stepd_local.%u.%u"
-#define PMIX_SRUN_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_srun.%u.%u"
-#define PMIX_CLI_ADDR_FMT "/home/artpol/slurm_tmp/sock.pmix_cli.%u.%u"
+// PMIx library header
+#include <pmix_server.h>
 
+// TODO: use /tmp directory instead
+#define PMIXP_TMPDIR "/home/artpol/slurm_tmp/"
+#define PMIXP_STEPD_ADDR_FMT PMIX_TMPDIR "sock.pmix_stepd.%u.%u"
 #define MAX_USOCK_PATH                                      \
 	( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) - \
 	(size_t)&(((struct sockaddr_un *)0)->sun_path) )

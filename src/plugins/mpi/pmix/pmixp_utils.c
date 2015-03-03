@@ -51,65 +51,78 @@
 
 #define PMIX_MAX_RETRY 7
 
-void pmix_xfree_buffer(void *x){
+void pmixp_xfree_buffer(void *x)
+{
 	xfree(x);
 }
 
-int pmix_usock_create_srv(char *path)
+int pmixp_usock_create_srv(char *path)
 {
 	static struct sockaddr_un sa;
 	int ret = 0;
 
+	// Make sure that socket file doesn't exists
+	if( 0 == access(path, F_OK) ){
+		// remove old file
+		if( 0 != unlink(path) ){
+			PMIXP_ERROR("Cannot delete outdated socket fine: %s",
+				    path);
+			return SLURM_ERROR;
+		}
+	}
+
 	if( strlen(path) >= sizeof(sa.sun_path) ){
-		PMIX_ERROR("The size of UNIX sockety path is greater than possible: "
-				   "%lu, max %lu", (unsigned long)strlen(path), (unsigned long)sizeof(sa.sun_path)-1);
-		return -1;
+		PMIXP_ERROR("UNIX socket path is too long: %lu, max %lu",
+			    (unsigned long)strlen(path),
+			    (unsigned long)sizeof(sa.sun_path)-1);
+		return SLURM_ERROR;
 	}
 
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if( fd < 0 ){
-		PMIX_ERROR("Cannot create UNIX socket");
-		return fd;
+		PMIXP_ERROR("Cannot create UNIX socket");
+		return SLURM_ERROR;
 	}
 
 	memset(&sa, 0, sizeof(sa));
 	sa.sun_family = AF_UNIX;
-
 	strcpy(sa.sun_path, path);
 	if( ret = bind(fd, (struct sockaddr*)&sa, SUN_LEN(&sa)) ){
-		PMIX_ERROR("Cannot bind() UNIX socket %s", path);
+		PMIXP_ERROR("Cannot bind() UNIX socket %s", path);
 		goto err_fd;
 	}
 
 	if( (ret = listen(fd, 64)) ){
-		PMIX_ERROR("Cannot bind() UNIX socket %s", path);
+		PMIXP_ERROR("Cannot listen(%d, 64) UNIX socket %s",
+			    fd, path);
 		goto err_bind;
 
 	}
 	return fd;
 
 err_bind:
-	close(fd);
 	unlink(path);
-	return ret;
-
 err_fd:
 	close(fd);
 	return ret;
 }
 
-size_t pmix_read_buf(int fd, void *buf, size_t count, int *shutdown, bool blocking)
+size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown, bool blocking)
 {
 	ssize_t ret, offs = 0;
 
 	*shutdown = 0;
 
-	if( !blocking && !pmix_fd_read_ready(fd, shutdown) ){
+	if( !blocking && !pmixp_fd_read_ready(sd, shutdown) ){
 		return 0;
 	}
 
+	if( blocking ){
+		fd_set_blocking(sd);
+	}
+
 	while( count - offs > 0 ) {
-		ret = read(fd, (char*)buf + offs, count - offs);
+		ret = read(sd, (char*)buf + offs, count - offs);
 		if( ret > 0 ){
 			offs += ret;
 			continue;
@@ -122,28 +135,37 @@ size_t pmix_read_buf(int fd, void *buf, size_t count, int *shutdown, bool blocki
 		case EINTR:
 			continue;
 		case EWOULDBLOCK:
+			// we can get here in non-blocking mode only
 			return offs;
 		default:
-			PMIX_ERROR("blocking=%d",blocking);
+			PMIXP_ERROR("blocking=%d",blocking);
 			*shutdown = -errno;
 			return offs;
 		}
 	}
+
+	if( blocking ){
+		fd_set_nonblocking(sd);
+	}
 	return offs;
 }
 
-size_t pmix_write_buf(int fd, void *buf, size_t count, int *shutdown)
+size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown, bool blocking)
 {
 	ssize_t ret, offs = 0;
 
 	*shutdown = 0;
 
-	if( !pmix_fd_write_ready(fd, shutdown) ){
+	if( !blocking && !pmixp_fd_write_ready(sd, shutdown) ){
 		return 0;
 	}
 
+	if( blocking ){
+		fd_set_blocking(sd);
+	}
+
 	while( count - offs > 0 ) {
-		ret = write(fd, (char*)buf + offs, count - offs);
+		ret = write(sd, (char*)buf + offs, count - offs);
 		if( ret > 0 ){
 			offs += ret;
 			continue;
@@ -158,10 +180,15 @@ size_t pmix_write_buf(int fd, void *buf, size_t count, int *shutdown)
 			return offs;
 		}
 	}
+
+	if( blocking ){
+		fd_set_nonblocking(sd);
+	}
+
 	return offs;
 }
 
-bool pmix_fd_read_ready(int fd, int *shutdown)
+bool pmixp_fd_read_ready(int fd, int *shutdown)
 {
 	struct pollfd pfd[1];
 	int    rc;
@@ -189,7 +216,7 @@ bool pmix_fd_read_ready(int fd, int *shutdown)
 }
 
 
-bool pmix_fd_write_ready(int fd, int *shutdown)
+bool pmixp_fd_write_ready(int fd, int *shutdown)
 {
 	struct pollfd pfd[1];
 	int    rc;
@@ -212,13 +239,13 @@ bool pmix_fd_write_ready(int fd, int *shutdown)
 }
 
 
-int pmix_stepd_send(char *nodelist, char *address, uint32_t len, char *data)
+int pmixp_stepd_send(char *nodelist, char *address, uint32_t len, char *data)
 {
 	int retry = 0, rc;
 	unsigned int delay = 100; /* in milliseconds */
 	while (1) {
 		if (retry == 1) {
-			PMIX_DEBUG("send failed, rc=%d, retrying", rc);
+			PMIXP_DEBUG("send failed, rc=%d, retrying", rc);
 		}
 
 		rc = slurm_forward_data(nodelist, address, len, data);
@@ -236,20 +263,20 @@ int pmix_stepd_send(char *nodelist, char *address, uint32_t len, char *data)
 	return rc;
 }
 
-int pmix_srun_send(slurm_addr_t *addr, uint32_t len, char *data)
+int pmixp_srun_send(slurm_addr_t *addr, uint32_t len, char *data)
 {
 	int retry = 0, rc;
 	unsigned int delay = 100; /* in milliseconds */
 	int fd;
 	fd = slurm_open_stream(addr, true);
 	if (fd < 0){
-		PMIX_ERROR("Cannot send collective data to srun (slurm_open_stream)");
+		PMIXP_ERROR("Cannot send collective data to srun (slurm_open_stream)");
 		return SLURM_ERROR;
 	}
 
 	while (1) {
 		if (retry == 1) {
-			PMIX_DEBUG("send failed, rc=%d, retrying", rc);
+			PMIXP_DEBUG("send failed, rc=%d, retrying", rc);
 		}
 
 		rc = slurm_msg_sendto(fd, data, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);

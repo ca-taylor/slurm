@@ -42,11 +42,12 @@
 
 #include "pmixp_common.h"
 
+extern pmix_server_module_t _slurm_pmix_callbacks;
 
+int pmixp_libpmix_init(struct sockaddr_un *address);
+int pmixp_libpmix_job_set();
+void pmix_libpmix_task_set(int rank, char ***env);
 
 void pmix_client_new_conn(int fd);
-void pmix_client_fence_notify();
-void pmix_client_taskid_reply(uint32_t taskid);
-
 
 #endif // CLIENT_H
