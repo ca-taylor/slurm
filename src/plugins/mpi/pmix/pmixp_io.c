@@ -48,14 +48,14 @@
 #include "pmixp_debug.h"
 #include "pmixp_utils.h"
 
-void pmix_io_init(pmix_io_engine_t *eng, int fd, pmix_io_engine_header_t header)
+void pmix_io_init(pmixp_io_engine_t *eng, int fd, pmixp_io_engine_header_t header)
 {
 	// Initialize general options
 #ifndef NDEBUG
     eng->magic = PMIX_MSGSTATE_MAGIC;
 #endif
 	eng->error = 0;
-	eng->fd = fd;
+	eng->sd = fd;
 	eng->header = header;
 	eng->operating = true;
 
@@ -83,10 +83,10 @@ void pmix_io_init(pmix_io_engine_t *eng, int fd, pmix_io_engine_header_t header)
 	eng->send_hdr_size = eng->send_hdr_offs = 0;
 	eng->send_payload = NULL;
 	eng->send_pay_size = eng->send_pay_offs = 0;
-	eng->send_queue = list_create(pmix_xfree_buffer);
+	eng->send_queue = list_create(pmixp_xfree_buffer);
 }
 
-void pmix_io_finalize(pmix_io_engine_t *eng, int error)
+void pmix_io_finalize(pmixp_io_engine_t *eng, int error)
 {
 	if( !eng->operating ){
 		return;
@@ -139,20 +139,20 @@ int pmix_io_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len)
 	int shutdown;
 	uint32_t offs = *_offs;
 
-	offs += pmix_read_buf(fd, buf + offs, len, &shutdown, true);
+	offs += pmixp_read_buf(fd, buf + offs, len, &shutdown, true);
 	*_offs = offs;
 	if( shutdown ){
 		if( shutdown < 0 ){
-			PMIX_ERROR_NO(shutdown, "Unexpected connection close");
+			PMIXP_ERROR_NO(shutdown, "Unexpected connection close");
 		} else {
-			PMIX_DEBUG("Unexpected connection close");
+			PMIXP_DEBUG("Unexpected connection close");
 		}
 		return SLURM_ERROR;
 	}
 	return 0;
 }
 
-inline static void _rcvd_next_message(pmix_io_engine_t *eng)
+inline static void _rcvd_next_message(pmixp_io_engine_t *eng)
 {
 	xassert( eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->rcvd_hdr != NULL );
@@ -165,7 +165,7 @@ inline static void _rcvd_next_message(pmix_io_engine_t *eng)
 
 }
 
-inline static int _rcvd_swithch_to_body(pmix_io_engine_t *eng)
+inline static int _rcvd_swithch_to_body(pmixp_io_engine_t *eng)
 {
 	int rc;
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
@@ -178,7 +178,7 @@ inline static int _rcvd_swithch_to_body(pmix_io_engine_t *eng)
 	if( eng->header.unpack_hdr_cb ){
 		// If this is inter-node communication - unpack the buffer first
 		if( (rc = eng->header.unpack_hdr_cb(eng->rcvd_hdr, eng->rcvd_hdr_host)) ){
-			PMIX_ERROR_NO(rc, "Cannot unpack message header");
+			PMIXP_ERROR_NO(rc, "Cannot unpack message header");
 			return rc;
 		}
 	}
@@ -187,12 +187,12 @@ inline static int _rcvd_swithch_to_body(pmix_io_engine_t *eng)
 	return 0;
 }
 
-inline static bool _rcvd_have_padding(pmix_io_engine_t *eng)
+inline static bool _rcvd_have_padding(pmixp_io_engine_t *eng)
 {
 	return eng->rcvd_padding && eng->rcvd_pad_recvd < eng->rcvd_padding;
 }
 
-inline static bool _rcvd_need_header(pmix_io_engine_t *eng)
+inline static bool _rcvd_need_header(pmixp_io_engine_t *eng)
 {
 	return eng->rcvd_hdr_offs < eng->header.net_size;
 }
@@ -201,7 +201,7 @@ inline static bool _rcvd_need_header(pmix_io_engine_t *eng)
 /*
  * Add already unpacked (converted from net to host format) header.
  */
-void pmix_io_add_hdr(pmix_io_engine_t *eng, void *buf)
+void pmix_io_add_hdr(pmixp_io_engine_t *eng, void *buf)
 {
 	int rc;
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
@@ -214,12 +214,12 @@ void pmix_io_add_hdr(pmix_io_engine_t *eng, void *buf)
 	}
 }
 
-void pmix_io_rcvd(pmix_io_engine_t *eng)
+void pmix_io_rcvd(pmixp_io_engine_t *eng)
 {
 	size_t size, remain;
 	void *offs;
 	int shutdown;
-	int fd = eng->fd;
+	int fd = eng->sd;
 
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
 
@@ -238,7 +238,7 @@ void pmix_io_rcvd(pmix_io_engine_t *eng)
 		char buf[eng->rcvd_padding];
 		size = eng->rcvd_padding;
 		remain = size - eng->rcvd_pad_recvd;
-		eng->rcvd_pad_recvd += pmix_read_buf(fd, buf, remain, &shutdown, false);
+		eng->rcvd_pad_recvd += pmixp_read_buf(fd, buf, remain, &shutdown, false);
 		if( shutdown ){
 			pmix_io_finalize(eng, 0);
 			return;
@@ -254,7 +254,7 @@ void pmix_io_rcvd(pmix_io_engine_t *eng)
 		size = eng->header.net_size;
 		remain = size - eng->rcvd_hdr_offs;
 		offs = eng->rcvd_hdr + eng->rcvd_hdr_offs;
-		eng->rcvd_hdr_offs += pmix_read_buf(fd, offs, remain, &shutdown, false);
+		eng->rcvd_hdr_offs += pmixp_read_buf(fd, offs, remain, &shutdown, false);
 		if( shutdown ){
 			pmix_io_finalize(eng, shutdown);
 			return;
@@ -278,7 +278,7 @@ void pmix_io_rcvd(pmix_io_engine_t *eng)
 	}
 	size = eng->rcvd_pay_size;
 	remain = size - eng->rcvd_pay_offs;
-	eng->rcvd_pay_offs += pmix_read_buf(fd, eng->rcvd_payload + eng->rcvd_pay_offs,
+	eng->rcvd_pay_offs += pmixp_read_buf(fd, eng->rcvd_payload + eng->rcvd_pay_offs,
 										remain, &shutdown, false);
 	if( shutdown ){
 		pmix_io_finalize(eng, 0);
@@ -286,13 +286,13 @@ void pmix_io_rcvd(pmix_io_engine_t *eng)
 	}
 	if( eng->rcvd_pay_offs  == size ){
 		// normal return. receive another portion later
-		PMIX_DEBUG("Message is ready for processing!");
+		PMIXP_DEBUG("Message is ready for processing!");
 		return;
 	}
 
 }
 
-void *pmix_io_rcvd_extract(pmix_io_engine_t *eng, void *header)
+void *pmix_io_rcvd_extract(pmixp_io_engine_t *eng, void *header)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->operating );
@@ -308,7 +308,7 @@ void *pmix_io_rcvd_extract(pmix_io_engine_t *eng, void *header)
 // Transmitter
 
 
-inline static int _send_set_current(pmix_io_engine_t *eng, void *msg)
+inline static int _send_set_current(pmixp_io_engine_t *eng, void *msg)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->operating );
@@ -333,7 +333,7 @@ inline static int _send_set_current(pmix_io_engine_t *eng, void *msg)
 	return 0;
 }
 
-inline static void _send_free_current(pmix_io_engine_t *eng)
+inline static void _send_free_current(pmixp_io_engine_t *eng)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->operating );
@@ -350,7 +350,7 @@ inline static void _send_free_current(pmix_io_engine_t *eng)
 	eng->send_current = NULL;
 }
 
-inline static int _send_header_ok(pmix_io_engine_t *eng)
+inline static int _send_header_ok(pmixp_io_engine_t *eng)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->operating );
@@ -361,7 +361,7 @@ inline static int _send_header_ok(pmix_io_engine_t *eng)
 			(eng->send_hdr_offs == eng->send_hdr_size);
 }
 
-inline static int _send_payload_ok(pmix_io_engine_t *eng)
+inline static int _send_payload_ok(pmixp_io_engine_t *eng)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->operating );
@@ -370,7 +370,7 @@ inline static int _send_payload_ok(pmix_io_engine_t *eng)
 			(eng->send_pay_size > 0) && (eng->send_pay_offs == eng->send_pay_size);
 }
 
-void pmix_io_send_enqueue(pmix_io_engine_t *eng, void *msg)
+void pmix_io_send_enqueue(pmixp_io_engine_t *eng, void *msg)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC );
 	xassert( eng->operating );
@@ -382,7 +382,7 @@ void pmix_io_send_enqueue(pmix_io_engine_t *eng, void *msg)
 	pmix_io_send_progress(eng);
 }
 
-bool pmix_io_send_pending(pmix_io_engine_t *eng)
+bool pmix_io_send_pending(pmixp_io_engine_t *eng)
 {
 	int rc;
 
@@ -404,16 +404,16 @@ bool pmix_io_send_pending(pmix_io_engine_t *eng)
 		void *msg = list_dequeue(eng->send_queue);
 		xassert( msg != NULL );
 		if( (rc = _send_set_current(eng, msg) ) ){
-			PMIX_ERROR_NO(rc,"Cannot switch to the next message");
+			PMIXP_ERROR_NO(rc,"Cannot switch to the next message");
 			pmix_io_finalize(eng, rc);
 		}
 	}
 	return true;
 }
 
-void pmix_io_send_progress(pmix_io_engine_t *eng)
+void pmix_io_send_progress(pmixp_io_engine_t *eng)
 {
-	int fd = eng->fd;
+	int fd = eng->sd;
 	uint32_t size, remain;
 	void *offs;
 
@@ -428,7 +428,7 @@ void pmix_io_send_progress(pmix_io_engine_t *eng)
 			size = eng->send_hdr_size;
 			remain = size - eng->send_hdr_offs;
 			offs = eng->send_hdr_net + eng->send_hdr_offs;
-			int cnt = pmix_write_buf(fd, offs, remain, &shutdown);
+			int cnt = pmixp_write_buf(fd, offs, remain, &shutdown, false);
 			if( shutdown ){
 				pmix_io_finalize(eng, shutdown);
 				return;
@@ -447,7 +447,7 @@ void pmix_io_send_progress(pmix_io_engine_t *eng)
 			size = eng->send_pay_size;
 			remain = size - eng->send_pay_offs;
 			offs = eng->send_payload + eng->send_pay_offs;
-			int cnt = pmix_write_buf(fd, offs, remain, &shutdown);
+			int cnt = pmixp_write_buf(fd, offs, remain, &shutdown, false);
 			if( shutdown ){
 				pmix_io_finalize(eng, shutdown);
 				return;

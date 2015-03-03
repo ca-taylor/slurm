@@ -42,39 +42,39 @@
 #include "pmixp_state.h"
 #include "pmixp_db.h"
 
-pmix_state_t pmix_state;
+pmixp_state_t pmixp_state;
 // Deferred requests
 List cli_req_sent, cli_req_wait; // TODO: use hash table instead of list?
 // The array of lists.
 // i'th element - list of requests for i'th local client
 List *srv_req;
 
-void pmix_state_init()
+void pmixp_state_init()
 {
 	size_t size, i;
 #ifndef NDEBUG
-	pmix_state.magic = PMIX_STATE_MAGIC;
+	pmixp_state.magic = PMIX_STATE_MAGIC;
 #endif
-	pmix_state.cli_size = pmix_info_ltasks();
-	size = pmix_state.cli_size * sizeof(client_state_t);
-	pmix_state.cli_state = xmalloc( size );
-	size = pmix_state.cli_size * sizeof(List *);
+	pmixp_state.cli_size = pmixp_info_ltasks();
+	size = pmixp_state.cli_size * sizeof(client_state_t);
+	pmixp_state.cli_state = xmalloc( size );
+	size = pmixp_state.cli_size * sizeof(List *);
 	srv_req = xmalloc( size );
-	for( i = 0; i < pmix_state.cli_size; i++ ){
-		pmix_state.cli_state[i].fd = -1;
-		pmix_state.cli_state[i].state = PMIX_CLI_UNCONNECTED;
-		srv_req[i] = list_create(pmix_xfree_buffer);
+	for( i = 0; i < pmixp_state.cli_size; i++ ){
+		pmixp_state.cli_state[i].sd = -1;
+		pmixp_state.cli_state[i].state = PMIX_CLI_UNCONNECTED;
+		srv_req[i] = list_create(pmixp_xfree_buffer);
 	}
-	cli_req_wait = list_create(pmix_xfree_buffer);
-	cli_req_sent = list_create(pmix_xfree_buffer);
+	cli_req_wait = list_create(pmixp_xfree_buffer);
+	cli_req_sent = list_create(pmixp_xfree_buffer);
 
-	pmix_state.coll.state = PMIX_COLL_SYNC;
-	pmix_state.coll.local_joined = 0;
-	pmix_state.coll.nodes_joined = 0;
-	pmix_state.coll.local_contrib = xmalloc(sizeof(uint8_t) * pmix_info_ltasks());
-	memset(pmix_state.coll.local_contrib, 0, sizeof(uint8_t) * pmix_info_ltasks());
-	pmix_state.coll.nodes_contrib = xmalloc(sizeof(uint8_t) * pmix_info_childs());
-	memset(pmix_state.coll.nodes_contrib, 0, sizeof(uint8_t) * pmix_info_childs());
+	pmixp_state.coll.state = PMIX_COLL_SYNC;
+	pmixp_state.coll.local_joined = 0;
+	pmixp_state.coll.nodes_joined = 0;
+	pmixp_state.coll.local_contrib = xmalloc(sizeof(uint8_t) * pmixp_info_ltasks());
+	memset(pmixp_state.coll.local_contrib, 0, sizeof(uint8_t) * pmixp_info_ltasks());
+	pmixp_state.coll.nodes_contrib = xmalloc(sizeof(uint8_t) * pmix_info_childs());
+	memset(pmixp_state.coll.nodes_contrib, 0, sizeof(uint8_t) * pmix_info_childs());
 }
 
 static bool _prepare_new_coll(uint32_t gen, int idx)
@@ -85,8 +85,8 @@ static bool _prepare_new_coll(uint32_t gen, int idx)
 	uint32_t my_gen = pmix_db_generation_next();
 	if( my_gen != gen){
 		// TODO: respond with error!
-		char *p = pmix_info_nth_child_name(idx);
-		PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
+		char *p = pmixp_info_nth_child_name(idx);
+		PMIXP_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
 				   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
 		xfree(p);
 		return false;
@@ -97,19 +97,19 @@ static bool _prepare_new_coll(uint32_t gen, int idx)
 // Check events
 static int _coll_new_task_contrib()
 {
-	switch( pmix_state.coll.state ){
+	switch( pmixp_state.coll.state ){
 	case PMIX_COLL_SYNC:
-		PMIX_DEBUG("Start collective");
-		pmix_state.coll.state = PMIX_COLL_GATHER;
+		PMIXP_DEBUG("Start collective");
+		pmixp_state.coll.state = PMIX_COLL_GATHER;
 	case PMIX_COLL_GATHER:
-		PMIX_DEBUG("New contribution");
+		PMIXP_DEBUG("New contribution");
 		return SLURM_SUCCESS;
 	case PMIX_COLL_FORWARD:
 		// This is not ok. Task shouldn't contribute during forward phase
-		PMIX_ERROR_NO(0,"New task contribution during FORWARD phase");
+		PMIXP_ERROR_NO(0,"New task contribution during FORWARD phase");
 		return SLURM_ERROR;
 	default:
-		PMIX_ERROR("pmix_state.coll.state has incomplete value %d", pmix_state.coll.state);
+		PMIXP_ERROR("pmix_state.coll.state has incomplete value %d", pmixp_state.coll.state);
 		xassert( 0 );
 		return SLURM_ERROR;
 	}
@@ -118,22 +118,22 @@ static int _coll_new_task_contrib()
 // Check events
 static int _coll_new_node_contrib()
 {
-	switch( pmix_state.coll.state ){
+	switch( pmixp_state.coll.state ){
 	case PMIX_COLL_SYNC:
-		PMIX_DEBUG("Start collective");
-		pmix_state.coll.state = PMIX_COLL_GATHER;
+		PMIXP_DEBUG("Start collective");
+		pmixp_state.coll.state = PMIX_COLL_GATHER;
 	case PMIX_COLL_GATHER:
-		PMIX_DEBUG("New contribution");
+		PMIXP_DEBUG("New contribution");
 		return SLURM_SUCCESS;
 	case PMIX_COLL_FORWARD:
 		// Node might contribute during forward phase. This may happen if our children receives
 		// broadcast from the srun before us and somehow enters next Fence while this node
 		// still waiting for the previous Fence result.
 		// The reason is that upward and downward flows are implemented differently.
-		PMIX_DEBUG("NOTE: New node contribution during FORWARD phase");
+		PMIXP_DEBUG("NOTE: New node contribution during FORWARD phase");
 		return SLURM_SUCCESS;
 	default:
-		PMIX_ERROR("pmix_state.coll.state has incomplete value %d", pmix_state.coll.state);
+		PMIXP_ERROR("pmix_state.coll.state has incomplete value %d", pmixp_state.coll.state);
 		xassert( 0 );
 		return SLURM_ERROR;
 	}
@@ -142,19 +142,19 @@ static int _coll_new_node_contrib()
 // Check events
 static int _coll_forward()
 {
-	switch( pmix_state.coll.state ){
+	switch( pmixp_state.coll.state ){
 	case PMIX_COLL_SYNC:
-		PMIX_ERROR("Inconsistency: can't go to FORWARD from SYNC state");
+		PMIXP_ERROR("Inconsistency: can't go to FORWARD from SYNC state");
 		return SLURM_ERROR;
 	case PMIX_COLL_GATHER:
-		pmix_state.coll.state = PMIX_COLL_FORWARD;
-		PMIX_DEBUG("Transit to FORWARD state");
+		pmixp_state.coll.state = PMIX_COLL_FORWARD;
+		PMIXP_DEBUG("Transit to FORWARD state");
 		return SLURM_SUCCESS;
 	case PMIX_COLL_FORWARD:
-		PMIX_ERROR("FORWARD phase was already enabled");
+		PMIXP_ERROR("FORWARD phase was already enabled");
 		return SLURM_ERROR;
 	default:
-		PMIX_ERROR("pmix_state.coll.state has incomplete value %d", pmix_state.coll.state);
+		PMIXP_ERROR("pmix_state.coll.state has incomplete value %d", pmixp_state.coll.state);
 		xassert( 0 );
 		return SLURM_ERROR;
 	}
@@ -164,18 +164,18 @@ static int _coll_forward()
 static int _coll_sync()
 {
 	pmix_db_commit();
-	switch( pmix_state.coll.state ){
+	switch( pmixp_state.coll.state ){
 	case PMIX_COLL_SYNC:
-		PMIX_ERROR("SYNC phase is already enabled");
+		PMIXP_ERROR("SYNC phase is already enabled");
 		return SLURM_ERROR;
 	case PMIX_COLL_GATHER:
-		PMIX_ERROR("Cannot transit from GATHER phase to SYNC phase");
+		PMIXP_ERROR("Cannot transit from GATHER phase to SYNC phase");
 		return SLURM_ERROR;
 	case PMIX_COLL_FORWARD:
-		PMIX_DEBUG("Go to SYNC state");
-		pmix_state.coll.state = PMIX_COLL_SYNC;
+		PMIXP_DEBUG("Go to SYNC state");
+		pmixp_state.coll.state = PMIX_COLL_SYNC;
 		// Check if we seen new contributions from our childrens
-		if( pmix_state.coll.nodes_joined > 0 ){
+		if( pmixp_state.coll.nodes_joined > 0 ){
 			// Next Fence already started
 
 			// 1. Emulate node contribution (need just one such emulation)
@@ -189,7 +189,7 @@ static int _coll_sync()
 		}
 		return SLURM_SUCCESS;
 	default:
-		PMIX_ERROR("pmix_state.coll.state has incomplete value %d", pmix_state.coll.state);
+		PMIXP_ERROR("pmix_state.coll.state has incomplete value %d", pmixp_state.coll.state);
 		xassert( 0 );
 		return SLURM_ERROR;
 	}
@@ -200,8 +200,8 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 	// Check state consistence
 	if( _coll_new_node_contrib() ){
 		// TODO: respond with error!
-		char *p = pmix_info_nth_child_name(idx);
-		PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]",
+		char *p = pmixp_info_nth_child_name(idx);
+		PMIXP_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]",
 				   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
 		xfree(p);
 		return false;
@@ -209,12 +209,12 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 
 	// Initiate new collective only if we are in synced state
 	// Otherwise - just save this contribution
-	if( pmix_state.coll.state == PMIX_COLL_FORWARD ){
+	if( pmixp_state.coll.state == PMIX_COLL_FORWARD ){
 		// Check that DB generation matches our expectations.
 		if( gen != pmix_db_generation() + 2) {
 			// TODO: respond with error!
-			char *p = pmix_info_nth_child_name(idx);
-			PMIX_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
+			char *p = pmixp_info_nth_child_name(idx);
+			PMIXP_ERROR("%s [%d]: Inconsistent contribution from node %s [%d]: data generation mismatch",
 					   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
 			xfree(p);
 			return false;
@@ -225,17 +225,17 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 		}
 	}
 
-	if( pmix_state.coll.nodes_contrib[idx] ){
+	if( pmixp_state.coll.nodes_contrib[idx] ){
 		// TODO: respond with error!
-		char *p = pmix_info_nth_child_name(idx);
-		PMIX_ERROR("%s [%d]: Node %s [%d] already contributed to the collective",
+		char *p = pmixp_info_nth_child_name(idx);
+		PMIXP_ERROR("%s [%d]: Node %s [%d] already contributed to the collective",
 				   pmix_info_this_host(), pmix_info_nodeid(), p, pmix_info_nth_child(idx) );
 		xfree(p);
 		return false;
 	}
 
-	pmix_state.coll.nodes_contrib[idx] = 1;
-	pmix_state.coll.nodes_joined++;
+	pmixp_state.coll.nodes_contrib[idx] = 1;
+	pmixp_state.coll.nodes_joined++;
 	return true;
 }
 
@@ -243,72 +243,72 @@ bool pmix_state_task_contrib_ok(int idx, bool blocking)
 {
 	// Check state consistence
 	if( _coll_new_task_contrib() ){
-		PMIX_ERROR("%s [%d]: Inconsistent contribution from task %d",
-				   pmix_info_this_host(), pmix_info_nodeid(), pmix_info_task_id(idx) );
+		PMIXP_ERROR("%s [%d]: Inconsistent contribution from task %d",
+				   pmix_info_this_host(), pmix_info_nodeid(), pmixp_info_task_id(idx) );
 		return false;
 	}
 
 	pmix_db_start_update();
 
-	if( pmix_state.coll.local_contrib[idx] ){
-		PMIX_ERROR("%s [%d]: Task %d already contributed to the collective",
-				   pmix_info_this_host(), pmix_info_nodeid(), pmix_info_task_id(idx) );
+	if( pmixp_state.coll.local_contrib[idx] ){
+		PMIXP_ERROR("%s [%d]: Task %d already contributed to the collective",
+				   pmix_info_this_host(), pmix_info_nodeid(), pmixp_info_task_id(idx) );
 		return false;
 	}
 
 	if( blocking ){
-		pmix_state.cli_state[idx].state = PMIX_CLI_COLL;
+		pmixp_state.cli_state[idx].state = PMIX_CLI_COLL;
 	} else {
-		pmix_state.cli_state[idx].state = PMIX_CLI_COLL_NB;
+		pmixp_state.cli_state[idx].state = PMIX_CLI_COLL_NB;
 	}
-	pmix_state.coll.local_contrib[idx] = 1;
-	pmix_state.coll.local_joined++;
+	pmixp_state.coll.local_contrib[idx] = 1;
+	pmixp_state.coll.local_joined++;
 	return true;
 }
 
 bool pmix_state_coll_local_ok()
 {
-	return (pmix_state.coll.local_joined == pmix_info_ltasks() ) &&
-			(pmix_state.coll.nodes_joined == pmix_info_childs());
+	return (pmixp_state.coll.local_joined == pmixp_info_ltasks() ) &&
+			(pmixp_state.coll.nodes_joined == pmix_info_childs());
 }
 
 
 bool pmix_state_node_contrib_cancel(int idx)
 {
 	// Check state consistence
-	if( pmix_state.coll.state != PMIX_COLL_FORWARD ){
-		PMIX_DEBUG("WARNING: trying to cancel contrib for node %s [%d] during wrong phase %d\n",
-				   pmix_info_nth_child_name(idx), pmix_info_nth_child(idx), pmix_state.coll.state );
+	if( pmixp_state.coll.state != PMIX_COLL_FORWARD ){
+		PMIXP_DEBUG("WARNING: trying to cancel contrib for node %s [%d] during wrong phase %d\n",
+				   pmixp_info_nth_child_name(idx), pmix_info_nth_child(idx), pmixp_state.coll.state );
 		return false;
 	}
 	// We need to contribute before we cancel!
-	xassert(pmix_state.coll.nodes_contrib[idx]);
-	pmix_state.coll.nodes_contrib[idx] = 0;
-	pmix_state.coll.nodes_joined--;
-	xassert(pmix_state.coll.nodes_joined >=0 );
+	xassert(pmixp_state.coll.nodes_contrib[idx]);
+	pmixp_state.coll.nodes_contrib[idx] = 0;
+	pmixp_state.coll.nodes_joined--;
+	xassert(pmixp_state.coll.nodes_joined >=0 );
 	return true;
 }
 
 bool pmix_state_task_contrib_cancel(int idx)
 {
 	// Check state consistence
-	if( pmix_state.coll.state != PMIX_COLL_FORWARD ){
-		PMIX_DEBUG("%s [%d]: WARNING: trying to cancel contrib for task [%d] during wrong phase %d\n",
-				   pmix_info_this_host(), pmix_info_nodeid(), pmix_info_task_id(idx), pmix_state.coll.state );
+	if( pmixp_state.coll.state != PMIX_COLL_FORWARD ){
+		PMIXP_DEBUG("%s [%d]: WARNING: trying to cancel contrib for task [%d] during wrong phase %d\n",
+				   pmix_info_this_host(), pmix_info_nodeid(), pmixp_info_task_id(idx), pmixp_state.coll.state );
 		return false;
 	}
 	// We need to contribute before we cancel!
-	xassert(pmix_state.coll.local_contrib[idx]);
-	pmix_state.coll.local_contrib[idx] = 0;
-	pmix_state.coll.local_joined--;
-	xassert(pmix_state.coll.local_joined >=0 );
+	xassert(pmixp_state.coll.local_contrib[idx]);
+	pmixp_state.coll.local_contrib[idx] = 0;
+	pmixp_state.coll.local_joined--;
+	xassert(pmixp_state.coll.local_joined >=0 );
 	return true;
 }
 
 bool pmix_state_coll_forwad()
 {
 	if( _coll_forward() ){
-		PMIX_ERROR("Cannot transit to FORWARD state!");
+		PMIXP_ERROR("Cannot transit to FORWARD state!");
 		return false;
 	}
 	return true;
@@ -317,7 +317,7 @@ bool pmix_state_coll_forwad()
 bool pmix_state_coll_sync()
 {
 	if( _coll_sync() ){
-		PMIX_ERROR("Cannot transit to SYNC state!");
+		PMIXP_ERROR("Cannot transit to SYNC state!");
 		return false;
 	}
 	return true;
@@ -385,7 +385,7 @@ void pmix_state_remote_wait(uint32_t localid, uint32_t taskid)
 
 List pmix_state_remote_to(uint32_t taskid)
 {
-	List ret = list_create(pmix_xfree_buffer);
+	List ret = list_create(pmixp_xfree_buffer);
 	ListIterator i;
 	deferred_t *elem;
 
@@ -404,7 +404,7 @@ List pmix_state_remote_to(uint32_t taskid)
 
 List pmix_state_remote_from(uint32_t localid)
 {
-	List ret = list_create(pmix_xfree_buffer);
+	List ret = list_create(pmixp_xfree_buffer);
 	ListIterator i;
 	deferred_t *elem;
 
@@ -426,7 +426,7 @@ List pmix_state_remote_from(uint32_t localid)
  */
 void pmix_state_local_defer(uint32_t src_lid, uint32_t nodeid)
 {
-	xassert( src_lid < pmix_state.cli_size );
+	xassert( src_lid < pmixp_state.cli_size );
 	int *ptr = xmalloc( sizeof(uint32_t) );
 	*ptr = nodeid;
 	list_enqueue(srv_req[src_lid], ptr);
@@ -440,6 +440,6 @@ int pmix_state_local_reqs_cnt(uint32_t localid)
 List pmix_state_local_reqs_to(uint32_t localid)
 {
 	List ret = srv_req[localid];
-	srv_req[localid] = list_create(pmix_xfree_buffer);
+	srv_req[localid] = list_create(pmixp_xfree_buffer);
 	return ret;
 }

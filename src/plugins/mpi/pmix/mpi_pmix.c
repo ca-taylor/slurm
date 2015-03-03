@@ -51,6 +51,7 @@
 #include "pmixp_info.h"
 
 #include <pmix_server.h>
+#include <pmixp_client.h>
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -86,9 +87,9 @@ const uint32_t plugin_version   = 100;
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
 	int ret;
-	PMIX_DEBUG("slurmstepd initialization");
+	PMIXP_DEBUG("slurmstepd initialization");
 
-	if( ( ret = pmix_stepd_init(job, env) ) ){
+	if( ( ret = pmixp_stepd_init(job, env) ) ){
 		return ret;
 	}
 	ret = pmix_agent_start();
@@ -98,9 +99,23 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 							   char ***env)
 {
-	PMIX_DEBUG("task initialization");
-	env_array_overwrite_fmt(env, SERVER_URI_ENV, "%s", pmix_info_cli_addr());
-	env_array_overwrite_fmt(env, JOBID_ENV, "%d.%d.%d", job->jobid, job->stepid, job->ltaskid);
+	char **tmp_env = NULL;
+	pmixp_debug_hang(0);
+	pmix_libpmix_task_set(job->gtaskid, &tmp_env);
+	if( NULL != tmp_env ){
+		int i;
+		for(i=0; NULL != tmp_env[i]; i++){
+			char *value = strchr(tmp_env[i],'=');
+			if( NULL != value ){
+				*value = '\0';
+				value++;
+				env_array_overwrite(env, (const char *)tmp_env[i], value);
+			}
+			free(tmp_env[i]);
+		}
+		free(tmp_env);
+		tmp_env = NULL;
+	}
 	pmix_agent_task_cleanup();
 	return SLURM_SUCCESS;
 }
@@ -108,11 +123,9 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 mpi_plugin_client_state_t *
 p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 {
-	// pmix_debug_hang(1);
+	// pmixp_debug_hang(1);
 
-    char *ptr = PMIx_Get_version();
-
-	PMIX_DEBUG("srun initialization");
+	PMIXP_DEBUG("srun initialization");
 	if( SLURM_SUCCESS != pmix_srun_init(job,env) ){
 		return NULL;
 	}
@@ -125,12 +138,12 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 
 int p_mpi_hook_client_single_task_per_node(void)
 {
-	PMIX_DEBUG("Single task per node");
+	PMIXP_DEBUG("Single task per node");
 	return false;
 }
 
 int p_mpi_hook_client_fini()
 {
-	PMIX_DEBUG("Cleanup client");
+	PMIXP_DEBUG("Cleanup client");
 	return SLURM_SUCCESS;
 }
