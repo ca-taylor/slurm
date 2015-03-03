@@ -43,7 +43,7 @@
 
 typedef enum { PMIX_FENCE, PMIX_FENCE_RESP, PMIX_DIRECT, PMIX_DIRECT_RESP  } pmix_srv_cmd_t;
 
-int pmix_stepd_init(const stepd_step_rec_t *job, char ***env);
+int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env);
 int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
 void pmix_server_new_conn(int fd);
 

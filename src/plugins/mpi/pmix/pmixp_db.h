@@ -100,7 +100,7 @@ static inline void pmix_db_start_update()
 {
 	if( pmix_db_consistent() ){
 		pmix_db.next_gen++;
-		PMIX_DEBUG("DB: current = %d, next = %d",
+		PMIXP_DEBUG("DB: current = %d, next = %d",
 				   pmix_db.cur_gen, pmix_db.next_gen);
 	}
 }
@@ -128,7 +128,7 @@ static inline void pmix_db_commit()
 	}
 	// Move entire database forward
 	pmix_db.cur_gen = pmix_db.next_gen;
-	PMIX_DEBUG("DB: current = %d, next = %d",
+	PMIXP_DEBUG("DB: current = %d, next = %d",
 			   pmix_db.cur_gen, pmix_db.next_gen);
 
 }
@@ -142,7 +142,7 @@ static inline void pmix_db_add_blob(int taskid, void *blob, int size)
 	if( NULL != pmix_db.blobs_new[taskid] ){
 		// This theoretically shouldn't happen.
 		// WARN and accept the new blob and remove the old one
-		PMIX_ERROR_NO(0,"NEW blob for task %d was rewritten!", taskid);
+		PMIXP_ERROR_NO(0,"NEW blob for task %d was rewritten!", taskid);
 		xfree(pmix_db.blobs_new[taskid]);
 		pmix_db.blobs_new[taskid] = NULL;
 	}

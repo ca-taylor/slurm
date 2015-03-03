@@ -60,7 +60,7 @@ char *_pack_the_data()
 	for(i = 0; i < pmix_info_childs(); i++ ){
 		cum_size += node_sizes[i];
 	}
-	for(i = 0; i < pmix_info_ltasks(); i++ ){
+	for(i = 0; i < pmixp_info_ltasks(); i++ ){
 		cum_size += local_sizes[i];
 	}
 
@@ -77,7 +77,7 @@ char *_pack_the_data()
 		xassert( ret == true );
 	}
 
-	for(i = 0; i < pmix_info_ltasks(); i++ ){
+	for(i = 0; i < pmixp_info_ltasks(); i++ ){
 		memcpy(payload, local_data[i], local_sizes[i]);
 		payload += local_sizes[i];
 		xfree(local_data[i]);
@@ -104,9 +104,9 @@ static void _forward()
 		// We have complete dataset. Broadcast it to others
 		pmix_server_msg_setcmd(msg, PMIX_FENCE_RESP);
 		pmix_server_msg_finalize(msg);
-		rc = pmix_stepd_send(pmix_info_step_hosts(), (char*)pmix_info_srv_addr(), size, msg_begin);
+		rc = pmixp_stepd_send(pmix_info_step_hosts(), (char*)pmixp_info_srv_addr(), size, msg_begin);
 		if( rc != SLURM_SUCCESS ){
-			PMIX_ERROR_NO(EAGAIN, "Cannot broadcast collective data to childrens");
+			PMIXP_ERROR_NO(EAGAIN, "Cannot broadcast collective data to childrens");
 			// xassert here?
 		}
 		pmix_state_coll_sync();
@@ -115,9 +115,9 @@ static void _forward()
 		int rc;
 		pmix_server_msg_setcmd(msg, PMIX_FENCE);
 		pmix_server_msg_finalize(msg);
-		rc = pmix_srun_send(pmix_info_parent_addr(),size, msg_begin);
+		rc = pmixp_srun_send(pmix_info_parent_addr(),size, msg_begin);
 		if( rc != SLURM_SUCCESS ){
-			PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion my portion of  collective data to childrens");
+			PMIXP_ERROR_NO(EAGAIN, "Cannot send collective portion my portion of  collective data to childrens");
 			// xassert here?
 		}
 		break;
@@ -125,14 +125,14 @@ static void _forward()
 	case PMIX_PARENT_STEPD:
 		pmix_server_msg_setcmd(msg, PMIX_FENCE);
 		pmix_server_msg_finalize(msg);
-		rc = pmix_stepd_send(pmix_info_parent_host(), (char*)pmix_info_srv_addr(), size, msg_begin);
+		rc = pmixp_stepd_send(pmix_info_parent_host(), (char*)pmixp_info_srv_addr(), size, msg_begin);
 		if( rc != SLURM_SUCCESS ){
-			PMIX_ERROR_NO(EAGAIN, "Cannot send collective portion to my parent %s", pmix_info_parent_host());
+			PMIXP_ERROR_NO(EAGAIN, "Cannot send collective portion to my parent %s", pmix_info_parent_host());
 			// xassert here?
 		}
 		break;
 	default:
-		PMIX_ERROR("Inconsistent parent type value");
+		PMIXP_ERROR("Inconsistent parent type value");
 		xassert(0);
 	}
 }
@@ -148,7 +148,7 @@ int pmix_coll_init(char ***env)
 	int *children, width, i;
 	char *p;
 
-	PMIX_DEBUG("Start");
+	PMIXP_DEBUG("Start");
 	// FIXME: By now just use SLURM defaults. Make it flexible as PMI2 in future.
 	width = slurm_get_tree_width();
 	reverse_tree_info(nodeid + 1, nodes + 1, width, &parent_id, &child_cnt,
@@ -165,43 +165,43 @@ int pmix_coll_init(char ***env)
 
 	{
 		int i;
-		PMIX_DEBUG("Have %d childrens", child_cnt);
+		PMIXP_DEBUG("Have %d childrens", child_cnt);
 		char buf[1024];
 		for(i=0;i<child_cnt; i++){
 			sprintf(buf,"%s %d", buf, children[i]);
 		}
-		PMIX_DEBUG("%s", buf);
+		PMIXP_DEBUG("%s", buf);
 	}
 
-	if( pmix_info_coll_tree_set(children, child_cnt) ){
+	if( pmixp_info_coll_tree(children, child_cnt) ){
 		return SLURM_ERROR;
 	}
 
 	if( parent_id == -2 ){
 		// this is srun.
-		pmix_info_parent_set_root();
+		pmixp_info_parent_set_root();
 	}else if( parent_id == -1 ){
 		// srun is our parent
 		p = getenvp(*env, PMIX_SRUN_HOST_ENV);
 		if (!p) {
-			PMIX_ERROR("Environment variable %s not found", PMIX_SRUN_HOST_ENV);
+			PMIXP_ERROR("Environment variable %s not found", PMIX_SRUN_HOST_ENV);
 			return SLURM_ERROR;
 		}
 		char *phost = p;
 		p = getenvp(*env, PMIX_SRUN_PORT_ENV);
 		if (!p) {
-			PMIX_ERROR("Environment variable %s not found", PMIX_SRUN_PORT_ENV);
+			PMIXP_ERROR("Environment variable %s not found", PMIX_SRUN_PORT_ENV);
 			return SLURM_ERROR;
 		}
 		uint16_t port = atoi(p);
 		unsetenvp(*env, PMIX_SRUN_PORT_ENV);
-		pmix_info_parent_set_srun(phost, port);
+		pmixp_info_parent_set_srun(phost, port);
 	} else if( parent_id >= 0 ){
-		char *phost = pmix_info_nth_host_name(parent_id);
-		pmix_info_parent_set_stepd(phost);
+		char *phost = pmixp_info_nth_host_name(parent_id);
+		pmixp_info_parent_set_stepd(phost);
 	}
 
-	// Collectove data
+	// Collective data
 	uint32_t size = sizeof(void*) * pmix_info_childs();
 	node_data = xmalloc(size);
 	memset(node_data, 0, size);
@@ -210,11 +210,11 @@ int pmix_coll_init(char ***env)
 	node_sizes = xmalloc( size );
 	memset(node_sizes, 0, size);
 
-	size = sizeof(void*) * pmix_info_ltasks();
+	size = sizeof(void*) * pmixp_info_ltasks();
 	local_data = xmalloc(size);
 	memset(local_data, 0, size);
 
-	size = sizeof(int) *  pmix_info_ltasks();
+	size = sizeof(int) *  pmixp_info_ltasks();
 	local_sizes = xmalloc(size);
 	memset(local_sizes, 0, size);
 
@@ -224,17 +224,17 @@ int pmix_coll_init(char ***env)
 void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t size)
 {
 	int idx = pmix_info_is_child_no(nodeid);
-	PMIX_DEBUG("Receive collective message from node %d", nodeid);
+	PMIXP_DEBUG("Receive collective message from node %d", nodeid);
 	if( idx < 0 ){
 
-		PMIX_ERROR("The node %s [%d] shouldn't send it's data directly to me",
-				   pmix_info_nth_host_name(nodeid), nodeid);
+		PMIXP_ERROR("The node %s [%d] shouldn't send it's data directly to me",
+				   pmixp_info_nth_host_name(nodeid), nodeid);
 		xfree(msg);
 		return;
 	}
 	if( !pmix_state_node_contrib_ok(gen, idx) ){
-		PMIX_ERROR("The node %s [%d] already contributed to this collective",
-				   pmix_info_nth_child_name(idx), nodeid);
+		PMIXP_ERROR("The node %s [%d] already contributed to this collective",
+				   pmixp_info_nth_child_name(idx), nodeid);
 		xfree(msg);
 		return;
 	}
@@ -247,14 +247,14 @@ void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t s
 
 void pmix_coll_task_contrib(uint32_t localid, void *msg, uint32_t size, bool blocking)
 {
-	PMIX_DEBUG("Local task contribution %d", localid);
+	PMIXP_DEBUG("Local task contribution %d", localid);
 	if( !pmix_state_task_contrib_ok(localid, blocking) ){
-		PMIX_ERROR_NO(0,"The task %d already contributed to this collective", localid);
+		PMIXP_ERROR_NO(0,"The task %d already contributed to this collective", localid);
 		return;
 	}
 	uint32_t full_size = sizeof(int)*2 + size;
 	local_data[localid]  = xmalloc( full_size );
-	*((int*)local_data[localid] ) = pmix_info_task_id(localid);
+	*((int*)local_data[localid] ) = pmixp_info_task_id(localid);
 	*((int*)local_data[localid] + 1 ) = size;
 	memcpy((void*)((int*)local_data[localid] + 2), msg, size );
 	local_sizes[localid] = full_size;

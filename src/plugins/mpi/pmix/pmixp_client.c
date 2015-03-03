@@ -45,69 +45,288 @@
 #include "pmixp_coll.h"
 #include "pmixp_server.h"
 
-// ----------------------------------- 8< -----------------------------------------------------------//
+#include <pmix_server.h>
 
+static int terminated_fn(const char nspace[], int rank);
+static int abort_fn(const char nspace[], int rank,
+                    int status, const char msg[],
+                    pmix_op_cbfunc_t cbfunc, void *cbdata);
+static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
+                      int barrier, int collect_data,
+                      pmix_modex_cbfunc_t cbfunc, void *cbdata);
+static int store_modex_fn(const char nspace[], int rank,
+                          pmix_scope_t scope, pmix_modex_data_t *data);
+static int get_modexnb_fn(const char nspace[], int rank,
+                          pmix_modex_cbfunc_t cbfunc, void *cbdata);
+static int publish_fn(pmix_scope_t scope, pmix_persistence_t persist,
+                      const pmix_info_t info[], size_t ninfo,
+                      pmix_op_cbfunc_t cbfunc, void *cbdata);
+static int lookup_fn(pmix_scope_t scope, int wait, char **keys,
+                     pmix_lookup_cbfunc_t cbfunc, void *cbdata);
+static int unpublish_fn(pmix_scope_t scope, char **keys,
+                        pmix_op_cbfunc_t cbfunc, void *cbdata);
+static int spawn_fn(const pmix_app_t apps[], size_t napps,
+                    pmix_spawn_cbfunc_t cbfunc, void *cbdata);
+static int connect_fn(const pmix_range_t ranges[], size_t nranges,
+                      pmix_op_cbfunc_t cbfunc, void *cbdata);
+static int disconnect_fn(const pmix_range_t ranges[], size_t nranges,
+                         pmix_op_cbfunc_t cbfunc, void *cbdata);
+
+pmix_server_module_t _slurm_pmix_cb = {
+    terminated_fn,
+    abort_fn,
+    fencenb_fn,
+    store_modex_fn,
+    get_modexnb_fn,
+    publish_fn,
+    lookup_fn,
+    unpublish_fn,
+    spawn_fn,
+    connect_fn,
+    disconnect_fn
+};
+
+static void errhandler(pmix_status_t status, pmix_range_t ranges[],
+                       size_t nranges, pmix_info_t info[], size_t ninfo);
+
+int pmixp_libpmix_init(struct sockaddr_un *address)
+{
+    int rc;
+
+    setenv("TMPDIR","/home/artpol/slurm_tmp/",1);
+
+    /* setup the server library */
+    if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb, false))) {
+	PMIXP_ERROR("PMIx_server_init failed with error %d\n", rc);
+	return SLURM_ERROR;
+    }
+
+    /* register the errhandler */
+    PMIx_Register_errhandler(errhandler);
+
+    /* retrieve the rendezvous address */
+    if (PMIX_SUCCESS != ( rc = PMIx_get_rendezvous_address(address) ) ) {
+	PMIXP_ERROR("PMIx_get_rendezvous_address failed with error: %d", rc);
+	return SLURM_ERROR;
+    }
+    return 0;
+}
+
+static void errhandler(pmix_status_t status,
+		       pmix_range_t ranges[], size_t nranges,
+		       pmix_info_t info[], size_t ninfo)
+{
+	// TODO: do something more sophisticated here
+	// FIXME: use proper specificator for nranges
+	PMIXP_ERROR("Error handler invoked: status = %d, nranges = %d", status, (int)nranges);
+}
+
+#define PMIXP_ALLOC_KEY(kvp, key_str) {				\
+	char *key = key_str;					\
+	kvp = (pmix_info_t*)xmalloc(sizeof(pmix_info_t));	\
+	(void)strncpy(kvp->key, key, PMIX_MAX_KEYLEN);		\
+}
+
+void pmix_libpmix_task_set(int rank, char ***env)
+{
+	uid_t uid = getuid();
+	gid_t gid = getgid();
+
+	PMIXP_DEBUG("task initialization");
+	PMIx_server_setup_fork(pmixp_info_namespace(), rank, uid, gid, env);
+}
+
+int pmixp_libpmix_job_set()
+{
+	List lresp;
+	pmix_info_t *resp;
+	int ninfo;
+	char *p = NULL;
+	ListIterator it;
+	pmix_info_t *kvp;
+	uint32_t tmp;
+	int i, rc, ret = SLURM_SUCCESS;
+
+	pmixp_debug_hang(1);
+
+	// Use list to safely expand/reduce key-value pairs.
+	lresp = slurm_list_create(pmixp_xfree_buffer);
+
+	/* The name of the current host */
+	PMIXP_ALLOC_KEY(kvp, PMIX_HOSTNAME);
+	PMIX_VAL_SET(&kvp->value, string, pmix_info_this_host());
+	slurm_list_append(lresp, kvp);
+
+	/* Setup temprary directory */
+	/* TODO: consider all ways of setting TMPDIR here: fixed, prolog, what else? */
+	p = getenv("TMPDIR");
+	if( NULL == p ){
+		p = "/tmp/";
+	}
+	PMIXP_ALLOC_KEY(kvp, PMIX_TMPDIR);
+	PMIX_VAL_SET(&kvp->value, string, p);
+	slurm_list_append(lresp, kvp);
+
+	/* jobid assigned by scheduler */
+	p = NULL;
+	xstrfmtcat(p, "%d.%d", pmixp_info_jobid(), pmixp_info_stepid());
+	PMIXP_ALLOC_KEY(kvp, PMIX_JOBID);
+	PMIX_VAL_SET(&kvp->value, string, p);
+	xfree(p);
+	slurm_list_append(lresp, kvp);
+
+	/* process identification ranks */
+	// TODO: what to put here for slurm?
+	// FIXME: This information supposed to be related to the precise rank
 /*
- * PMIx library definitions
- */
+	PMIXP_ALLOC_KEY(kvp, PMIX_GLOBAL_RANK);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
+	slurm_list_append(lresp, kvp);
 
-#define PMIX_VERSION "1.0"
+	PMIXP_ALLOC_KEY(kvp, PMIX_RANK);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
+	slurm_list_append(lresp, kvp);
 
-/* header for pmix client-server msgs - must
- * match that in opal/mca/pmix/native! */
-#define PMIX_CLIENT_HDR_MAGIC 0xdeadbeef
-typedef struct {
-	uint32_t magic;
-	uint32_t localid;
-	uint8_t type;
-	uint32_t tag;
-	size_t nbytes;
-} message_header_t;
+	PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_RANK);
+	PMIX_VAL_SET(&kvp->value, uint32_t, taskid);
+	slurm_list_append(lresp, kvp);
 
-// From OMPI pmix_server implementation
-/* define some commands */
-#define PMIX_ABORT_CMD        1
-#define PMIX_FENCE_CMD        2
-#define PMIX_FENCENB_CMD      3
-#define PMIX_PUT_CMD          4
-#define PMIX_GET_CMD          5
-#define PMIX_GETNB_CMD        6
-#define PMIX_FINALIZE_CMD     7
-#define PMIX_GETATTR_CMD      8
+	PMIXP_ALLOC_KEY(kvp, PMIX_APP_RANK);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
+	slurm_list_append(lresp, kvp);
+*/
+	PMIXP_ALLOC_KEY(kvp, PMIX_APPNUM);
+	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
+	slurm_list_append(lresp, kvp);
 
-/* define some message types */
-#define PMIX_USOCK_IDENT  1
-#define PMIX_USOCK_USER   2
+	PMIXP_ALLOC_KEY(kvp, PMIX_NODE_RANK);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_nodeid());
+	slurm_list_append(lresp, kvp);
 
-typedef struct {
-	char hname[32];
-	char tmpdir[256];
-	char jobid[32];
-	uint32_t appnum;
-	uint32_t rank; //FIXME: what is it for?
-	uint32_t grank;
-	uint32_t apprank;
-	uint32_t offset;
-	uint16_t lrank;
-	uint16_t nrank;
-	uint64_t lldr;
-	uint32_t aldr;
-	uint32_t usize;
-	uint32_t jsize;
-	uint32_t lsize;
-	uint32_t nsize;
-	uint32_t msize;
-} job_attr_t;
+	/* size information */
+	PMIXP_ALLOC_KEY(kvp, PMIX_UNIV_SIZE);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_tasks_uni());
+	slurm_list_append(lresp, kvp);
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_JOB_SIZE);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_tasks());
+	slurm_list_append(lresp, kvp);
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_SIZE);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_ltasks());
+	slurm_list_append(lresp, kvp);
+
+	// TODO: fix it in future
+	PMIXP_ALLOC_KEY(kvp, PMIX_NODE_SIZE);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_ltasks());
+	slurm_list_append(lresp, kvp);
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_MAX_PROCS);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_tasks_uni());
+	slurm_list_append(lresp, kvp);
+
+	/* offset information */
+	// TODO: Fix this in future once Spawn will be implemented
+	PMIXP_ALLOC_KEY(kvp, PMIX_NPROC_OFFSET);
+	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
+	slurm_list_append(lresp, kvp);
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_APPLDR);
+	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
+	slurm_list_append(lresp, kvp);
+
+	//-----------------------------------------------------------------
+	// FIXME: this is a workaround. Should be fixed in future
+	for(i=0;i<pmixp_info_ltasks();i++){
+		char **env = NULL;
+		uint32_t rank = pmixp_info_task_id(i);
+		//env[0] = NULL;x
+		pmix_libpmix_task_set((int)rank, &env);
+		if( NULL != env ){
+			int i;
+			for(i=0; NULL != env[i]; i++){
+				free(env[i]);
+			}
+			free(env);
+			env = NULL;
+		}
+	}
+	//-----------------------------------------------------------------
+
+	xstrfmtcat(p,"%u", pmixp_info_task_id(0));
+	tmp = pmixp_info_task_id(0);
+	for(i=1;i<pmixp_info_ltasks();i++){
+		uint32_t rank = pmixp_info_task_id(i);
+		xstrfmtcat(p,",%u", rank);
+		if( tmp > rank ){
+			tmp = rank;
+		}
+	}
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_PEERS);
+	PMIX_VAL_SET(&kvp->value, string, p);
+	xfree(p);
+	slurm_list_append(lresp, kvp);
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_LOCALLDR);
+	PMIX_VAL_SET(&kvp->value, uint32_t, tmp);
+	slurm_list_append(lresp, kvp);
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_PROC_MAP);
+	PMIX_VAL_SET(&kvp->value, string, pmix_info_task_map());
+	slurm_list_append(lresp, kvp);
+
+	ninfo = slurm_list_count(lresp);
+	resp = xmalloc(sizeof(pmix_info_t) * ninfo);
+	it = slurm_list_iterator_create(lresp);
+	i = 0;
+	while( NULL != (kvp = slurm_list_next(it) ) ){
+		resp[i] = *kvp;
+		i++;
+	}
+	slurm_list_destroy(lresp);
+
+	rc = PMIx_server_setup_job(pmixp_info_namespace(), resp, ninfo);
+	if( PMIX_SUCCESS != rc ){
+		ret = SLURM_ERROR;
+	}
+	xfree(resp);
+	return ret;
+}
 
 
+static uint32_t payload_size_cb(void *buf)
+{
+    return (uint32_t)PMIx_message_payload_size(buf);
+}
+
+static void _auth_send_cb(int sd/*, int localid*/, char *payload, size_t size)
+{
+	int shutdown;
+	pmixp_write_buf(sd, payload, size, &shutdown, true);
+}
+
+static void _send_cb(int sd/*, int localid*/, char *payload, size_t size)
+{
+	int localid = 0;
+	pmixp_io_engine_t *eng = NULL;
+
+	for( ; localid < pmixp_state_cli_io_size(); localid++ ){
+		eng = pmixp_state_cli_io(localid);
+		if( sd == eng->sd){
+			break;
+		}
+	}
+	if( pmixp_state_cli_io_size() <= localid ){
+		// not found
+		return;
+	}
+	void *msg = xmalloc(size);
+	memcpy(msg, payload, size);
+	pmix_io_send_enqueue(eng, msg);
+}
 
 // ----------------------------------- 8< -----------------------------------------------------------//
-
-int _process_message(message_header_t hdr, void *msg);
-int _establish_connection(message_header_t hdr, void *msg);
-inline void _fill_job_attributes(uint32_t taskid, job_attr_t *jattr);
-int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent);
-int _postpone_cli_request(message_header_t hdr, void *msg);
 
 static bool _peer_readable(eio_obj_t *obj);
 static int _peer_read(eio_obj_t *obj, List objs);
@@ -120,74 +339,41 @@ static struct io_operations peer_ops = {
 	.handle_write = _peer_write
 };
 
-inline static void _send_blob_to(uint32_t localid, uint32_t taskid);
-
-static uint32_t payload_size(void *buf)
+// Nonblocking message processing
+void pmix_client_new_conn(int sd)
 {
-	message_header_t *ptr = (message_header_t*)buf;
-	xassert(ptr->magic == PMIX_CLIENT_HDR_MAGIC);
-	return ptr->nbytes;
-}
-
-pmix_io_engine_header_t cli_header = {
-	.net_size= sizeof(message_header_t),
-	.host_size = sizeof(message_header_t),
-	.pack_hdr_cb = NULL,
-	.unpack_hdr_cb = NULL,
-	.pay_size_cb = payload_size
-};
-
-// Unblocking message processing
-
-static void *_allocate_msg_to_task(uint32_t localid, uint8_t type, uint32_t tag, uint32_t size, void **payload)
-{
-	int msize = size + sizeof(message_header_t);
-	message_header_t *msg = (message_header_t*)xmalloc( msize );
-	msg->magic = PMIX_CLIENT_HDR_MAGIC;
-	msg->nbytes = size;
-	msg->localid = localid;
-	msg->tag = tag;
-	msg->type = type;
-	*payload = (void*)(msg + 1);
-	return msg;
-}
-
-#define _new_msg_connecting(id, size, pay) _allocate_msg_to_task(id, PMIX_USOCK_IDENT, 0, size, pay)
-#define _new_msg(id, size, pay) _allocate_msg_to_task(id, PMIX_USOCK_USER, 0, size, pay)
-#define _new_msg_tag(id, tag, size, pay) _allocate_msg_to_task(id, PMIX_USOCK_USER, tag, size, pay)
-
-void pmix_client_new_conn(int fd)
-{
-	message_header_t hdr;
-	uint32_t offset = 0;
+	int rc;
 	eio_obj_t *obj;
+	pmixp_io_engine_header_t cli_header;
+	int localid, rank;
 
-	PMIX_DEBUG("New connection on fd = %d", fd);
+	cli_header.net_size = PMIx_message_hdr_size();
+	cli_header.host_size = PMIx_message_hdr_size();
+	cli_header.pack_hdr_cb = cli_header.unpack_hdr_cb = NULL;
+	cli_header.pay_size_cb = payload_size_cb;
 
-	// fd was just accept()'ed and is blocking for now.
-	// TODO/FIXME: implement this in nonblocking fashion?
-	pmix_io_first_header(fd, &hdr, &offset, sizeof(hdr) );
-	xassert( offset == sizeof(hdr));
+	PMIXP_DEBUG("New connection on fd = %d", sd);
 
-	// Setup fd
-	fd_set_nonblocking(fd);
-	fd_set_close_on_exec(fd);
-
-	uint32_t localid = hdr.localid;
-	if( pmix_state_cli_connecting(localid,fd) ){
-		PMIX_DEBUG("Bad connection, taskid = %d, fd = %d", pmix_info_task_id(localid), fd);
-		close(fd);
+	/* authenticate the connection */
+	if (PMIX_SUCCESS != (rc = PMIx_server_authenticate_client(sd, &rank /*, &localid*/, _auth_send_cb))) {
+		PMIXP_DEBUG("Cannot authentificate new connection: rc = %d", rc);
 		return;
 	}
 
+	// TODO: fixme
+	localid = rank;
+
+	// Setup fd
+	fd_set_nonblocking(sd);
+	fd_set_close_on_exec(sd);
+
 	// Setup message engine. Push the header we just received to
 	// ensure integrity of msgengine
-	pmix_io_engine_t *me = pmix_state_cli_io(localid);
-	pmix_io_init(me, fd, cli_header);
-	pmix_io_add_hdr(me, &hdr);
+	pmixp_io_engine_t *me = pmixp_state_cli_io_new(localid);
+	pmix_io_init(me, sd, cli_header);
 
-	obj = eio_obj_create(fd, &peer_ops, (void*)(long)localid);
-	eio_new_obj( pmix_info_io(), obj);
+	obj = eio_obj_create(sd, &peer_ops, (void*)(long)localid);
+	eio_new_obj( pmixp_info_io(), obj);
 }
 
 int _finalize_client(uint32_t taskid, eio_obj_t *obj, List objs)
@@ -195,20 +381,20 @@ int _finalize_client(uint32_t taskid, eio_obj_t *obj, List objs)
 	// Don't track this process anymore
 	eio_remove_obj(obj, objs);
 	// Reset client state
-	pmix_state_cli_finalize(taskid);
+	pmixp_state_cli_finalize(taskid);
 	return 0;
 }
 
 static bool _peer_readable(eio_obj_t *obj)
 {
-	PMIX_DEBUG("fd = %d", obj->fd);
-	xassert( !pmix_info_is_srun() );
+	PMIXP_DEBUG("fd = %d", obj->fd);
+	xassert( !pmixp_info_is_srun() );
 	if (obj->shutdown == true) {
 		if (obj->fd != -1) {
 			close(obj->fd);
 			obj->fd = -1;
 		}
-		PMIX_DEBUG("    false, shutdown");
+		PMIXP_DEBUG("    false, shutdown");
 		return false;
 	}
 	return true;
@@ -216,27 +402,25 @@ static bool _peer_readable(eio_obj_t *obj)
 
 static int _peer_read(eio_obj_t *obj, List objs)
 {
-	PMIX_DEBUG("fd = %d", obj->fd);
+	PMIXP_DEBUG("fd = %d", obj->fd);
 	uint32_t localid = (int)(long)(obj->arg);
-	pmix_io_engine_t *eng = pmix_state_cli_io(localid);
+	pmixp_io_engine_t *eng = pmixp_state_cli_io(localid);
+	int rc;
 
 	// Read and process all received messages
 	while( 1 ){
 		pmix_io_rcvd(eng);
 		if( pmix_io_finalized(eng) ){
-			PMIX_DEBUG("Connection with task %d finalized", localid);
+			PMIXP_DEBUG("Connection with task %d finalized", localid);
 			break;
 		}
 		if( pmix_io_rcvd_ready(eng) ){
-			message_header_t hdr;
-			void *msg = pmix_io_rcvd_extract(eng, &hdr);
-			xassert( hdr.localid == localid );
-			//			{
-			//				static int delay = 1;
-			//				pmix_debug_hang(delay);
-			//			}
-			if( _process_message(hdr, msg) ){
-				break;
+			char hdr[PMIx_message_hdr_size()];
+			void *msg = pmix_io_rcvd_extract(eng, hdr);
+			// TODO: process return codes
+			rc = PMIx_server_process_msg(eng->sd, hdr, msg, _send_cb);
+			if( PMIX_SUCCESS != rc ){
+				PMIXP_ERROR_NO(0, "Error processing message: %d", rc);
 			}
 		}else{
 			// No more complete messages
@@ -254,14 +438,14 @@ static int _peer_read(eio_obj_t *obj, List objs)
 
 static bool _peer_writable(eio_obj_t *obj)
 {
-	xassert( !pmix_info_is_srun() );
-	PMIX_DEBUG("fd = %d", obj->fd);
+	xassert( !pmixp_info_is_srun() );
+	PMIXP_DEBUG("fd = %d", obj->fd);
 	if (obj->shutdown == true) {
-		PMIX_ERROR_NO(0,"We shouldn't be here if connection shutdowned");
+		PMIXP_ERROR_NO(0,"We shouldn't be here if connection shutdowned");
 		return false;
 	}
 	uint32_t taskid = (int)(long)(obj->arg);
-	pmix_io_engine_t *me = pmix_state_cli_io(taskid);
+	pmixp_io_engine_t *me = pmixp_state_cli_io(taskid);
 	if( pmix_io_send_pending(me) )
 		return true;
 	return false;
@@ -269,166 +453,22 @@ static bool _peer_writable(eio_obj_t *obj)
 
 static int _peer_write(eio_obj_t *obj, List objs)
 {
-	xassert( !pmix_info_is_srun() );
+	xassert( !pmixp_info_is_srun() );
 
-	PMIX_DEBUG("fd = %d", obj->fd);
+	PMIXP_DEBUG("fd = %d", obj->fd);
 
 	uint32_t taskid = (int)(long)(obj->arg);
-	pmix_io_engine_t *me = pmix_state_cli_io(taskid);
+	pmixp_io_engine_t *me = pmixp_state_cli_io(taskid);
 	pmix_io_send_progress(me);
 	return 0;
 }
 
-int _process_message(message_header_t hdr, void *msg)
-{
-	int rc;
-
-	switch(  pmix_state_cli(hdr.localid) ){
-	case PMIX_CLI_UNCONNECTED:
-		PMIX_ERROR_NO(0,"We shouldn't be here. Obvious programmer mistake");
-		xassert(0);
-		break;
-	case PMIX_CLI_ACK:
-		// process connection establishment
-		rc = _establish_connection(hdr, msg);
-		xfree(msg);
-		break;
-	case PMIX_CLI_OPERATE:
-		return _process_cli_request(hdr, msg, 0);
-	case PMIX_CLI_COLL:
-	case PMIX_CLI_COLL_NB:
-		// We are in the middle of collective. DB is inconsistent.
-		return _process_cli_request(hdr, msg, 1);
-	}
-	return rc;
-}
-
-int _establish_connection(message_header_t hdr, void *msg)
-{
-	uint32_t localid = hdr.localid;
-	pmix_io_engine_t *eng = pmix_state_cli_io(localid);
-	char *version;
-	void *rmsg, *payload;
-	int size;
-
-	if (hdr.type != PMIX_USOCK_IDENT) {
-		PMIX_ERROR_NO(0,"Invalid message header type: %d from ltask=%d, fd = %d",
-					  hdr.type, pmix_info_task_id(localid), pmix_state_cli_fd(localid));
-		return SLURM_ERROR;
-	}
-
-	PMIX_DEBUG("Connection from ltask %d established", localid);
-
-	/* check that this is from a matching version */
-	version = (char*)(msg);
-	if (0 != strcmp(version, PMIX_VERSION ) ) {
-		PMIX_ERROR_NO(0,"PMIx version mismatch");
-		return SLURM_ERROR;
-	}
-
-
-	/* check security token */
-	// TODO: Check with Ralph, skip by now
-
-	// Send ack to a client
-	size = sizeof(PMIX_VERSION) + 1;
-	rmsg = _new_msg_connecting(localid, size, &payload);
-	strcpy((char*)payload, PMIX_VERSION);
-	pmix_io_send_enqueue(eng, rmsg);
-
-	// Switch to PMIX_CLI_OPERATE state
-	pmix_state_cli_connected(localid);
-	return SLURM_SUCCESS;
-}
-
-inline void _fill_job_attributes(uint32_t taskid, job_attr_t *jattr)
-{
-	char *p = NULL;
-
-	// Precise numbers first
-
-	/* name of the host this proc is on */
-	strcpy(jattr->hname, pmix_info_this_host());
-	/* top-level tmp dir assigned to session (Might be ovverrided by prolog!?) */
-	p = getenv("TMPDIR");
-	if( p ){
-		strcpy(jattr->tmpdir, p);
-	} else {
-		jattr->tmpdir[0] = '\0';
-	}
-	/* jobid assigned by scheduler */
-	sprintf(jattr->jobid, "%d.%d", pmix_info_jobid(), pmix_info_stepid());
-	/* process rank within the job */
-	jattr->grank = pmix_info_task_id(taskid);
-	/* rank on this node within this job */
-	jattr->lrank = taskid;
-	/* procs in this job */
-	jattr->jsize = pmix_info_tasks();
-	/* procs in this job on this node */
-	jattr->lsize = pmix_info_ltasks();
-
-	/* #procs in this namespace */
-	jattr->usize = pmix_info_tasks_uni();
-	/* max #procs for this job */
-	jattr->msize = jattr->jsize;
-
-	// Now set "emulated" values for simplest implementation
-	// where we don't spawn
-
-	// -----------------------------------------------------------------------------------
-
-	// If my understanding is correct this value is important for
-	// MPI_Spawn'ed processes which have global rank offset <> 0.
-	// By now it will be 0
-	/* starting global rank of this job */
-	jattr->offset = 0;
-
-	// -----------------------------------------------------------------------------------
-
-	// If we spawn several job steps might be located on one node. Thusthis value might be wrong.
-	// Need to implement stepd's intra-node communication to exchange this info
-
-	/* Lowest rank on this node */
-	jattr->lldr = pmix_info_task_id(0);
-	/* rank on this node spanning all jobs */
-	jattr->nrank = jattr->lrank; // True if we don't spawn
-	/* #procs across all jobs on this node */
-	jattr->nsize = jattr->lsize; // The same here
-
-
-	// -----------------------------------------------------------------------------------
-
-	// srun is able to launch multi-app configurations.
-	// See MULTIPLE PROGRAM CONFIGURATION section of srun's man
-	// Address this in the future !?
-
-	/* app number within the job */
-	jattr->appnum = 0;
-	/* rank within this app */
-	jattr->apprank = jattr->grank;
-	/* lowest rank in this app within this job */
-	jattr->aldr = 0; // Do not distinguich by now
-
-	// -----------------------------------------------------------------------------------
-
-	// TODO: Actually we can calculate usize from SLURM's environment:
-	// SLURM_JOB_CPUS_PER_NODE='4(x6)'
-	// SLURM_JOB_NODELIST='cndev[1-4,8-9]'
-	//
-	// ? What's the difference between maxprocs and universe size?
-	// I think for SLURM they'll be equal.
-
-
-
-
-	// -----------------------------------------------------------------------------------
-}
-
+/*
 int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 {
 	uint32_t localid = hdr.localid;
 	uint32_t tag = hdr.tag;
-	pmix_io_engine_t *eng = pmix_state_cli_io(localid);
+	pmixp_io_engine_t *eng = pmix_state_cli_io(localid);
 	int *ptr = (int*)msg;
 	void *rmsg, *payload;
 	int rc = 0;
@@ -471,7 +511,7 @@ int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
 		} else {
 			// In direct modex we don't send blobs with collective
 			uint32_t *taskid = xmalloc(sizeof(uint32_t));
-			*taskid = pmix_info_task_id(localid);
+			*taskid = pmixp_info_task_id(localid);
 			void *blob = xmalloc(size);
 			memcpy(blob,(void*)&ptr[1], size);
 			// Note: we need to contribute first to increment data generation counter
@@ -496,6 +536,7 @@ free_message:
 	return rc;
 }
 
+
 inline static void _send_blob_to(uint32_t to_localid, uint32_t taskid)
 {
 	void *msg, *payload, *blob;
@@ -507,11 +548,11 @@ inline static void _send_blob_to(uint32_t to_localid, uint32_t taskid)
 		if( pmix_state_cli(to_localid) == PMIX_CLI_OPERATE ){
 			// If we are operating - we are in direct modex mode => send request
 			PMIX_DEBUG("Blob not found: localid=%d, taskid=%d, state=%d (send request)",
-					   to_localid, taskid, pmix_state_cli(to_localid));
+				   to_localid, taskid, pmix_state_cli(to_localid));
 			pmix_server_dmdx_request(to_localid, taskid);
 		} else {
 			PMIX_DEBUG("Blob not found: localid=%d, taskid=%d, state=%d (wait till fence end)",
-					   to_localid, taskid, pmix_state_cli(to_localid));
+				   to_localid, taskid, pmix_state_cli(to_localid));
 		}
 		// Save that localid was interested in taskid
 		pmix_state_remote_wait(to_localid,taskid);
@@ -521,7 +562,7 @@ inline static void _send_blob_to(uint32_t to_localid, uint32_t taskid)
 	msg = _new_msg(to_localid, msize, &payload);
 	*(uint32_t*)payload = taskid;
 	memcpy((uint32_t*)payload + 1, blob, size );
-	pmix_io_engine_t *me = pmix_state_cli_io(to_localid);
+	pmixp_io_engine_t *me = pmix_state_cli_io(to_localid);
 	pmix_io_send_enqueue(me, msg);
 }
 
@@ -533,7 +574,7 @@ void pmix_client_fence_notify()
 	// and answer them
 	// This will work for both blocking and non-blocking fence
 	// By now we only send ones to all clients
-	for(localid = 0; localid < pmix_info_ltasks(); localid++){
+	for(localid = 0; localid < pmixp_info_ltasks(); localid++){
 		pmix_cli_state_t state = pmix_state_cli(localid);
 		pmix_state_task_coll_finish(localid);
 		pmix_server_dmdx_notify(localid);
@@ -542,7 +583,7 @@ void pmix_client_fence_notify()
 			// is finished.
 			int *payload;
 			void *msg = _new_msg(localid, sizeof(int), (void**)&payload);
-			pmix_io_engine_t *me = pmix_state_cli_io(localid);
+			pmixp_io_engine_t *me = pmix_state_cli_io(localid);
 			*payload = 0;
 			pmix_io_send_enqueue(me, msg);
 		} else if( state == PMIX_CLI_COLL_NB ){
@@ -581,3 +622,116 @@ void pmix_client_taskid_reply(uint32_t taskid)
 exit:
 	list_destroy(requests);
 }
+
+*/
+
+static int terminated_fn(const char nspace[], int rank)
+{
+	PMIXP_DEBUG("called");
+	return PMIX_SUCCESS;
+}
+
+static int abort_fn(const char nspace[], int rank,
+		    int status, const char msg[],
+		    pmix_op_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called: status = %d, msg = %s",
+		      status, msg);
+	if (NULL != cbfunc) {
+		cbfunc(PMIX_SUCCESS, cbdata);
+	}
+
+	return PMIX_SUCCESS;
+}
+
+static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
+		      int barrier, int collect_data,
+		      pmix_modex_cbfunc_t cbfunc, void *cbdata)
+{
+	//pmix_modex_data_t *mdxarray = NULL;
+	//size_t size=0, n;
+	PMIXP_DEBUG("called");
+
+	return PMIX_SUCCESS;
+}
+
+static int store_modex_fn(const char nspace[], int rank,
+			  pmix_scope_t scope, pmix_modex_data_t *data)
+{
+	PMIXP_DEBUG("called: rank = %d", rank);
+
+	return PMIX_SUCCESS;
+}
+
+static int get_modexnb_fn(const char nspace[], int rank,
+			  pmix_modex_cbfunc_t cbfunc, void *cbdata)
+{
+	//pmix_modex_data_t *mdxarray;
+	PMIXP_DEBUG("called: rank = %d", rank);
+
+	return PMIX_SUCCESS;
+}
+
+
+
+static int publish_fn(pmix_scope_t scope, pmix_persistence_t persist,
+		      const pmix_info_t info[], size_t ninfo,
+		      pmix_op_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called");
+	if (NULL != cbfunc) {
+		cbfunc(PMIX_SUCCESS, cbdata);
+	}
+	return PMIX_SUCCESS;
+}
+
+static int lookup_fn(pmix_scope_t scope, int wait, char **keys,
+		     pmix_lookup_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called");
+	if (NULL != cbfunc) {
+		cbfunc(PMIX_SUCCESS, NULL, 0, NULL, cbdata);
+	}
+	return PMIX_SUCCESS;
+}
+
+static int unpublish_fn(pmix_scope_t scope, char **keys,
+			pmix_op_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called");
+	if (NULL != cbfunc) {
+		cbfunc(PMIX_SUCCESS, cbdata);
+	}
+	return PMIX_SUCCESS;
+}
+
+static int spawn_fn(const pmix_app_t apps[], size_t napps,
+		    pmix_spawn_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called");
+	if (NULL != cbfunc) {
+		cbfunc(PMIX_SUCCESS, "foobar", cbdata);
+	}
+	return PMIX_SUCCESS;
+}
+
+static int connect_fn(const pmix_range_t ranges[], size_t nranges,
+		      pmix_op_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called");
+	if (NULL != cbfunc) {
+		cbfunc(PMIX_SUCCESS, cbdata);
+	}
+	return PMIX_SUCCESS;
+}
+
+static int disconnect_fn(const pmix_range_t ranges[], size_t nranges,
+			 pmix_op_cbfunc_t cbfunc, void *cbdata)
+{
+	PMIXP_DEBUG("called");
+	if (NULL != cbfunc) {
+		cbfunc(PMIX_SUCCESS, cbdata);
+	}
+	return PMIX_SUCCESS;
+}
+
