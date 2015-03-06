@@ -224,9 +224,10 @@ eio_handle_t *pmixp_info_io()
  * FIXME: original _get_task_count has some additinal ckeck
  * for opt.ntasks_per_node & opt.cpus_set
  * Should we care here?
- */
+ *//*
 static int _get_task_count(char ***env, uint32_t *tasks, uint32_t *cpus)
 {
+	pmixp_debug_hang(1);
 	char *cpus_per_node = NULL, *cpus_per_task_env = NULL, *end_ptr = NULL;
 	int cpus_per_task = 1, cpu_count, node_count, task_count;
 	int total_tasks = 0, total_cpus = 0;
@@ -269,7 +270,7 @@ static int _get_task_count(char ***env, uint32_t *tasks, uint32_t *cpus)
 	*cpus = total_cpus;
 	return 0;
 }
-
+*/
 
 
 int pmixp_info_resources_set(char ***env)
@@ -313,11 +314,18 @@ int pmixp_info_resources_set(char ***env)
 	_pmixp_job_info.node_id_job = hostlist_find(hl, _pmix_this_host);
 	hostlist_destroy(hl);
 
+	// FIXME!! -------------------------------------------------------------
+	/* TODO: _get_task_count not always works well.
 	if( _get_task_count(env, &_pmixp_job_info.ntasks_job, &_pmixp_job_info.ncpus_job ) < 0 ){
 		_pmixp_job_info.ntasks_job  = _pmixp_job_info.ntasks;
 		_pmixp_job_info.ncpus_job  = _pmixp_job_info.ntasks;
 	}
 	xassert( _pmixp_job_info.ntasks <= _pmixp_job_info.ntasks_job );
+	*/
+	_pmixp_job_info.ntasks_job  = _pmixp_job_info.ntasks;
+	_pmixp_job_info.ncpus_job  = _pmixp_job_info.ntasks;
+
+	//---------------------------------------------------------------------
 
 	// Get modex type
 	_pmixp_job_info.direct_modex = false;

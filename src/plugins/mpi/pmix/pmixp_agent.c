@@ -215,8 +215,6 @@ static void *_agent(void * unused)
 		eio_new_initial_obj(pmix_io_handle, cli_obj);
 	}
 
-	pmixp_state_init();
-	pmix_db_init();
 	pmixp_info_io_set(pmix_io_handle);
 
 	eio_handle_mainloop(pmix_io_handle);

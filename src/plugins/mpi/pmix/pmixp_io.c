@@ -200,7 +200,8 @@ inline static bool _rcvd_need_header(pmixp_io_engine_t *eng)
 
 /*
  * Add already unpacked (converted from net to host format) header.
- */
+ *//*
+ * // TODO: Remove this function as it is needed anymore
 void pmix_io_add_hdr(pmixp_io_engine_t *eng, void *buf)
 {
 	int rc;
@@ -213,6 +214,7 @@ void pmix_io_add_hdr(pmixp_io_engine_t *eng, void *buf)
 		pmix_io_finalize(eng, rc);
 	}
 }
+*/
 
 void pmix_io_rcvd(pmixp_io_engine_t *eng)
 {
