@@ -87,6 +87,7 @@ const uint32_t plugin_version   = 100;
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
 	int ret;
+	pmixp_debug_hang(0);
 	PMIXP_DEBUG("slurmstepd initialization");
 
 	if( ( ret = pmixp_stepd_init(job, env) ) ){
@@ -101,7 +102,9 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 {
 	char **tmp_env = NULL;
 	pmixp_debug_hang(0);
-	pmix_libpmix_task_set(job->gtaskid, &tmp_env);
+
+	PMIXP_DEBUG("Patch environment for task %d", job->gtaskid);
+	PMIx_server_setup_fork(pmixp_info_namespace(), job->gtaskid, &tmp_env);
 	if( NULL != tmp_env ){
 		int i;
 		for(i=0; NULL != tmp_env[i]; i++){
@@ -116,7 +119,6 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 		free(tmp_env);
 		tmp_env = NULL;
 	}
-	pmix_agent_task_cleanup();
 	return SLURM_SUCCESS;
 }
 

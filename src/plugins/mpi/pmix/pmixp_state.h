@@ -47,8 +47,7 @@ typedef enum { PMIX_CLI_UNCONNECTED, PMIX_CLI_ACK, PMIX_CLI_OPERATE, PMIX_CLI_CO
 
 typedef struct {
 	pmix_cli_state_t state;
-	uint32_t task_id;
-	int sd;
+	uint32_t localid;
 	pmixp_io_engine_t eng;
 } client_state_t;
 
@@ -73,13 +72,13 @@ typedef struct {
 	eio_handle_t *cli_handle, *srv_handle;
 } pmixp_state_t;
 
-extern pmixp_state_t pmixp_state;
+extern pmixp_state_t _pmixp_state;
 
 void pmixp_state_init();
 
 inline static void pmixp_state_sanity_check()
 {
-	xassert( pmixp_state.magic == PMIX_STATE_MAGIC );
+	xassert( _pmixp_state.magic == PMIX_STATE_MAGIC );
 }
 
 /*
@@ -89,87 +88,58 @@ inline static void pmixp_state_sanity_check()
 inline static void pmixp_state_cli_sanity_check(uint32_t localid)
 {
 	pmixp_state_sanity_check();
-	xassert( localid < pmixp_state.cli_size);
-	xassert( pmixp_state.cli_state[localid].sd >= 0 );
+	xassert( localid < _pmixp_state.cli_size);
 }
 
 inline static uint32_t pmixp_state_cli_io_size(){
-	return pmixp_state.cli_size;
+	return _pmixp_state.cli_size;
 }
 
 inline static pmixp_io_engine_t *pmixp_state_cli_io_new(int localid)
 {
-	if( localid >= pmixp_state.cli_size ){
-		pmixp_state.cli_size *= 2;
-		size_t size = pmixp_state.cli_size * sizeof(client_state_t);
-		pmixp_state.cli_state = xrealloc(pmixp_state.cli_state, size);
+	if( localid >= _pmixp_state.cli_size ){
+		_pmixp_state.cli_size *= 2;
+		size_t size = _pmixp_state.cli_size * sizeof(client_state_t);
+		_pmixp_state.cli_state = xrealloc(_pmixp_state.cli_state, size);
 	}
-	return &pmixp_state.cli_state[localid].eng;
+	return &_pmixp_state.cli_state[localid].eng;
 }
 
 
 inline static pmixp_io_engine_t *pmixp_state_cli_io(int localid)
 {
 	pmixp_state_cli_sanity_check(localid);
-	return &pmixp_state.cli_state[localid].eng;
+	return &_pmixp_state.cli_state[localid].eng;
 }
 
 inline static int pmixp_state_cli_fd(int localid)
 {
 	pmixp_state_cli_sanity_check(localid);
-	return pmixp_state.cli_state[localid].sd;
+	pmixp_io_engine_t *eng = &_pmixp_state.cli_state[localid].eng;
+	return eng->sd;
 }
 
 
-inline static pmix_cli_state_t pmixp_state_cli(uint32_t localid)
+inline static client_state_t *pmixp_state_cli(uint32_t localid)
 {
 	pmixp_state_cli_sanity_check(localid);
-	client_state_t *cli = &pmixp_state.cli_state[localid];
-	return cli->state;
-}
-
-inline static int pmixp_state_cli_connecting(int localid, int fd)
-{
-	pmixp_state_sanity_check();
-	if( !( localid < pmixp_state.cli_size ) ){
-		return SLURM_ERROR;
-	}
-	client_state_t *cli = &pmixp_state.cli_state[localid];
-	if( cli->state != PMIX_CLI_UNCONNECTED ){
-		// We already have this task connected. Shouldn't happen.
-		// FIXME: should we ignore new or old connection?
-		// Ignore new by now, discuss with Ralph.
-		return SLURM_ERROR;
-	}
-	// TODO: will need to implement additional step - ACK
-	cli->state = PMIX_CLI_ACK;
-	cli->task_id = localid;
-	cli->sd = fd;
-	return SLURM_SUCCESS;
+	return &_pmixp_state.cli_state[localid];
 }
 
 inline static int pmixp_state_cli_connected(int taskid)
 {
 	pmixp_state_sanity_check();
-	if( !( taskid < pmixp_state.cli_size ) ){
+	if( !( taskid < _pmixp_state.cli_size ) ){
 		return SLURM_ERROR;
 	}
-	client_state_t *cli = &pmixp_state.cli_state[taskid];
+	client_state_t *cli = &_pmixp_state.cli_state[taskid];
 	// TODO: will need to implement additional step - ACK
 	cli->state = PMIX_CLI_OPERATE;
 	return SLURM_SUCCESS;
 }
 
-inline static void pmixp_state_cli_finalize(uint32_t localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	client_state_t *cli = &pmixp_state.cli_state[localid];
-	cli->sd = -1;
-	cli->state = PMIX_CLI_UNCONNECTED;
-	if( !pmix_io_finalized( &cli->eng ) ){
-		pmix_io_finalize(&cli->eng, 0);
-	}
-}
+
+
 
 /*
  * Collective state
@@ -190,7 +160,7 @@ bool pmix_state_task_contrib_cancel(int idx);
 inline static void pmix_state_task_coll_finish(uint32_t localid)
 {
 	pmixp_state_cli_sanity_check(localid);
-	client_state_t *cli = &pmixp_state.cli_state[localid];
+	client_state_t *cli = &_pmixp_state.cli_state[localid];
 	xassert( cli->state == PMIX_CLI_COLL || cli->state == PMIX_CLI_COLL_NB);
 	cli->state = PMIX_CLI_OPERATE;
 }
