@@ -42,7 +42,7 @@
 #include "pmixp_state.h"
 #include "pmixp_db.h"
 
-pmixp_state_t pmixp_state;
+pmixp_state_t _pmixp_state;
 // Deferred requests
 List cli_req_sent, cli_req_wait; // TODO: use hash table instead of list?
 // The array of lists.
@@ -53,32 +53,35 @@ void pmixp_state_init()
 {
 	size_t size, i;
 #ifndef NDEBUG
-	pmixp_state.magic = PMIX_STATE_MAGIC;
+	_pmixp_state.magic = PMIX_STATE_MAGIC;
 #endif
-	pmixp_state.cli_size = pmixp_info_ltasks();
-	size = pmixp_state.cli_size * sizeof(client_state_t);
-	pmixp_state.cli_state = xmalloc( size );
-	size = pmixp_state.cli_size * sizeof(List *);
+	_pmixp_state.cli_size = pmixp_info_ltasks();
+	size = _pmixp_state.cli_size * sizeof(client_state_t);
+	_pmixp_state.cli_state = xmalloc( size );
+	size = _pmixp_state.cli_size * sizeof(List *);
 	srv_req = xmalloc( size );
-	for( i = 0; i < pmixp_state.cli_size; i++ ){
-		pmixp_state.cli_state[i].sd = -1;
-		pmixp_state.cli_state[i].state = PMIX_CLI_UNCONNECTED;
+	for( i = 0; i < _pmixp_state.cli_size; i++ ){
+		_pmixp_state.cli_state[i].state = PMIX_CLI_UNCONNECTED;
+		_pmixp_state.cli_state[i].localid = i;
 		srv_req[i] = list_create(pmixp_xfree_buffer);
 	}
 	cli_req_wait = list_create(pmixp_xfree_buffer);
 	cli_req_sent = list_create(pmixp_xfree_buffer);
-
-	pmixp_state.coll.state = PMIX_COLL_SYNC;
-	pmixp_state.coll.local_joined = 0;
-	pmixp_state.coll.nodes_joined = 0;
-	pmixp_state.coll.local_contrib = xmalloc(sizeof(uint8_t) * pmixp_info_ltasks());
-	memset(pmixp_state.coll.local_contrib, 0, sizeof(uint8_t) * pmixp_info_ltasks());
-	pmixp_state.coll.nodes_contrib = xmalloc(sizeof(uint8_t) * pmix_info_childs());
-	memset(pmixp_state.coll.nodes_contrib, 0, sizeof(uint8_t) * pmix_info_childs());
+/*
+	_pmixp_state.coll.state = PMIX_COLL_SYNC;
+	_pmixp_state.coll.local_joined = 0;
+	_pmixp_state.coll.nodes_joined = 0;
+	_pmixp_state.coll.local_contrib = xmalloc(sizeof(uint8_t) * pmixp_info_ltasks());
+	memset(_pmixp_state.coll.local_contrib, 0, sizeof(uint8_t) * pmixp_info_ltasks());
+	_pmixp_state.coll.nodes_contrib = xmalloc(sizeof(uint8_t) * pmix_info_childs());
+	memset(_pmixp_state.coll.nodes_contrib, 0, sizeof(uint8_t) * pmix_info_childs());
+*/
 }
 
+/*
 static bool _prepare_new_coll(uint32_t gen, int idx)
 {
+
 	// If we are in synced state - add 1 to the next generation counter
 	// It will be updated once
 	pmix_db_start_update();
@@ -93,7 +96,9 @@ static bool _prepare_new_coll(uint32_t gen, int idx)
 	}
 	return true;
 }
+*/
 
+/*
 // Check events
 static int _coll_new_task_contrib()
 {
@@ -114,7 +119,9 @@ static int _coll_new_task_contrib()
 		return SLURM_ERROR;
 	}
 }
+*/
 
+/*
 // Check events
 static int _coll_new_node_contrib()
 {
@@ -138,10 +145,12 @@ static int _coll_new_node_contrib()
 		return SLURM_ERROR;
 	}
 }
+*/
 
 // Check events
 static int _coll_forward()
 {
+	/*
 	switch( pmixp_state.coll.state ){
 	case PMIX_COLL_SYNC:
 		PMIXP_ERROR("Inconsistency: can't go to FORWARD from SYNC state");
@@ -158,11 +167,14 @@ static int _coll_forward()
 		xassert( 0 );
 		return SLURM_ERROR;
 	}
+	*/
+	return SLURM_SUCCESS;
 }
 
 // Check events
 static int _coll_sync()
 {
+	/*
 	pmix_db_commit();
 	switch( pmixp_state.coll.state ){
 	case PMIX_COLL_SYNC:
@@ -193,10 +205,13 @@ static int _coll_sync()
 		xassert( 0 );
 		return SLURM_ERROR;
 	}
+	*/
+	return SLURM_SUCCESS;
 }
 
 bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 {
+	/*
 	// Check state consistence
 	if( _coll_new_node_contrib() ){
 		// TODO: respond with error!
@@ -236,11 +251,13 @@ bool pmix_state_node_contrib_ok(uint32_t gen, int idx)
 
 	pmixp_state.coll.nodes_contrib[idx] = 1;
 	pmixp_state.coll.nodes_joined++;
+	*/
 	return true;
 }
 
 bool pmix_state_task_contrib_ok(int idx, bool blocking)
 {
+	/*
 	// Check state consistence
 	if( _coll_new_task_contrib() ){
 		PMIXP_ERROR("%s [%d]: Inconsistent contribution from task %d",
@@ -263,18 +280,20 @@ bool pmix_state_task_contrib_ok(int idx, bool blocking)
 	}
 	pmixp_state.coll.local_contrib[idx] = 1;
 	pmixp_state.coll.local_joined++;
+	*/
 	return true;
 }
 
 bool pmix_state_coll_local_ok()
 {
-	return (pmixp_state.coll.local_joined == pmixp_info_ltasks() ) &&
-			(pmixp_state.coll.nodes_joined == pmix_info_childs());
+	return (_pmixp_state.coll.local_joined == pmixp_info_ltasks() ) &&
+			(_pmixp_state.coll.nodes_joined == pmix_info_childs());
 }
 
 
 bool pmix_state_node_contrib_cancel(int idx)
 {
+	/*
 	// Check state consistence
 	if( pmixp_state.coll.state != PMIX_COLL_FORWARD ){
 		PMIXP_DEBUG("WARNING: trying to cancel contrib for node %s [%d] during wrong phase %d\n",
@@ -286,22 +305,23 @@ bool pmix_state_node_contrib_cancel(int idx)
 	pmixp_state.coll.nodes_contrib[idx] = 0;
 	pmixp_state.coll.nodes_joined--;
 	xassert(pmixp_state.coll.nodes_joined >=0 );
+*/
 	return true;
 }
 
 bool pmix_state_task_contrib_cancel(int idx)
 {
 	// Check state consistence
-	if( pmixp_state.coll.state != PMIX_COLL_FORWARD ){
+	if( _pmixp_state.coll.state != PMIX_COLL_FORWARD ){
 		PMIXP_DEBUG("%s [%d]: WARNING: trying to cancel contrib for task [%d] during wrong phase %d\n",
-				   pmix_info_this_host(), pmix_info_nodeid(), pmixp_info_task_id(idx), pmixp_state.coll.state );
+				   pmix_info_this_host(), pmix_info_nodeid(), pmixp_info_task_id(idx), _pmixp_state.coll.state );
 		return false;
 	}
 	// We need to contribute before we cancel!
-	xassert(pmixp_state.coll.local_contrib[idx]);
-	pmixp_state.coll.local_contrib[idx] = 0;
-	pmixp_state.coll.local_joined--;
-	xassert(pmixp_state.coll.local_joined >=0 );
+	xassert(_pmixp_state.coll.local_contrib[idx]);
+	_pmixp_state.coll.local_contrib[idx] = 0;
+	_pmixp_state.coll.local_joined--;
+	xassert(_pmixp_state.coll.local_joined >=0 );
 	return true;
 }
 
@@ -426,7 +446,7 @@ List pmix_state_remote_from(uint32_t localid)
  */
 void pmix_state_local_defer(uint32_t src_lid, uint32_t nodeid)
 {
-	xassert( src_lid < pmixp_state.cli_size );
+	xassert( src_lid < _pmixp_state.cli_size );
 	int *ptr = xmalloc( sizeof(uint32_t) );
 	*ptr = nodeid;
 	list_enqueue(srv_req[src_lid], ptr);

@@ -87,7 +87,7 @@ char *_pack_the_data()
 	}
 	return msg;
 }
-
+/*
 static void _forward()
 {
 	int rc;
@@ -136,6 +136,7 @@ static void _forward()
 		xassert(0);
 	}
 }
+*/
 
 /*
  * Based on ideas provided by Hongjia Cao <hjcao@nudt.edu.cn> in PMI2 plugin
@@ -220,7 +221,7 @@ int pmix_coll_init(char ***env)
 
 	return SLURM_SUCCESS;
 }
-
+/*
 void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t size)
 {
 	int idx = pmix_info_is_child_no(nodeid);
@@ -244,27 +245,9 @@ void pmix_coll_node_contrib(uint32_t gen, uint32_t nodeid, void *msg, uint32_t s
 		_forward();
 	}
 }
+*/
 
-void pmix_coll_task_contrib(uint32_t localid, void *msg, uint32_t size, bool blocking)
-{
-	PMIXP_DEBUG("Local task contribution %d", localid);
-	if( !pmix_state_task_contrib_ok(localid, blocking) ){
-		PMIXP_ERROR_NO(0,"The task %d already contributed to this collective", localid);
-		return;
-	}
-	uint32_t full_size = sizeof(int)*2 + size;
-	local_data[localid]  = xmalloc( full_size );
-	*((int*)local_data[localid] ) = pmixp_info_task_id(localid);
-	*((int*)local_data[localid] + 1 ) = size;
-	memcpy((void*)((int*)local_data[localid] + 2), msg, size );
-	local_sizes[localid] = full_size;
-
-	if( pmix_state_coll_local_ok() ){
-		_forward();
-	}
-}
-
-
+/*
 void pmix_coll_update_db(void *msg, uint32_t size)
 {
 	int i = 0;
@@ -285,3 +268,4 @@ void pmix_coll_update_db(void *msg, uint32_t size)
 	}
 	pmix_state_coll_sync();
 }
+*/

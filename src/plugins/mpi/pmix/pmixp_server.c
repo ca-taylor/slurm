@@ -101,15 +101,19 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 	if( (fd = pmixp_usock_create_srv(path)) < 0 ){
 		return SLURM_ERROR;
 	}
+	fd_set_close_on_exec(fd);
 	pmixp_info_srv_contacts(path, fd);
 
 	if( ( rc = pmixp_info_set_stepd(job, env) ) ){
 		return rc;
 	}
+
+	// Initialize clients state structure
+	pmixp_state_init();
+
 	if( ( rc = pmix_coll_init(env) ) ){
 		return rc;
 	}
-
 
 	// Create UNIX socket for client communication
 	if( SLURM_SUCCESS != pmixp_libpmix_init(&address) ){
@@ -119,12 +123,15 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 		close( pmixp_info_srv_fd() );
 		return SLURM_ERROR;
 	}
+	fd_set_close_on_exec(fd);
 	pmixp_info_cli_contacts(fd);
 
 	// Create UNIX socket for client communication
 	if( SLURM_SUCCESS != pmixp_libpmix_job_set() ){
 		return SLURM_ERROR;
 	}
+
+	pmixp_db_init( pmixp_info_namespace() );
 
 	return SLURM_SUCCESS;
 }
@@ -252,6 +259,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 
 void *pmix_server_alloc_msg(uint32_t size, void **payload)
 {
+	/*
 	uint32_t payload_offs = sizeof(send_header_t) + SEND_HDR_SIZE;
 	// Allocate more space than need to save unpacked header too
 	void *msg = xmalloc(payload_offs + size);
@@ -263,10 +271,13 @@ void *pmix_server_alloc_msg(uint32_t size, void **payload)
 	hdr->paysize = size;
 	*payload = (char*)msg + payload_offs;
 	return msg;
+	*/
+	return NULL;
 }
 
 void *pmix_server_alloc_msg_next(uint32_t size, void **payload)
 {
+	/*
 	uint32_t payload_offs = sizeof(send_header_t) + SEND_HDR_SIZE;
 	// Allocate more space than need to save unpacked header too
 	void *msg = xmalloc(payload_offs + size);
@@ -279,6 +290,8 @@ void *pmix_server_alloc_msg_next(uint32_t size, void **payload)
 	hdr->paysize = size;
 	*payload = (char*)msg + payload_offs;
 	return msg;
+	*/
+	return NULL;
 }
 
 void pmix_server_msg_setcmd(void *msg, pmix_srv_cmd_t cmd)
@@ -445,6 +458,7 @@ void pmix_server_dmdx_request(uint32_t localid, uint32_t taskid)
 
 void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 {
+/*
 	int size, offset, rc;
 	void *blob, *msg, *start, *payload;
 	char *host;
@@ -471,10 +485,12 @@ void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
 	PMIXP_ERROR_NO(EAGAIN, "Cannot send DMDX request to node %s", host);
 	}
 	xfree(host);
+	*/
 }
 
 void _process_dmdx_request(send_header_t *hdr, void *payload)
 {
+	/*
 	int offset;
 	uint32_t taskid;
 	uint32_t localid;
@@ -517,10 +533,12 @@ void _process_dmdx_request(send_header_t *hdr, void *payload)
 	PMIXP_ERROR_NO(0,"Get DMDX request from the _past_: our generation = %d,"
 					  "Request generation = %d", pmix_db_generation(), hdr->gen);
 	}
+	*/
 }
 
 int _dmdx_response(send_header_t *hdr, void *payload)
 {
+	/*
 	void *blob, *blob_copy;
 	uint32_t taskid;
 	int size, offset;
@@ -538,11 +556,13 @@ int _dmdx_response(send_header_t *hdr, void *payload)
 	pmix_state_remote_received(taskid);
 	// Reply to the clients
 	//pmix_client_taskid_reply(taskid);
+	*/
 	return SLURM_SUCCESS;
 }
 
 void pmix_server_dmdx_notify(uint32_t localid)
 {
+	/*
 	uint32_t *nodeid;
 	List requests;
 	if( !pmix_state_local_reqs_cnt(localid) ){
@@ -554,4 +574,5 @@ void pmix_server_dmdx_notify(uint32_t localid)
 		_dmdx_reply_to_node(localid, *nodeid);
 		xfree(nodeid);
 	}
+	*/
 }

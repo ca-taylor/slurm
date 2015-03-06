@@ -45,45 +45,51 @@
 #include "pmixp_state.h"
 
 typedef struct {
+	void *blob;
+	int blob_sz;
+} pmixp_blob_t;
+
+typedef struct {
 #ifndef NDEBUG
-#       define PMIX_MSGSTATE_MAGIC 0xdeadbeef
+#       define PMIXP_NSPACE_MAGIC 0xdeadbeef
 	int  magic;
 #endif
-	uint32_t cur_gen, next_gen; // Data generation
+	char name[PMIX_MAX_NSLEN];
 	// Current database
-	void **blobs;
-	int *blob_sizes;
+	uint32_t tasks;
+	pmixp_blob_t *local_blobs;
+	pmixp_blob_t *remote_blobs;
+	pmixp_blob_t *global_blobs;
+	// FIXME:
+	// 1. do we want to account generations of DB?
+	// 2. how will we merge pieces of database?
 	// Next generation of database
+	/*
 	void **blobs_new;
 	int *blob_sizes_new;
-} pmix_db_t;
+	uint32_t cur_gen, next_gen; // Data generation
+	*/
+} pmixp_namespace_t;
 
-extern pmix_db_t pmix_db;
-
-static inline void pmix_db_init()
-{
-	uint32_t tasks = pmix_info_tasks();
-	uint32_t bsize = sizeof(int*) * tasks;
-	uint32_t ssize = sizeof(int) * tasks;
-
+typedef struct {
 #ifndef NDEBUG
-	pmix_db.magic = PMIX_MSGSTATE_MAGIC;
+#       define PMIXP_DB_MAGIC 0xdeadbeef
+	int  magic;
 #endif
-	pmix_db.cur_gen = pmix_db.next_gen = 0;
+	List nspaces;
+} pmixp_db_t;
 
-	// Setup "current" Databse
-	pmix_db.blobs = xmalloc( bsize );
-	memset(pmix_db.blobs, 0, bsize);
-	pmix_db.blob_sizes = xmalloc( ssize );
-	memset(pmix_db.blob_sizes, 0, ssize);
+extern pmixp_db_t _pmixp_db;
 
-	// Setup new database
-	pmix_db.blobs_new = xmalloc( bsize );
-	memset(pmix_db.blobs_new, 0, bsize);
-	pmix_db.blob_sizes_new = xmalloc( ssize );
-	memset(pmix_db.blob_sizes_new, 0, ssize);
-}
+void pmixp_db_init(char *nspace);
+int pmixp_db_add_blob(const char *nspace, pmix_scope_t scope,
+		      int taskid, void *blob, int size);
 
+
+int pmixp_db_blob(const char *nspace, List modex_data);
+int pmixp_db_blob_r(const char *nspace, int rank, List modex_data);
+
+/*
 static inline uint32_t pmix_db_generation(){
 	return pmix_db.cur_gen;
 }
@@ -109,7 +115,7 @@ static inline void pmix_db_start_update()
 static inline void pmix_db_commit()
 {
 	int i;
-	xassert(pmix_db.magic == PMIX_MSGSTATE_MAGIC);
+	xassert(pmix_db.magic == PMIXP_NSPACE_MAGIC);
 
 	// Make new database to be current.
 	for(i=0; i<pmix_info_tasks(); i++){
@@ -132,43 +138,29 @@ static inline void pmix_db_commit()
 			   pmix_db.cur_gen, pmix_db.next_gen);
 
 }
+*/
 
-static inline void pmix_db_add_blob(int taskid, void *blob, int size)
-{
-	xassert(pmix_db.magic == PMIX_MSGSTATE_MAGIC);
-	xassert( !pmix_db_consistent() );
-
-	// check that we update data incrementally with step = 1
-	if( NULL != pmix_db.blobs_new[taskid] ){
-		// This theoretically shouldn't happen.
-		// WARN and accept the new blob and remove the old one
-		PMIXP_ERROR_NO(0,"NEW blob for task %d was rewritten!", taskid);
-		xfree(pmix_db.blobs_new[taskid]);
-		pmix_db.blobs_new[taskid] = NULL;
-	}
-	pmix_db.blobs_new[taskid] = blob;
-	pmix_db.blob_sizes_new[taskid] = size;
-}
 
 /*
  * With direct modex we have two cases:
  * 1. if (hdr->gen == cur_gen) we submit into the current DB.
  * 2. if (hdr->gen <> cur_gen) we discard the data
  */
+/*
 static inline void pmix_db_dmdx_add_blob(uint32_t gen, int taskid, void *blob, int size)
 {
-	xassert(pmix_db.magic == PMIX_MSGSTATE_MAGIC);
-	if( pmix_db.cur_gen == gen ){
-		pmix_db.blobs[taskid] = blob;
-		pmix_db.blob_sizes[taskid] = size;
+	xassert(_pmixp_db.magic == PMIXP_NSPACE_MAGIC);
+	if( _pmixp_db.cur_gen == gen ){
+		_pmixp_db.blobs[taskid] = blob;
+		_pmixp_db.blob_sizes[taskid] = size;
 	}
 }
 
 static inline int pmix_db_get_blob(int taskid, void **blob)
 {
-	xassert(pmix_db.magic == PMIX_MSGSTATE_MAGIC);
-	*blob = pmix_db.blobs[taskid];
-	return pmix_db.blob_sizes[taskid];
+	xassert(_pmixp_db.magic == PMIXP_NSPACE_MAGIC);
+	*blob = _pmixp_db.blobs[taskid];
+	return _pmixp_db.blob_sizes[taskid];
 }
-
+*/
 #endif // PMIX_DB_H

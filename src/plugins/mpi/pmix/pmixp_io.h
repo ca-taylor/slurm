@@ -110,7 +110,8 @@ void pmix_io_finalize(pmixp_io_engine_t *eng, int error);
 
 // Receiver
 int pmix_io_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len);
-void pmix_io_add_hdr(pmixp_io_engine_t *eng, void *buf);
+// TODO: Remove this function as it is needed anymore
+// void pmix_io_add_hdr(pmixp_io_engine_t *eng, void *buf);
 void pmix_io_rcvd(pmixp_io_engine_t *eng);
 void *pmix_io_rcvd_extract(pmixp_io_engine_t *eng, void *header);
 // Transmitter
