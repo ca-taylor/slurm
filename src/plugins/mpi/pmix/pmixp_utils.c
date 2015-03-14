@@ -49,7 +49,7 @@
 #include "pmixp_utils.h"
 #include "pmixp_debug.h"
 
-#define PMIX_MAX_RETRY 7
+#define PMIXP_MAX_RETRY 7
 
 void pmixp_xfree_buffer(void *x)
 {
@@ -65,14 +65,14 @@ int pmixp_usock_create_srv(char *path)
 	if( 0 == access(path, F_OK) ){
 		// remove old file
 		if( 0 != unlink(path) ){
-			PMIXP_ERROR("Cannot delete outdated socket fine: %s",
+			PMIXP_ERROR_STD("Cannot delete outdated socket fine: %s",
 				    path);
 			return SLURM_ERROR;
 		}
 	}
 
 	if( strlen(path) >= sizeof(sa.sun_path) ){
-		PMIXP_ERROR("UNIX socket path is too long: %lu, max %lu",
+		PMIXP_ERROR_STD("UNIX socket path is too long: %lu, max %lu",
 			    (unsigned long)strlen(path),
 			    (unsigned long)sizeof(sa.sun_path)-1);
 		return SLURM_ERROR;
@@ -80,7 +80,7 @@ int pmixp_usock_create_srv(char *path)
 
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if( fd < 0 ){
-		PMIXP_ERROR("Cannot create UNIX socket");
+		PMIXP_ERROR_STD("Cannot create UNIX socket");
 		return SLURM_ERROR;
 	}
 
@@ -88,12 +88,12 @@ int pmixp_usock_create_srv(char *path)
 	sa.sun_family = AF_UNIX;
 	strcpy(sa.sun_path, path);
 	if( ret = bind(fd, (struct sockaddr*)&sa, SUN_LEN(&sa)) ){
-		PMIXP_ERROR("Cannot bind() UNIX socket %s", path);
+		PMIXP_ERROR_STD("Cannot bind() UNIX socket %s", path);
 		goto err_fd;
 	}
 
 	if( (ret = listen(fd, 64)) ){
-		PMIXP_ERROR("Cannot listen(%d, 64) UNIX socket %s",
+		PMIXP_ERROR_STD("Cannot listen(%d, 64) UNIX socket %s",
 			    fd, path);
 		goto err_bind;
 
@@ -138,7 +138,7 @@ size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown, bool block
 			// we can get here in non-blocking mode only
 			return offs;
 		default:
-			PMIXP_ERROR("blocking=%d",blocking);
+			PMIXP_ERROR_STD("blocking=%d",blocking);
 			*shutdown = -errno;
 			return offs;
 		}
@@ -238,63 +238,74 @@ bool pmixp_fd_write_ready(int fd, int *shutdown)
 	return ((rc == 1) && (pfd[0].revents & POLLOUT));
 }
 
-
-int pmixp_stepd_send(char *nodelist, char *address, uint32_t len, char *data)
+static int
+_send_to_stepds(hostlist_t hl, const char *addr, uint32_t len, char *data)
 {
+	List ret_list = NULL;
+	int temp_rc = 0, rc = 0;
+	ret_data_info_t *ret_data_info = NULL;
+	slurm_msg_t *msg = xmalloc(sizeof(slurm_msg_t));
+	forward_data_msg_t req;
+	char *nodelist = NULL;
+
+	slurm_msg_t_init(msg);
+	req.address = xstrdup(addr);
+	req.len = len;
+	req.data = data;
+
+	msg->msg_type = REQUEST_FORWARD_DATA;
+	msg->data = &req;
+
+	nodelist = hostlist_ranged_string_xmalloc(hl);
+
+	if ((ret_list = slurm_send_recv_msgs(nodelist, msg, 0, false))) {
+		while ((ret_data_info = list_pop(ret_list))) {
+			temp_rc = slurm_get_return_code(ret_data_info->type,
+							ret_data_info->data);
+			if (temp_rc){
+				rc = temp_rc;
+			} else {
+				hostlist_delete_host(hl,
+							ret_data_info->node_name);
+			}
+		}
+	} else {
+		error("tree_msg_to_stepds: no list was returned");
+		rc = SLURM_ERROR;
+	}
+
+	slurm_free_msg(msg);
+	xfree(nodelist);
+	xfree(req.address);
+	return rc;
+}
+
+int pmixp_stepd_send(char *nodelist, const char *address, char *data, uint32_t len)
+{
+
 	int retry = 0, rc;
 	unsigned int delay = 100; /* in milliseconds */
+	hostlist_t hl;
+
+	hl = hostlist_create(nodelist);
 	while (1) {
 		if (retry == 1) {
-			PMIXP_DEBUG("send failed, rc=%d, retrying", rc);
+			PMIXP_ERROR("send failed, rc=%d, retrying", rc);
 		}
 
-		rc = slurm_forward_data(nodelist, address, len, data);
+		rc = _send_to_stepds(hl, address, len, data);
 
 		if (rc == SLURM_SUCCESS)
 			break;
 		retry++;
-		if (retry >= PMIX_MAX_RETRY )
+		if (retry >= PMIXP_MAX_RETRY )
 			break;
 		/* wait with constantly increasing delay */
 		struct timespec ts = { (delay/1000), ((delay % 1000) * 1000000) };
 		nanosleep(&ts, NULL);
 		delay *= 2;
 	}
+	hostlist_destroy(hl);
 	return rc;
 }
 
-int pmixp_srun_send(slurm_addr_t *addr, uint32_t len, char *data)
-{
-	int retry = 0, rc;
-	unsigned int delay = 100; /* in milliseconds */
-	int fd;
-	fd = slurm_open_stream(addr, true);
-	if (fd < 0){
-		PMIXP_ERROR("Cannot send collective data to srun (slurm_open_stream)");
-		return SLURM_ERROR;
-	}
-
-	while (1) {
-		if (retry == 1) {
-			PMIXP_DEBUG("send failed, rc=%d, retrying", rc);
-		}
-
-		rc = slurm_msg_sendto(fd, data, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
-		if (rc == len ){ /* all data sent */
-			rc = SLURM_SUCCESS;
-			break;
-		}
-		rc = SLURM_ERROR;
-
-		retry++;
-		if (retry >= PMIX_MAX_RETRY )
-			break;
-		/* wait with constantly increasing delay */
-		struct timespec ts = { (delay/1000), ((delay % 1000) * 1000000) };
-		nanosleep(&ts, NULL);
-		delay *= 2;
-	}
-	close(fd);
-
-	return rc;
-}

@@ -57,7 +57,7 @@ typedef struct {
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIX_MSGSTATE_MAGIC 0xdeadbeef
+#       define PMIX_MSGSTATE_MAGIC 0xC0FFEEEE
 	int  magic;
 #endif
 	// User supplied information

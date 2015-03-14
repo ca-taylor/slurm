@@ -43,14 +43,12 @@
 #include "pmixp_common.h"
 
 /*
- *
- *  Environment information structure and access API
- *
+ *  Slurm job and job-step information
  */
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIX_INFO_MAGIC 0xdeadbeef
+#       define PMIX_INFO_MAGIC 0xCAFEFACE
 	int  magic;
 #endif
 	char nspace[PMIX_MAX_NSLEN];
@@ -59,16 +57,17 @@ typedef struct {
 	uint32_t nnodes;      /* number of nodes in current step              */
 	uint32_t nnodes_job;  /* number of nodes in current job               */
 	uint32_t ntasks;      /* total number of tasks in current step        */
-	uint32_t ntasks_job;  /* total possible number of tasks in job		*/
-	uint32_t ncpus_job;   /* total possible number of cpus in job		    */
-	uint16_t *task_cnts;  /* Number of tasks on each node in this step    */
+	uint32_t ntasks_job;  /* total possible number of tasks in job	      */
+	uint32_t ncpus_job;   /* total possible number of cpus in job	      */
+	uint32_t *task_cnts;  /* Number of tasks on each node in this step    */
 	int node_id;          /* relative position of this node in this step  */
 	int node_id_job;      /* relative position of this node in SLURM job  */
+	hostlist_t job_hl;
+	hostlist_t step_hl;
+	char *hostname;
 	uint32_t node_tasks;  /* number of tasks on *this* node               */
 	uint32_t *gtids;      /* global ids of tasks located on *this* node   */
-	bool	direct_modex;	/* direct modex mode enabled/disabled           */
 	char *task_map_packed;  /* string represents packed task mapping information */
-	uint32_t *task_map;	/* i'th task is located on task_map[i] node     */
 } pmix_jobinfo_t;
 
 extern pmix_jobinfo_t _pmixp_job_info;
@@ -84,31 +83,18 @@ const char *pmixp_info_srv_addr();
 int pmixp_info_srv_fd();
 
 // Dealing with hostnames
+static inline char *pmixp_info_hostname(){
+	return _pmixp_job_info.hostname;
+}
+
 int pmixp_info_resources_set(char ***env);
-char *pmixp_info_nth_child_name(int idx);
-char *pmixp_info_nth_host_name(int n);
 
 // Dealing with I/O
 void pmixp_info_io_set(eio_handle_t *h);
 eio_handle_t *pmixp_info_io();
 
-
-// Agent location
-static inline int pmixp_info_is_srun()
-{
-	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	return (_pmixp_job_info.node_id < 0 );
-}
-
-static inline int pmixp_info_is_stepd()
-{
-	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	return ( _pmixp_job_info.node_id >= 0 );
-}
-
 // Job information
-int pmixp_info_set_stepd(const stepd_step_rec_t *job, char ***env);
-void pmixp_info_set_srun(const mpi_plugin_client_info_t *job, char ***env);
+int pmixp_info_set(const stepd_step_rec_t *job, char ***env);
 
 inline static uint32_t pmixp_info_jobid(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
@@ -121,58 +107,67 @@ inline static uint32_t pmixp_info_stepid(){
 }
 
 inline static char *pmixp_info_namespace(){
+	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
 	return _pmixp_job_info.nspace;
 }
 
-inline static uint32_t pmix_info_nodeid(){
-	// xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+inline static uint32_t pmixp_info_nodeid(){
 	// This routine is called from PMIX_DEBUG/ERROR and
 	// this CAN happen before initialization. Relax demand to have
 	// _pmix_job_info.magic == PMIX_INFO_MAGIC
+
+	// ! xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
 	return _pmixp_job_info.node_id;
 }
 
-inline static uint32_t pmix_info_nodes(){
+inline static uint32_t pmixp_info_nodes(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
 	return _pmixp_job_info.nnodes;
 }
 
-inline static uint32_t pmix_info_nodes_uni(){
+inline static uint32_t pmixp_info_nodes_uni(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
 	return _pmixp_job_info.nnodes_job;
 }
 
-inline static uint32_t pmix_info_tasks(){
+inline static uint32_t pmixp_info_tasks(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
 	return _pmixp_job_info.ntasks;
 }
 
-inline static uint32_t pmix_info_tasks_uni(){
+inline static uint32_t pmixp_info_tasks_node(uint32_t nodeid){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	return _pmixp_job_info.ntasks_job;
+	xassert( nodeid < _pmixp_job_info.nnodes);
+	return _pmixp_job_info.task_cnts[nodeid];
 }
 
-inline static uint32_t pmix_info_cpus(){
+inline static uint32_t *pmixp_info_tasks_cnts(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	return _pmixp_job_info.ncpus_job;
-}
-
-inline static uint32_t pmix_info_node_taskcnt(uint32_t i){
-	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	xassert( i < _pmixp_job_info.nnodes);
-	return _pmixp_job_info.task_cnts[i];
+	return _pmixp_job_info.task_cnts;
 }
 
 
-inline static uint32_t pmixp_info_ltasks(){
+inline static uint32_t pmixp_info_tasks_loc(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
 	return _pmixp_job_info.node_tasks;
 }
 
-inline static uint32_t pmixp_info_task_id(uint32_t i){
+
+inline static uint32_t pmixp_info_tasks_uni(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	xassert( i < _pmixp_job_info.node_tasks );
-	return _pmixp_job_info.gtids[i];
+	return _pmixp_job_info.ntasks_job;
+}
+
+inline static uint32_t pmixp_info_cpus(){
+	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmixp_job_info.ncpus_job;
+}
+
+
+inline static uint32_t pmixp_info_taskid(uint32_t localid){
+	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
+	xassert( localid < _pmixp_job_info.node_tasks );
+	return _pmixp_job_info.gtids[localid];
 }
 
 /*
@@ -180,135 +175,24 @@ inline static uint32_t pmixp_info_task_id(uint32_t i){
  * task local id can't be grater than 2^16. So we can
  * safely return int here. We need (-1) for the not-found case
  */
-inline static int pmix_info_lid2gid(uint32_t gid){
+inline static int pmixp_info_taskid2localid(uint32_t taskid){
 	int i;
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	xassert( gid < _pmixp_job_info.ntasks );
+	xassert( taskid < _pmixp_job_info.ntasks );
 
 	for(i=0; i<_pmixp_job_info.node_tasks; i++){
-		if( _pmixp_job_info.gtids[i] == gid )
+		if( _pmixp_job_info.gtids[i] == taskid )
 			return i;
 	}
 	return -1;
 }
 
-inline static bool pmix_info_dmdx(){
-	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	return _pmixp_job_info.direct_modex;
-}
-
-inline static uint32_t pmix_info_task_node(uint32_t gid)
-{
-	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
-	xassert( gid < _pmixp_job_info.ntasks );
-
-	return _pmixp_job_info.task_map[gid];
-}
-
-inline static char *pmix_info_task_map(){
+inline static char *pmixp_info_task_map(){
 	return _pmixp_job_info.task_map_packed;
 }
 
-/*
- *
- *  Collective information structure and access API
- *
- */
-
-typedef enum {PMIX_PARENT_NONE, PMIX_PARENT_ROOT, PMIX_PARENT_SRUN, PMIX_PARENT_STEPD } parent_type_t;
-
-
-
-typedef struct {
-	parent_type_t _pmix_parent_type;
-	char *_pmix_this_host;
-	char *_pmix_nodes_list;
-	int _pmix_child_num;
-	int *_pmix_child_list;
-	char *_pmix_parent_host;
-	slurm_addr_t *_pmix_parent_addr;
-} pmix_collective_info_t;
-
-
-
-extern parent_type_t _pmix_parent_type;
-extern char *_pmix_this_host;
-extern char *_pmix_step_nodes_list;
-extern int _pmix_child_num;
-extern int *_pmix_child_list;
-extern char *_pmix_parent_host;
-extern slurm_addr_t *_pmix_parent_addr;
-
-int pmixp_info_coll_tree(int *childs, int child_cnt);
-int  pmixp_info_parent_set_root();
-int  pmixp_info_parent_set_srun(char *phost, uint16_t port);
-int pmixp_info_parent_set_stepd(char *phost);
-
-inline static parent_type_t pmix_info_parent_type(){
-	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	return _pmix_parent_type;
-}
-
-inline static char *pmix_info_step_hosts(){
-	// xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	// This information is essential in determinig of the parent type
-	// The only thign that's important - did we initialize _pmix_nodes_list itself?
-	xassert( _pmix_step_nodes_list != NULL );
-	return _pmix_step_nodes_list;
-}
-
-inline static char *pmix_info_this_host(){
-	// xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	// This routine is called from PMIX_DEBUG/ERROR and
-	// this CAN happen before initialization. Relax demand to have
-	// _pmix_parent_type != PMIX_PARENT_NONE
-	if( _pmix_this_host == NULL ){
-		return "unknown";
-	} else {
-		return _pmix_this_host;
-	}
-}
-
-inline static char *pmix_info_parent_host()
-{
-	// Check for initialization
-	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	return _pmix_parent_host;
-}
-
-inline static slurm_addr_t *pmix_info_parent_addr()
-{
-	// Check for initialization
-	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	return _pmix_parent_addr;
-}
-
-inline static int pmix_info_childs()
-{
-	// Check for initialization
-	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	return _pmix_child_num;
-}
-
-inline static int pmix_info_nth_child(int n)
-{
-	// Check for initialization
-	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	xassert( n < _pmix_child_num );
-	return _pmix_child_list[n];
-}
-
-inline static int pmix_info_is_child_no(int id)
-{
-	// Check for initialization
-	xassert( _pmix_parent_type != PMIX_PARENT_NONE );
-	int i;
-	for(i=0;i<_pmix_child_num; i++){
-		if( id == _pmix_child_list[i] ){
-			return i;
-		}
-	}
-	return -1;
+inline static hostlist_t pmixp_info_step_hostlist(){
+	return _pmixp_job_info.step_hl;
 }
 
 #endif // INFO_H
