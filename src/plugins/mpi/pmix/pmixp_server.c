@@ -49,15 +49,17 @@
 
 #include <pmix_server.h>
 
-#define PMIX_SERVER_MSG_MAGIC 0xdeadbeef
+
+#define PMIX_SERVER_MSG_MAGIC 0xCAFECA11
 typedef struct {
 	uint32_t magic;
+	uint32_t type;
 	uint32_t gen;
 	uint32_t nodeid;
-	uint32_t paysize;
-	uint8_t cmd;
+	uint32_t msgsize;
 } send_header_t;
-#define SEND_HDR_SIZE (4*sizeof(uint32_t) + sizeof(uint8_t))
+// Cannot use sizeof here because of padding
+#define SEND_HDR_SIZE (5*sizeof(uint32_t))
 
 typedef struct {
 	uint32_t size; // Has to be first (appended by SLURM API)
@@ -93,6 +95,8 @@ pmixp_io_engine_header_t srv_rcvd_header = {
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 {
 	struct sockaddr_un address;
+	pmix_range_t range;
+	pmixp_coll_t *coll = NULL;
 	char path[MAX_USOCK_PATH];
 	int fd, rc;
 
@@ -104,23 +108,45 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 	fd_set_close_on_exec(fd);
 	pmixp_info_srv_contacts(path, fd);
 
-	if( ( rc = pmixp_info_set_stepd(job, env) ) ){
+	if( SLURM_SUCCESS != ( rc = pmixp_info_set(job, env) ) ){
+		PMIXP_ERROR("pmixp_info_set(job, env) failed");
 		return rc;
 	}
 
 	// Initialize clients state structure
-	pmixp_state_init();
-
-	if( ( rc = pmix_coll_init(env) ) ){
+	if( SLURM_SUCCESS != (rc = pmixp_state_init()) ){
+		PMIXP_ERROR("pmixp_state_init() failed");
 		return rc;
+	}
+
+	if( SLURM_SUCCESS != (rc = pmixp_nspaces_init()) ){
+		PMIXP_ERROR("pmixp_nspaces_init() failed");
+		return rc;
+	}
+
+	if( ( rc = pmixp_coll_init(env, SEND_HDR_SIZE) ) ){
+		PMIXP_ERROR("pmixp_coll_init() failed");
+		return rc;
+	}
+
+	// Add default collectives
+	range.nranks = 0;
+	range.ranks = NULL;
+	strcpy(range.nspace, pmixp_info_namespace());
+	coll = pmixp_state_coll_new(PMIXP_COLL_TYPE_FENCE, &range, 1);
+	if( NULL == coll ){
+		PMIXP_ERROR("Cannot add default FENCE collective");
+		return SLURM_ERROR;
 	}
 
 	// Create UNIX socket for client communication
 	if( SLURM_SUCCESS != pmixp_libpmix_init(&address) ){
+		PMIXP_ERROR("pmixp_libpmix_init() failed");
 		return SLURM_ERROR;
 	}
 	if( (fd = pmixp_usock_create_srv(address.sun_path)) < 0 ){
 		close( pmixp_info_srv_fd() );
+		PMIXP_ERROR("pmixp_usock_create_srv() failed");
 		return SLURM_ERROR;
 	}
 	fd_set_close_on_exec(fd);
@@ -128,33 +154,10 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 
 	// Create UNIX socket for client communication
 	if( SLURM_SUCCESS != pmixp_libpmix_job_set() ){
+		PMIXP_ERROR("pmixp_libpmix_job_set() failed");
 		return SLURM_ERROR;
 	}
 
-	pmixp_db_init( pmixp_info_namespace() );
-
-	return SLURM_SUCCESS;
-}
-
-int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env)
-{
-	char path[MAX_USOCK_PATH];
-	int fd, rc;
-	uint16_t port;
-
-	if (net_stream_listen(&fd, &port) < 0) {
-		PMIXP_ERROR("Failed to srun collective TCP socket");
-		return SLURM_ERROR;
-	}
-	PMIXP_DEBUG("srun port: %hu", port);
-
-	sprintf(path, PMIXP_STEPD_ADDR_FMT, job->jobid, job->stepid );
-	pmixp_info_srv_contacts(path, fd);
-	env_array_overwrite_fmt(env, PMIX_SRUN_PORT_ENV, "%hu", port);
-	pmixp_info_set_srun(job, env);
-	if( ( rc = pmix_coll_init(env) ) ){
-		return rc;
-	}
 	return SLURM_SUCCESS;
 }
 
@@ -169,11 +172,10 @@ void pmix_server_new_conn(int fd)
 
 	pmixp_io_engine_t *me = xmalloc( sizeof(pmixp_io_engine_t) );
 	pmix_io_init(me, fd, srv_rcvd_header);
-	if( pmixp_info_is_stepd() ){
-		// We use slurm_forward_data to send message to stepd's
-		// SLURM will put user ID there. We need to skip it.
-		pmix_io_rcvd_padding(me, sizeof(uint32_t));
-	}
+	// We use slurm_forward_data to send message to stepd's
+	// SLURM will put user ID there. We need to skip it.
+	pmix_io_rcvd_padding(me, sizeof(uint32_t));
+
 	// TODO: in future try to process the request right here
 	// use eio only in case of blocking operation
 	// NOW: always defer to debug the blocking case
@@ -190,9 +192,9 @@ static uint32_t _recv_payload_size(void *buf)
 {
 	recv_header_t *ptr = (recv_header_t*)buf;
 	send_header_t *hdr = &ptr->send_hdr;
-	xassert( ptr->size == (SEND_HDR_SIZE + hdr->paysize) );
+	xassert( ptr->size == (SEND_HDR_SIZE + hdr->msgsize) );
 	xassert( hdr->magic == PMIX_SERVER_MSG_MAGIC );
-	return hdr->paysize;
+	return hdr->msgsize;
 }
 
 /*
@@ -206,12 +208,12 @@ static int _send_pack_hdr(void *host, void *net)
 	Buf packbuf = create_buf(net, sizeof(send_header_t));
 	int size = 0;
 	pack32(ptr->magic, packbuf);
+	pack32(ptr->type, packbuf);
 	pack32(ptr->gen, packbuf);
 	pack32(ptr->nodeid, packbuf);
-	pack32(ptr->paysize, packbuf);
-	pack8(ptr->cmd, packbuf);
+	pack32(ptr->msgsize, packbuf);
 	size = get_buf_offset(packbuf);
-	xassert( size == (4*sizeof(uint32_t) + sizeof(uint8_t)) );
+	xassert( size == SEND_HDR_SIZE );
 	// free the Buf packbuf, but not the memory to which it points
 	packbuf->head = NULL;
 	free_buf(packbuf);
@@ -235,6 +237,10 @@ static int _recv_unpack_hdr(void *net, void *host)
 	}
 	xassert( ptr->send_hdr.magic == PMIX_SERVER_MSG_MAGIC );
 
+	if( unpack32(&ptr->send_hdr.type, packbuf)){
+		return -EINVAL;
+	}
+
 	if( unpack32(&ptr->send_hdr.gen, packbuf)){
 		return -EINVAL;
 	}
@@ -243,11 +249,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 		return -EINVAL;
 	}
 
-	if( unpack32(&ptr->send_hdr.paysize, packbuf) ){
-		return -EINVAL;
-	}
-
-	if( unpack8(&ptr->send_hdr.cmd, packbuf) ){
+	if( unpack32(&ptr->send_hdr.msgsize, packbuf) ){
 		return -EINVAL;
 	}
 
@@ -257,76 +259,33 @@ static int _recv_unpack_hdr(void *net, void *host)
 	return 0;
 }
 
-void *pmix_server_alloc_msg(uint32_t size, void **payload)
+int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type,
+			   const char *addr, uint32_t nodeid,
+			   void *data, size_t size)
 {
-	/*
-	uint32_t payload_offs = sizeof(send_header_t) + SEND_HDR_SIZE;
-	// Allocate more space than need to save unpacked header too
-	void *msg = xmalloc(payload_offs + size);
-	send_header_t *hdr = msg;
+	send_header_t hdr;
+	char nhdr[sizeof(send_header_t)];
+	size_t hsize;
+	int rc;
 
-	hdr->magic = PMIX_SERVER_MSG_MAGIC;
-	hdr->gen = 	pmix_db_generation();
-	hdr->nodeid = pmix_info_nodeid();
-	hdr->paysize = size;
-	*payload = (char*)msg + payload_offs;
-	return msg;
-	*/
-	return NULL;
-}
+	hdr.magic = PMIX_SERVER_MSG_MAGIC;
+	hdr.type = type;
+	hdr.nodeid = nodeid;
+	hdr.msgsize = size;
+	hdr.gen = 0; // Not used now
+	hsize = _send_pack_hdr(&hdr, nhdr);
+	memcpy(data,nhdr, hsize);
 
-void *pmix_server_alloc_msg_next(uint32_t size, void **payload)
-{
-	/*
-	uint32_t payload_offs = sizeof(send_header_t) + SEND_HDR_SIZE;
-	// Allocate more space than need to save unpacked header too
-	void *msg = xmalloc(payload_offs + size);
-	send_header_t *hdr = msg;
-
-	hdr->magic = PMIX_SERVER_MSG_MAGIC;
-	// This may be request with non-blocking fence.
-	hdr->gen = 	pmix_db_generation_next();
-	hdr->nodeid = pmix_info_nodeid();
-	hdr->paysize = size;
-	*payload = (char*)msg + payload_offs;
-	return msg;
-	*/
-	return NULL;
-}
-
-void pmix_server_msg_setcmd(void *msg, pmix_srv_cmd_t cmd)
-{
-	xassert(msg != NULL);
-	send_header_t *hdr = (send_header_t*)msg;
-	hdr->cmd = cmd;
-}
-
-void pmix_server_msg_finalize(void *msg)
-{
-	send_header_t *uhdr = (send_header_t *)msg;
-	void *phdr = (void*)(uhdr + 1);
-	_send_pack_hdr(uhdr, phdr);
-}
-
-uint32_t pmix_server_msg_size(void *msg)
-{
-	xassert(msg != NULL);
-	send_header_t *hdr = (send_header_t*)msg;
-	return hdr->paysize + SEND_HDR_SIZE;
-}
-
-void *pmix_server_msg_start(void *msg)
-{
-	xassert(msg != NULL);
-	send_header_t *uhdr = msg;
-	return (void*)(uhdr + 1);
+	rc = pmixp_stepd_send(hostlist, addr, data, size);
+	if( SLURM_SUCCESS != rc ){
+		PMIXP_ERROR("Cannot send message to %s, size = %u, hostlist:\n%s",
+			    addr, (uint32_t)size, hostlist);
+	}
+	return rc;
 }
 
 static bool _serv_readable(eio_obj_t *obj)
 {
-	// TEMP
-	return !obj->shutdown;
-
 	// We should delete connection right when it
 	// was closed or failed
 	xassert( obj->shutdown == false );
@@ -336,26 +295,41 @@ static bool _serv_readable(eio_obj_t *obj)
 static void _process_server_request(recv_header_t *_hdr, void *payload)
 {
 	send_header_t *hdr = &_hdr->send_hdr;
-	switch( hdr->cmd ){
-	case PMIX_FENCE:
-		pmix_coll_node_contrib(hdr->gen, hdr->nodeid, payload, hdr->paysize);
-		// keep the payload!
-		return;
-	case PMIX_FENCE_RESP:
-		// Skip DB update if we are in direct modex mode.
-		pmix_coll_update_db(payload, hdr->paysize);
-		//pmix_client_fence_notify();
+	size_t size = hdr->msgsize - SEND_HDR_SIZE;
+	switch( hdr->type ){
+	case PMIXP_MSG_FAN_IN:
+	case PMIXP_MSG_FAN_OUT:{
+		pmixp_coll_t *coll;
+		int offset = 0;
+		pmix_range_t *ranges = NULL;
+		size_t nranges = 0;
+		pmixp_coll_type_t type = 0;
+
+		offset = pmixp_coll_unpack_ranges(payload, size, &type, &ranges, &nranges);
+		if( 0 >= offset ){
+			PMIXP_ERROR("Bad message header from node %d",
+				    hdr->nodeid);
+			return;
+		}
+		coll = pmixp_state_coll_find(type, ranges, nranges);
+		PMIXP_DEBUG("FENCE collective message from node \"%s\", type = %s",
+			    pmixp_coll_nodename(coll, hdr->nodeid),
+			    (PMIXP_MSG_FAN_IN == hdr->type) ? "fan-in" : "fan-out");
+
+		if( PMIXP_MSG_FAN_IN == hdr->type ){
+			pmixp_coll_contrib_node(coll, hdr->nodeid,
+						payload + offset,
+						hdr->msgsize - offset);
+		} else {
+			pmixp_coll_fan_out_data(coll, payload + offset,
+						hdr->msgsize - offset);
+		}
 		break;
-	case PMIX_DIRECT:
-		_process_dmdx_request(hdr, payload);
-		break;
-	case PMIX_DIRECT_RESP:
-		_dmdx_response(hdr, payload);
-		break;
-	default:
-	PMIXP_ERROR_NO(0,"Bad command %d", hdr->cmd);
 	}
-	xfree(payload);
+	default:
+		PMIXP_ERROR("Unknown message type %d", hdr->type);
+		break;
+	}
 }
 
 static int _serv_read(eio_obj_t *obj, List objs)
@@ -380,6 +354,7 @@ static int _serv_read(eio_obj_t *obj, List objs)
 			recv_header_t hdr;
 			void *msg = pmix_io_rcvd_extract(me, &hdr);
 			_process_server_request(&hdr, msg);
+			xfree(msg);
 		}else{
 			// No more complete messages
 			break;
@@ -388,191 +363,3 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	return 0;
 }
 
-/*
- * Direct modex service
- */
-
-int _put_taskid(void *payload, uint32_t taskid)
-{
-	int size = sizeof(uint32_t);
-	int offset;
-	Buf packbuf = create_buf(payload, size);
-	pack32(taskid, packbuf);
-	offset = get_buf_offset(packbuf);
-	packbuf->head = NULL;
-	free_buf(packbuf);
-	return offset;
-}
-
-int _get_taskid(void *payload, uint32_t *taskid)
-{
-	int size = sizeof(uint32_t);
-	int offset;
-	Buf packbuf = create_buf(payload, size);
-	if( unpack32(taskid, packbuf) ){
-	PMIXP_ERROR_NO(EINVAL,"DMDX: Cannot unpack requested global task id");
-		return SLURM_ERROR;
-	}
-	offset = get_buf_offset(packbuf);
-	packbuf->head = NULL;
-	free_buf(packbuf);
-	return offset;
-}
-
-
-void pmix_server_dmdx_request(uint32_t localid, uint32_t taskid)
-{
-	int size = sizeof(uint32_t);
-	int rc;
-	void *msg, *payload, *start;
-	char *host;
-	uint32_t nodeid;
-
-	PMIXP_DEBUG("from %d to %d", localid, taskid);
-
-	if( pmix_state_remote_sent(taskid) ){
-		// Request was already send. Nothing to do
-		PMIXP_DEBUG("Already have request for taskid=%d ...", taskid);
-		return;
-	}
-
-	msg = pmix_server_alloc_msg(size, &payload);
-	//offset = _put_taskid(payload, taskid);
-	_put_taskid(payload, taskid);
-	pmix_server_msg_setcmd(msg, PMIX_DIRECT);
-	pmix_server_msg_finalize(msg);
-	nodeid = pmix_info_task_node(taskid);
-	host = pmixp_info_nth_host_name(nodeid);
-	size = pmix_server_msg_size(msg);
-	start = pmix_server_msg_start(msg);
-	// TODO: Try to send several times in case of error!
-	rc = pmixp_stepd_send(host, (char*)pmixp_info_srv_addr(), size, start);
-	if( rc != SLURM_SUCCESS ){
-	PMIXP_ERROR_NO(EAGAIN, "Cannot send DMDX request to node %s", host);
-	}
-	xfree(host);
-	xfree(msg);
-}
-
-
-
-void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid)
-{
-/*
-	int size, offset, rc;
-	void *blob, *msg, *start, *payload;
-	char *host;
-	uint32_t taskid;
-
-	taskid = pmixp_info_task_id(localid);
-	size = pmix_db_get_blob(taskid, &blob);
-
-	// If we have the DB of proper generation we MUST have the blob.
-	xassert( blob != NULL );
-
-	msg = pmix_server_alloc_msg(size + sizeof(uint32_t), &payload);
-	offset = _put_taskid(payload, taskid);
-	memcpy((char*)payload + offset, blob, size);
-	// Convert the header into network byte order
-	pmix_server_msg_setcmd(msg, PMIX_DIRECT_RESP);
-	pmix_server_msg_finalize(msg);
-	host = pmixp_info_nth_host_name(nodeid);
-	size = pmix_server_msg_size(msg);
-	start = pmix_server_msg_start(msg);
-	// TODO: Try to send several times in case of error!
-	rc = pmixp_stepd_send(host, (char*)pmixp_info_srv_addr(), size, start);
-	if( rc != SLURM_SUCCESS ){
-	PMIXP_ERROR_NO(EAGAIN, "Cannot send DMDX request to node %s", host);
-	}
-	xfree(host);
-	*/
-}
-
-void _process_dmdx_request(send_header_t *hdr, void *payload)
-{
-	/*
-	int offset;
-	uint32_t taskid;
-	uint32_t localid;
-
-	if( SLURM_ERROR == (offset = _get_taskid(payload, &taskid) ) ){
-	PMIXP_ERROR_NO(EINVAL,"DMDX: Cannot unpack requested global task id");
-		// TODO: respond with the error
-		return;
-	}
-
-	if( (localid = pmix_info_lid2gid(taskid)) < 0 ){
-	PMIXP_ERROR_NO(ENOENT,"DMDX: Cannot find requested global task ID on this node");
-		// TODO: respond with the error
-		return;
-	}
-
-	char *node = pmixp_info_nth_host_name(hdr->nodeid);
-	PMIXP_DEBUG("Get DMDX request from %d (%s) on the task %d(%d), DB generation: %d",
-			   hdr->nodeid, node, taskid, localid, hdr->gen);
-	xfree(node);
-
-	// More sophisticated DB generations scheme is needed.
-	// Will need to fix this in future.
-	if( hdr->gen == pmix_db_generation() ){
-		// We have the same DB generation. Respond now
-		PMIXP_DEBUG("DMDX request: reply immediately");
-		_dmdx_reply_to_node(localid, hdr->nodeid);
-	} else if( hdr->gen == (pmix_db_generation() + 1) ){
-		// The client is one step ahared. Wait until we reach it too.
-		PMIXP_DEBUG("DMDX request: defer response");
-		pmix_state_local_defer(localid, hdr->nodeid);
-	} else if( hdr->gen > pmix_db_generation() + 1){
-		// The client is more than one step ahared. Can this happen?
-		// Maybe if we will do more complex collective scopes in future.
-	PMIXP_ERROR_NO(0,"Get DMDX request from the _future_: our generation = %d,"
-					  "Request generation = %d", pmix_db_generation(), hdr->gen);
-	} else {
-		// The client is more than one step behind us. Can this happen?
-		// Maybe if we will do more complex collective scopes in future.
-	PMIXP_ERROR_NO(0,"Get DMDX request from the _past_: our generation = %d,"
-					  "Request generation = %d", pmix_db_generation(), hdr->gen);
-	}
-	*/
-}
-
-int _dmdx_response(send_header_t *hdr, void *payload)
-{
-	/*
-	void *blob, *blob_copy;
-	uint32_t taskid;
-	int size, offset;
-
-	if( SLURM_ERROR == (offset = _get_taskid(payload, &taskid) ) ){
-	PMIXP_ERROR_NO(EINVAL,"DMDX response: Cannot unpack task global id");
-		return SLURM_ERROR;
-	}
-	blob = (char*)payload + offset;
-	size = hdr->paysize - offset;
-	blob_copy = xmalloc( size );
-	memcpy(blob_copy, blob, size);
-	pmix_db_dmdx_add_blob(hdr->gen, taskid,blob_copy,size);
-	// Mark DMDX request as completed
-	pmix_state_remote_received(taskid);
-	// Reply to the clients
-	//pmix_client_taskid_reply(taskid);
-	*/
-	return SLURM_SUCCESS;
-}
-
-void pmix_server_dmdx_notify(uint32_t localid)
-{
-	/*
-	uint32_t *nodeid;
-	List requests;
-	if( !pmix_state_local_reqs_cnt(localid) ){
-		// there was no requests to this task
-		return;
-	}
-	requests = pmix_state_local_reqs_to(localid);
-	while( (nodeid = list_dequeue(requests)) ){
-		_dmdx_reply_to_node(localid, *nodeid);
-		xfree(nodeid);
-	}
-	*/
-}

@@ -91,9 +91,7 @@ _server_conn_read(eio_obj_t *obj, List objs)
 {
 	int fd;
 	struct sockaddr addr;
-	struct sockaddr_in *sin;
 	socklen_t size = sizeof(addr);
-	char buf[INET_ADDRSTRLEN];
 	int shutdown = 0;
 
 	PMIXP_DEBUG("fd = %d", obj->fd);
@@ -119,17 +117,11 @@ _server_conn_read(eio_obj_t *obj, List objs)
 					(errno == EWOULDBLOCK)) {
 				return 0;
 			}
-			PMIXP_ERROR("accept()ing connection sd=%d", obj->fd);
+			PMIXP_ERROR_STD("accept()ing connection sd=%d", obj->fd);
 			return 0;
 		}
 
-		if( pmixp_info_is_srun() ){
-			sin = (struct sockaddr_in *) &addr;
-			inet_ntop(AF_INET, &sin->sin_addr, buf, INET_ADDRSTRLEN);
-			PMIXP_DEBUG("accepted connection: ip=%s sd=%d", buf, fd);
-		} else {
-			PMIXP_DEBUG("accepted connection: sd=%d", fd);
-		}
+		PMIXP_DEBUG("accepted connection: sd=%d", fd);
 		/* read command from socket and handle it */
 		pmix_server_new_conn(fd);
 	}
@@ -165,7 +157,7 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
 			// The error occurs or fd was closed
 			if( shutdown < 0 ){
 				obj->shutdown = true;
-				PMIXP_ERROR_NO(-shutdown, "sd=%d failure", obj->fd);
+				PMIXP_ERROR(-shutdown, "sd=%d failure", obj->fd);
 			}
 			return 0;
 		}
@@ -179,12 +171,7 @@ static int _cli_conn_read(eio_obj_t *obj, List objs)
 					(errno == EWOULDBLOCK)) {
 				return 0;
 			}
-			PMIXP_ERROR("unable to accept new connection");
-			return 0;
-		}
-
-		if( pmixp_info_is_srun() ){
-			PMIXP_ERROR("srun shouldn't be directly connected to clients");
+			PMIXP_ERROR_STD("unable to accept new connection");
 			return 0;
 		}
 
@@ -210,10 +197,8 @@ static void *_agent(void * unused)
 	eio_new_initial_obj(pmix_io_handle, srv_obj);
 
 	/* for stepd, add the sockets to tasks */
-	if( pmixp_info_is_stepd() ) {
-		cli_obj = eio_obj_create(pmix_info_cli_fd(), &cli_ops, (void*)(long)(-1));
-		eio_new_initial_obj(pmix_io_handle, cli_obj);
-	}
+	cli_obj = eio_obj_create(pmix_info_cli_fd(), &cli_ops, (void*)(long)(-1));
+	eio_new_initial_obj(pmix_io_handle, cli_obj);
 
 	pmixp_info_io_set(pmix_io_handle);
 
@@ -236,7 +221,7 @@ int pmix_agent_start(void)
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	while ((errno = pthread_create(&pmix_agent_tid, &attr, _agent, NULL))) {
 		if (++retries > MAX_RETRIES) {
-			PMIXP_ERROR("pthread_create error");
+			PMIXP_ERROR_STD("pthread_create error");
 			slurm_attr_destroy(&attr);
 			return SLURM_ERROR;
 		}

@@ -50,13 +50,26 @@ typedef struct {
 } pmixp_blob_t;
 
 typedef struct {
+	pmix_modex_data_t data;
+	pmix_scope_t scope;
+} pmixp_modex_t;
+
+
+typedef struct {
 #ifndef NDEBUG
-#       define PMIXP_NSPACE_MAGIC 0xdeadbeef
+#       define PMIXP_NSPACE_MAGIC 0xCAFED00D
 	int  magic;
 #endif
 	char name[PMIX_MAX_NSLEN];
-	// Current database
-	uint32_t tasks;
+	uint32_t nnodes;      /* number of nodes in this namespace              */
+	int node_id;          /* relative position of this node in this step  */
+	uint32_t ntasks;      /* total number of tasks in this namespace        */
+	uint32_t *task_cnts;  /* Number of tasks on each node in this namespace */
+	char *task_map_packed;  /* string represents packed task mapping information */
+	uint32_t *task_map;	/* i'th task is located on task_map[i] node     */
+	hostlist_t hl;
+
+	/* Current database */
 	pmixp_blob_t *local_blobs;
 	pmixp_blob_t *remote_blobs;
 	pmixp_blob_t *global_blobs;
@@ -73,21 +86,37 @@ typedef struct {
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIXP_DB_MAGIC 0xdeadbeef
+#       define PMIXP_DB_MAGIC 0xCAFEBABE
 	int  magic;
 #endif
 	List nspaces;
 } pmixp_db_t;
 
+
 extern pmixp_db_t _pmixp_db;
 
-void pmixp_db_init(char *nspace);
-int pmixp_db_add_blob(const char *nspace, pmix_scope_t scope,
-		      int taskid, void *blob, int size);
+/* namespaces list operations */
+int pmixp_nspaces_init();
+pmixp_namespace_t *pmixp_nspaces_find(const char *name);
+int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
+			 uint32_t ntasks, uint32_t *task_cnts,
+			 char *task_map_packed, hostlist_t hl);
+
+/* operations on the specific namespace */
+inline static hostlist_t pmixp_nspace_hostlist(pmixp_namespace_t *nsptr)
+{
+	hostlist_t hl = hostlist_copy(nsptr->hl);
+	return hl;
+}
+hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
+				  int *ranks, size_t nranks);
+int pmixp_nspace_add_blob(const char *nspace, pmix_scope_t scope, int taskid, void *blob, int size);
+int pmixp_nspace_blob(const char *nspace, pmix_scope_t scope, List l);
+int pmixp_nspace_rank_blob(const char *nspace, pmix_scope_t scope,
+			   int rank, List l);
 
 
-int pmixp_db_blob(const char *nspace, List modex_data);
-int pmixp_db_blob_r(const char *nspace, int rank, List modex_data);
+// TODO: Check the usefulness of this and remove in future.
 
 /*
 static inline uint32_t pmix_db_generation(){

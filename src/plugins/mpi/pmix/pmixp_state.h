@@ -42,146 +42,131 @@
 #include "pmixp_common.h"
 #include "pmixp_debug.h"
 #include "pmixp_io.h"
+#include "pmixp_coll.h"
 
-typedef enum { PMIX_CLI_UNCONNECTED, PMIX_CLI_ACK, PMIX_CLI_OPERATE, PMIX_CLI_COLL, PMIX_CLI_COLL_NB } pmix_cli_state_t;
+/*
+ * Client state structure
+ */
 
-typedef struct {
-	pmix_cli_state_t state;
-	uint32_t localid;
-	pmixp_io_engine_t eng;
-} client_state_t;
-
-typedef enum { PMIX_COLL_SYNC, PMIX_COLL_GATHER, PMIX_COLL_FORWARD } pmix_coll_state_t;
-
-typedef struct {
-	pmix_coll_state_t state;
-	uint32_t local_joined;
-	uint8_t *local_contrib;
-	uint32_t nodes_joined;
-	uint8_t *nodes_contrib;
-} collective_state_t;
+typedef enum { PMIXP_CLI_UNCONNECTED, PMIXP_CLI_OPERATE } pmix_cli_state_name_t;
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIX_STATE_MAGIC 0xdeadbeef
+#       define PMIXP_CLIENT_STATE_MAGIC 0xFEEDFACE
+	int  magic;
+#endif
+	pmix_cli_state_name_t state;
+	uint32_t localid;
+	// TODO: To support clones on one rank need variable-size
+	// array of I/O engines here in future
+	pmixp_io_engine_t eng;
+} pmixp_cli_state_t;
+
+/*
+ * Collective state structure
+ */
+
+
+/*
+ * PMIx plugin state structure
+ */
+
+typedef struct {
+#ifndef NDEBUG
+#       define PMIX_STATE_MAGIC 0xFEEDCAFE
 	int  magic;
 #endif
 	uint32_t cli_size;
-	client_state_t *cli_state;
-	collective_state_t coll;
+	pmixp_cli_state_t *cli_state;
+	List coll;
 	eio_handle_t *cli_handle, *srv_handle;
 } pmixp_state_t;
 
 extern pmixp_state_t _pmixp_state;
 
-void pmixp_state_init();
+/*
+ * General PMIx plugin state manipulation functions
+ */
+
+int pmixp_state_init();
+void pmixp_state_finalize();
 
 inline static void pmixp_state_sanity_check()
 {
 	xassert( _pmixp_state.magic == PMIX_STATE_MAGIC );
 }
 
+inline static uint32_t pmixp_state_cli_count()
+{
+	pmixp_state_sanity_check();
+	return _pmixp_state.cli_size;
+}
+
 /*
- * Client state
+ * Client state manipulation functions
  */
 
 inline static void pmixp_state_cli_sanity_check(uint32_t localid)
 {
 	pmixp_state_sanity_check();
 	xassert( localid < _pmixp_state.cli_size);
+	xassert( _pmixp_state.cli_state[localid].magic == PMIXP_CLIENT_STATE_MAGIC );
 }
 
-inline static uint32_t pmixp_state_cli_io_size(){
-	return _pmixp_state.cli_size;
-}
-
-inline static pmixp_io_engine_t *pmixp_state_cli_io_new(int localid)
-{
-	if( localid >= _pmixp_state.cli_size ){
-		_pmixp_state.cli_size *= 2;
-		size_t size = _pmixp_state.cli_size * sizeof(client_state_t);
-		_pmixp_state.cli_state = xrealloc(_pmixp_state.cli_state, size);
-	}
-	return &_pmixp_state.cli_state[localid].eng;
-}
-
-
-inline static pmixp_io_engine_t *pmixp_state_cli_io(int localid)
+inline static int pmixp_state_cli_connected(int localid)
 {
 	pmixp_state_cli_sanity_check(localid);
-	return &_pmixp_state.cli_state[localid].eng;
+	pmixp_cli_state_t *cli = &_pmixp_state.cli_state[localid];
+	xassert( cli->state == PMIXP_CLI_UNCONNECTED );
+	cli->state = PMIXP_CLI_OPERATE;
+	return SLURM_SUCCESS;
+}
+
+inline static int pmixp_state_cli_disconnected(int localid)
+{
+	pmixp_state_cli_sanity_check(localid);
+	pmixp_cli_state_t *cli = &_pmixp_state.cli_state[localid];
+	xassert( cli->state == PMIXP_CLI_OPERATE );
+	cli->state = PMIXP_CLI_UNCONNECTED;
+	return SLURM_SUCCESS;
+}
+
+inline static pmixp_cli_state_t *
+pmixp_state_cli(uint32_t localid)
+{
+	pmixp_state_cli_sanity_check(localid);
+	pmixp_cli_state_t *cli = pmixp_state_cli(localid);
+	xassert( cli->state == PMIXP_CLI_OPERATE );
+	return cli;
+}
+
+inline static pmixp_io_engine_t *
+pmixp_state_cli_io(int localid)
+{
+	pmixp_state_cli_sanity_check(localid);
+	pmixp_cli_state_t *cli = pmixp_state_cli(localid);
+	xassert( cli->state == PMIXP_CLI_OPERATE );
+	return &cli->eng;
 }
 
 inline static int pmixp_state_cli_fd(int localid)
 {
 	pmixp_state_cli_sanity_check(localid);
-	pmixp_io_engine_t *eng = &_pmixp_state.cli_state[localid].eng;
-	return eng->sd;
+	pmixp_cli_state_t *cli = pmixp_state_cli(localid);
+	xassert( cli->state == PMIXP_CLI_OPERATE );
+	return cli->eng.sd;
 }
-
-
-inline static client_state_t *pmixp_state_cli(uint32_t localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	return &_pmixp_state.cli_state[localid];
-}
-
-inline static int pmixp_state_cli_connected(int taskid)
-{
-	pmixp_state_sanity_check();
-	if( !( taskid < _pmixp_state.cli_size ) ){
-		return SLURM_ERROR;
-	}
-	client_state_t *cli = &_pmixp_state.cli_state[taskid];
-	// TODO: will need to implement additional step - ACK
-	cli->state = PMIX_CLI_OPERATE;
-	return SLURM_SUCCESS;
-}
-
-
 
 
 /*
  * Collective state
  */
 
-/*
- * Database-related information
- */
-
-bool pmix_state_node_contrib_ok(uint32_t gen, int idx);
-bool pmix_state_task_contrib_ok(int idx, bool blocking);
-bool pmix_state_coll_local_ok();
-bool pmix_state_coll_forwad();
-bool pmix_state_coll_sync();
-bool pmix_state_node_contrib_cancel(int idx);
-bool pmix_state_task_contrib_cancel(int idx);
-
-inline static void pmix_state_task_coll_finish(uint32_t localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	client_state_t *cli = &_pmixp_state.cli_state[localid];
-	xassert( cli->state == PMIX_CLI_COLL || cli->state == PMIX_CLI_COLL_NB);
-	cli->state = PMIX_CLI_OPERATE;
-}
-
-/*
- * Direct modex
- */
-
-// DMDX requests tracking
-bool pmix_state_remote_sent(uint32_t taskid);
-void pmix_state_remote_received(uint32_t taskid);
-
-// Client interest in blob tracking
-void pmix_state_remote_wait(uint32_t localid, uint32_t taskid);
-List pmix_state_remote_to(uint32_t taskid);
-List pmix_state_remote_from(uint32_t localid);
-
-// Requests to local data tracking
-void pmix_state_local_defer(uint32_t src_lid, uint32_t nodeid);
-int pmix_state_local_reqs_cnt(uint32_t localid);
-List pmix_state_local_reqs_to(uint32_t localid);
-
+pmixp_coll_t *
+pmixp_state_coll_find(pmixp_coll_type_t type, const pmix_range_t *ranges,
+		      size_t nranges);
+pmixp_coll_t *
+pmixp_state_coll_new(pmixp_coll_type_t type, const pmix_range_t *ranges,
+		     size_t nranges);
 
 #endif // STATE_H
