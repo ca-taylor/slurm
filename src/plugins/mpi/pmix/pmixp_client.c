@@ -98,7 +98,7 @@ int pmixp_libpmix_init(struct sockaddr_un *address)
 
     /* setup the server library */
     if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb, false))) {
-	PMIXP_ERROR("PMIx_server_init failed with error %d\n", rc);
+	PMIXP_ERROR_STD("PMIx_server_init failed with error %d\n", rc);
 	return SLURM_ERROR;
     }
 
@@ -107,7 +107,7 @@ int pmixp_libpmix_init(struct sockaddr_un *address)
 
     /* retrieve the rendezvous address */
     if (PMIX_SUCCESS != ( rc = PMIx_get_rendezvous_address(address) ) ) {
-	PMIXP_ERROR("PMIx_get_rendezvous_address failed with error: %d", rc);
+	PMIXP_ERROR_STD("PMIx_get_rendezvous_address failed with error: %d", rc);
 	return SLURM_ERROR;
     }
     return 0;
@@ -119,7 +119,7 @@ static void errhandler(pmix_status_t status,
 {
 	// TODO: do something more sophisticated here
 	// FIXME: use proper specificator for nranges
-	PMIXP_ERROR("Error handler invoked: status = %d, nranges = %d", status, (int)nranges);
+	PMIXP_ERROR_STD("Error handler invoked: status = %d, nranges = %d", status, (int)nranges);
 }
 
 #define PMIXP_ALLOC_KEY(kvp, key_str) {				\
@@ -142,12 +142,12 @@ int pmixp_libpmix_job_set()
 	gid_t gid = getgid();
 
 	// Use list to safely expand/reduce key-value pairs.
-	lresp = slurm_list_create(pmixp_xfree_buffer);
+	lresp = list_create(pmixp_xfree_buffer);
 
 	/* The name of the current host */
 	PMIXP_ALLOC_KEY(kvp, PMIX_HOSTNAME);
-	PMIX_VAL_SET(&kvp->value, string, pmix_info_this_host());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, string, pmixp_info_hostname());
+	list_append(lresp, kvp);
 
 	/* Setup temprary directory */
 	/* TODO: consider all ways of setting TMPDIR here: fixed, prolog, what else? */
@@ -157,7 +157,7 @@ int pmixp_libpmix_job_set()
 	}
 	PMIXP_ALLOC_KEY(kvp, PMIX_TMPDIR);
 	PMIX_VAL_SET(&kvp->value, string, p);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	/* jobid assigned by scheduler */
 	p = NULL;
@@ -165,7 +165,7 @@ int pmixp_libpmix_job_set()
 	PMIXP_ALLOC_KEY(kvp, PMIX_JOBID);
 	PMIX_VAL_SET(&kvp->value, string, p);
 	xfree(p);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	/* process identification ranks */
 	// TODO: what to put here for slurm?
@@ -173,64 +173,64 @@ int pmixp_libpmix_job_set()
 /*
 	PMIXP_ALLOC_KEY(kvp, PMIX_GLOBAL_RANK);
 	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_RANK);
 	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_RANK);
 	PMIX_VAL_SET(&kvp->value, uint32_t, taskid);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_APP_RANK);
 	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 */
 	PMIXP_ALLOC_KEY(kvp, PMIX_APPNUM);
 	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_NODE_RANK);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_nodeid());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_nodeid());
+	list_append(lresp, kvp);
 
 	/* size information */
 	PMIXP_ALLOC_KEY(kvp, PMIX_UNIV_SIZE);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_tasks_uni());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_tasks_uni());
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_JOB_SIZE);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_tasks());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_tasks());
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_SIZE);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_ltasks());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_tasks_loc());
+	list_append(lresp, kvp);
 
 	// TODO: fix it in future
 	PMIXP_ALLOC_KEY(kvp, PMIX_NODE_SIZE);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_ltasks());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_tasks_loc());
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_MAX_PROCS);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmix_info_tasks_uni());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_tasks_uni());
+	list_append(lresp, kvp);
 
 	/* offset information */
 	// TODO: Fix this in future once Spawn will be implemented
 	PMIXP_ALLOC_KEY(kvp, PMIX_NPROC_OFFSET);
 	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_APPLDR);
 	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
-	xstrfmtcat(p,"%u", pmixp_info_task_id(0));
-	tmp = pmixp_info_task_id(0);
-	for(i=1;i< pmixp_info_ltasks();i++){
-		uint32_t rank = pmixp_info_task_id(i);
+	xstrfmtcat(p,"%u", pmixp_info_taskid(0));
+	tmp = pmixp_info_taskid(0);
+	for(i=1;i< pmixp_info_tasks_loc();i++){
+		uint32_t rank = pmixp_info_taskid(i);
 		xstrfmtcat(p,",%u", rank);
 		if( tmp > rank ){
 			tmp = rank;
@@ -240,44 +240,44 @@ int pmixp_libpmix_job_set()
 	PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_PEERS);
 	PMIX_VAL_SET(&kvp->value, string, p);
 	xfree(p);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_LOCALLDR);
 	PMIX_VAL_SET(&kvp->value, uint32_t, tmp);
-	slurm_list_append(lresp, kvp);
+	list_append(lresp, kvp);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_PROC_MAP);
-	PMIX_VAL_SET(&kvp->value, string, pmix_info_task_map());
-	slurm_list_append(lresp, kvp);
+	PMIX_VAL_SET(&kvp->value, string, pmixp_info_task_map());
+	list_append(lresp, kvp);
 
-	ninfo = slurm_list_count(lresp);
+	ninfo = list_count(lresp);
 	info = xmalloc(sizeof(pmix_info_t) * ninfo);
-	it = slurm_list_iterator_create(lresp);
+	it = list_iterator_create(lresp);
 	i = 0;
-	while( NULL != (kvp = slurm_list_next(it) ) ){
+	while( NULL != (kvp = list_next(it) ) ){
 		info[i] = *kvp;
 		i++;
 	}
-	slurm_list_destroy(lresp);
+	list_destroy(lresp);
 
 	rc = PMIx_server_register_nspace(pmixp_info_namespace(),
-					 pmixp_info_ltasks(), info, ninfo);
+					 pmixp_info_tasks_loc(), info, ninfo);
 	xfree(info);
 	if( PMIX_SUCCESS != rc ){
-		PMIXP_ERROR_NO(0, "Cannot register namespace %s, nlocalproc=%d, "
+		PMIXP_ERROR("Cannot register namespace %s, nlocalproc=%d, "
 			       "ninfo = %d", pmixp_info_namespace(),
-			       pmixp_info_ltasks(), ninfo );
+			       pmixp_info_tasks_loc(), ninfo );
 		return SLURM_ERROR;
 	} else {
 		PMIXP_DEBUG("task initialization");
-		for(i=0;i<pmixp_info_ltasks();i++){
+		for(i=0;i<pmixp_info_tasks_loc();i++){
 			rc = PMIx_server_register_client(pmixp_info_namespace(),
-						    pmixp_info_task_id(i),
+						    pmixp_info_taskid(i),
 						    uid, gid,
 						    &pmixp_state_cli(i)->localid);
 			if( PMIX_SUCCESS != rc ){
-				PMIXP_ERROR_NO(0, "Cannot register client %d(%d) in namespace %s",
-					       pmixp_info_task_id(i), i, pmixp_info_namespace() );
+				PMIXP_ERROR("Cannot register client %d(%d) in namespace %s",
+					       pmixp_info_taskid(i), i, pmixp_info_namespace() );
 				return SLURM_ERROR;
 			}
 		}
@@ -303,13 +303,13 @@ static void _send_cb(int sd, void *srv_obj, char *payload, size_t size)
 	int localid = 0;
 	pmixp_io_engine_t *eng = NULL;
 
-	for( ; localid < pmixp_state_cli_io_size(); localid++ ){
+	for( ; localid < pmixp_state_cli_count(); localid++ ){
 		eng = pmixp_state_cli_io(localid);
 		if( sd == eng->sd){
 			break;
 		}
 	}
-	if( pmixp_state_cli_io_size() <= localid ){
+	if( pmixp_state_cli_count() <= localid ){
 		// not found
 		return;
 	}
@@ -352,16 +352,15 @@ void pmix_client_new_conn(int sd)
 		return;
 	}
 
-	// TODO: fixme
-	localid = rank;
-
 	// Setup fd
 	fd_set_nonblocking(sd);
 	fd_set_close_on_exec(sd);
 
 	// Setup message engine. Push the header we just received to
 	// ensure integrity of msgengine
-	pmixp_io_engine_t *me = pmixp_state_cli_io_new(localid);
+	localid = pmixp_info_taskid2localid(rank);
+	pmixp_state_cli_connected(localid);
+	pmixp_io_engine_t *me = pmixp_state_cli_io(localid);
 	pmix_io_init(me, sd, cli_header);
 
 	obj = eio_obj_create(sd, &peer_ops, (void*)(long)localid);
@@ -372,7 +371,6 @@ void pmix_client_new_conn(int sd)
 static bool _peer_readable(eio_obj_t *obj)
 {
 	PMIXP_DEBUG("fd = %d", obj->fd);
-	xassert( !pmixp_info_is_srun() );
 	if (obj->shutdown == true) {
 		if (obj->fd != -1) {
 			close(obj->fd);
@@ -406,7 +404,7 @@ static int _peer_read(eio_obj_t *obj, List objs)
 			// TODO: process return codes
 			rc = PMIx_server_process_msg(eng->sd, hdr, msg, _send_cb);
 			if( PMIX_SUCCESS != rc ){
-				PMIXP_ERROR_NO(0, "Error processing message: %d", rc);
+				PMIXP_ERROR("Error processing message: %d", rc);
 			}
 		}else{
 			// No more complete messages
@@ -425,10 +423,9 @@ static int _peer_read(eio_obj_t *obj, List objs)
 
 static bool _peer_writable(eio_obj_t *obj)
 {
-	xassert( !pmixp_info_is_srun() );
 	PMIXP_DEBUG("fd = %d", obj->fd);
 	if (obj->shutdown == true) {
-		PMIXP_ERROR_NO(0,"We shouldn't be here if connection shutdowned");
+		PMIXP_ERROR("We shouldn't be here if connection shutdowned");
 		return false;
 	}
 	uint32_t taskid = (int)(long)(obj->arg);
@@ -440,10 +437,7 @@ static bool _peer_writable(eio_obj_t *obj)
 
 static int _peer_write(eio_obj_t *obj, List objs)
 {
-	xassert( !pmixp_info_is_srun() );
-
 	PMIXP_DEBUG("fd = %d", obj->fd);
-
 	uint32_t taskid = (int)(long)(obj->arg);
 	pmixp_io_engine_t *me = pmixp_state_cli_io(taskid);
 	pmix_io_send_progress(me);
@@ -662,52 +656,30 @@ static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
 		      int barrier, int collect_data,
 		      pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
-	//pmix_modex_data_t *mdxarray = NULL;
-
 	PMIXP_DEBUG("called");
-	List modex_list = slurm_list_create(pmixp_xfree_buffer);
-	pmix_modex_data_t *modex_data, *mptr;
-	ListIterator it;
-	size_t ndata;
-	int i;
 
-	for(i=0; i < nranges; i++){
-		if( 0 == ranges[i].nranks ){
-			if( PMIX_SUCCESS != pmixp_db_blob(ranges[i].nspace, modex_list) ){
-				return SLURM_ERROR;
-			}
-		} else {
-			int j;
-			for(j=0; j < ranges[i].nranks; j++){
-				if( PMIX_SUCCESS != pmixp_db_blob_r(ranges[i].nspace, ranges[i].ranks[j],
-							    modex_list) ){
-					return SLURM_ERROR;
-				}
-			}
-		}
+	pmixp_coll_t *coll;
+	coll = pmixp_state_coll_find(PMIXP_COLL_TYPE_FENCE, ranges, nranges);
+
+	if( NULL == coll ){
+		coll = pmixp_state_coll_new(PMIXP_COLL_TYPE_FENCE, ranges, nranges);
 	}
 
-	ndata = slurm_list_count(modex_list);
-	modex_data = xmalloc(ndata * sizeof(*modex_data));
-	it = slurm_list_iterator_create(modex_list);
-	i = 0;
-	while( NULL != (mptr = slurm_list_next(it) ) ){
-		modex_data[i] = *mptr;
-		i++;
+	if( NULL == coll ){
+		cbfunc(PMIX_ERROR,NULL,0,cbdata);
+		return SLURM_ERROR;
 	}
-	slurm_list_destroy(modex_list);
 
-	cbfunc(PMIX_SUCCESS, modex_data, ndata, cbdata);
-	xfree(modex_data);
+	pmixp_coll_contrib_loc(coll);
 
-	return PMIX_SUCCESS;
+	return SLURM_SUCCESS;
 }
 
 static int store_modex_fn(const char nspace[], int rank, void *server_object,
 			  pmix_scope_t scope, pmix_modex_data_t *data)
 {
 	PMIXP_DEBUG("called: rank = %d", rank);
-	pmixp_db_add_blob(nspace, scope, rank, data->blob, data->size);
+	pmixp_nspace_add_blob(nspace, scope, rank, data->blob, data->size);
 
 	return PMIX_SUCCESS;
 }
@@ -716,26 +688,40 @@ static int get_modexnb_fn(const char nspace[], int rank,
 			  pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
-	List modex_list = slurm_list_create(pmixp_xfree_buffer);
+	List modex_list = list_create(pmixp_xfree_buffer);
 	pmix_modex_data_t *modex_data, *mptr;
 	ListIterator it;
 	size_t ndata;
-	int i;
+	int i, rc;
 
-	if( PMIX_SUCCESS != pmixp_db_blob_r(nspace, rank,
-					    modex_list) ){
+	// TODO: Data might be missing and we need to wait for them
+	rc = pmixp_nspace_rank_blob(nspace, rank, PMIX_LOCAL, modex_list);
+	if( SLURM_SUCCESS != rc ){
+		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
 		return SLURM_ERROR;
 	}
 
-	ndata = slurm_list_count(modex_list);
+	rc = pmixp_nspace_rank_blob(nspace, rank, PMIX_GLOBAL, modex_list);
+	if( SLURM_SUCCESS != rc ){
+		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
+		return SLURM_ERROR;
+	}
+
+	rc = pmixp_nspace_rank_blob(nspace, rank, PMIX_REMOTE, modex_list);
+	if( SLURM_SUCCESS != rc ){
+		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
+		return SLURM_ERROR;
+	}
+
+	ndata = list_count(modex_list);
 	modex_data = xmalloc(ndata * sizeof(*modex_data));
-	it = slurm_list_iterator_create(modex_list);
+	it = list_iterator_create(modex_list);
 	i = 0;
-	while( NULL != (mptr = slurm_list_next(it) ) ){
+	while( NULL != (mptr = list_next(it) ) ){
 		modex_data[i] = *mptr;
 		i++;
 	}
-	slurm_list_destroy(modex_list);
+	list_destroy(modex_list);
 
 	cbfunc(PMIX_SUCCESS, modex_data, ndata, cbdata);
 	xfree(modex_data);
