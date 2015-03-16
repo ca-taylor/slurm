@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_UTILS_H
-#define PMIX_UTILS_H
+#ifndef PMIXP_UTILS_H
+#define PMIXP_UTILS_H
 
 void pmixp_xfree_buffer(void *x);
 int pmixp_usock_create_srv(char *path);
@@ -49,4 +49,4 @@ int pmixp_srun_send(slurm_addr_t *addr, uint32_t len, char *data);
 int pmixp_stepd_send(char *nodelist, const char *address, char *data, uint32_t len);
 
 
-#endif // PMIX_UTILS_H
+#endif // PMIXP_UTILS_H

@@ -93,6 +93,7 @@ int pmixp_info_srv_fd()
 int pmixp_info_set(const stepd_step_rec_t *job, char ***env)
 {
 	int i, rc;
+	memset(&_pmixp_job_info, 0, sizeof(_pmixp_job_info));
 #ifndef NDEBUG
 	_pmixp_job_info.magic = PMIX_INFO_MAGIC;
 #endif
@@ -121,7 +122,7 @@ int pmixp_info_set(const stepd_step_rec_t *job, char ***env)
 		return rc;
 	}
 
-	snprintf(_pmixp_job_info.nspace, PMIX_MAX_NSLEN, "slurm.pmix.%d%d",
+	snprintf(_pmixp_job_info.nspace, PMIX_MAX_NSLEN, "slurm.pmix.%d.%d",
 		   pmixp_info_jobid(), pmixp_info_stepid());
 
 	return SLURM_SUCCESS;
@@ -204,7 +205,6 @@ int pmixp_info_resources_set(char ***env)
 {
 	char *p = NULL;
 
-	memset(&_pmixp_job_info, 0, sizeof(_pmixp_job_info));
 	// Initialize all memory pointers that would be allocated to NULL
 	// So in case of error exit we will know what to xfree
 	_pmixp_job_info.job_hl = hostlist_create("");

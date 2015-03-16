@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_SERVER_H
-#define PMIX_SERVER_H
+#ifndef PMIXP_SERVER_H
+#define PMIXP_SERVER_H
 
 #include "pmixp_common.h"
 
@@ -53,7 +53,6 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env);
 int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
 void pmix_server_new_conn(int fd);
 int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type,
-			   const char *addr, uint32_t nodeid,
-			   void *data, size_t size);
+			   const char *addr, void *data, size_t size);
 
-#endif // SERVER_H
+#endif // PMIXP_SERVER_H

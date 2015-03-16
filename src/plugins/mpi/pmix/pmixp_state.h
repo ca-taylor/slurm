@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_STATE_H
-#define PMIX_STATE_H
+#ifndef PMIXP_STATE_H
+#define PMIXP_STATE_H
 
 #include "pmixp_common.h"
 #include "pmixp_debug.h"
@@ -135,8 +135,7 @@ inline static pmixp_cli_state_t *
 pmixp_state_cli(uint32_t localid)
 {
 	pmixp_state_cli_sanity_check(localid);
-	pmixp_cli_state_t *cli = pmixp_state_cli(localid);
-	xassert( cli->state == PMIXP_CLI_OPERATE );
+	pmixp_cli_state_t *cli = &_pmixp_state.cli_state[localid];
 	return cli;
 }
 
@@ -169,4 +168,4 @@ pmixp_coll_t *
 pmixp_state_coll_new(pmixp_coll_type_t type, const pmix_range_t *ranges,
 		     size_t nranges);
 
-#endif // STATE_H
+#endif // PMIXP_STATE_H

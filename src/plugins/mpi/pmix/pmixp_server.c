@@ -43,7 +43,7 @@
 #include "pmixp_io.h"
 #include "pmixp_client.h"
 #include "pmixp_server.h"
-#include "pmixp_db.h"
+#include "pmixp_nspaces.h"
 #include "pmixp_state.h"
 #include "pmixp_client.h"
 
@@ -75,10 +75,6 @@ static bool _serv_readable(eio_obj_t *obj);
 static int _serv_read(eio_obj_t *obj, List objs);
 static void _process_server_request(recv_header_t *_hdr, void *payload);
 
-void _dmdx_reply_to_node(uint32_t localid, uint32_t nodeid);
-void _process_dmdx_request(send_header_t *hdr, void *payload);
-int _dmdx_response(send_header_t *hdr, void *payload);
-
 static struct io_operations peer_ops = {
 	.readable     = _serv_readable,
 	.handle_read  = _serv_read
@@ -95,8 +91,6 @@ pmixp_io_engine_header_t srv_rcvd_header = {
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 {
 	struct sockaddr_un address;
-	pmix_range_t range;
-	pmixp_coll_t *coll = NULL;
 	char path[MAX_USOCK_PATH];
 	int fd, rc;
 
@@ -113,9 +107,8 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 		return rc;
 	}
 
-	// Initialize clients state structure
-	if( SLURM_SUCCESS != (rc = pmixp_state_init()) ){
-		PMIXP_ERROR("pmixp_state_init() failed");
+	if( ( rc = pmixp_coll_init(env, SEND_HDR_SIZE) ) ){
+		PMIXP_ERROR("pmixp_coll_init() failed");
 		return rc;
 	}
 
@@ -124,19 +117,9 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 		return rc;
 	}
 
-	if( ( rc = pmixp_coll_init(env, SEND_HDR_SIZE) ) ){
-		PMIXP_ERROR("pmixp_coll_init() failed");
+	if( SLURM_SUCCESS != (rc = pmixp_state_init()) ){
+		PMIXP_ERROR("pmixp_state_init() failed");
 		return rc;
-	}
-
-	// Add default collectives
-	range.nranks = 0;
-	range.ranks = NULL;
-	strcpy(range.nspace, pmixp_info_namespace());
-	coll = pmixp_state_coll_new(PMIXP_COLL_TYPE_FENCE, &range, 1);
-	if( NULL == coll ){
-		PMIXP_ERROR("Cannot add default FENCE collective");
-		return SLURM_ERROR;
 	}
 
 	// Create UNIX socket for client communication
@@ -192,9 +175,9 @@ static uint32_t _recv_payload_size(void *buf)
 {
 	recv_header_t *ptr = (recv_header_t*)buf;
 	send_header_t *hdr = &ptr->send_hdr;
-	xassert( ptr->size == (SEND_HDR_SIZE + hdr->msgsize) );
+	xassert( ptr->size == hdr->msgsize );
 	xassert( hdr->magic == PMIX_SERVER_MSG_MAGIC );
-	return hdr->msgsize;
+	return hdr->msgsize - SEND_HDR_SIZE;
 }
 
 /*
@@ -260,8 +243,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 }
 
 int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type,
-			   const char *addr, uint32_t nodeid,
-			   void *data, size_t size)
+			   const char *addr, void *data, size_t size)
 {
 	send_header_t hdr;
 	char nhdr[sizeof(send_header_t)];
@@ -270,9 +252,12 @@ int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type,
 
 	hdr.magic = PMIX_SERVER_MSG_MAGIC;
 	hdr.type = type;
-	hdr.nodeid = nodeid;
 	hdr.msgsize = size;
 	hdr.gen = 0; // Not used now
+	/* Store global nodeid that is
+	 *  independent from exact collective */
+	hdr.nodeid = pmixp_info_nodeid_job();
+
 	hsize = _send_pack_hdr(&hdr, nhdr);
 	memcpy(data,nhdr, hsize);
 
@@ -296,6 +281,7 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 {
 	send_header_t *hdr = &_hdr->send_hdr;
 	size_t size = hdr->msgsize - SEND_HDR_SIZE;
+	char *nodename = pmixp_info_job_host(hdr->nodeid);
 	switch( hdr->type ){
 	case PMIXP_MSG_FAN_IN:
 	case PMIXP_MSG_FAN_OUT:{
@@ -307,22 +293,23 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 
 		offset = pmixp_coll_unpack_ranges(payload, size, &type, &ranges, &nranges);
 		if( 0 >= offset ){
-			PMIXP_ERROR("Bad message header from node %d",
-				    hdr->nodeid);
+			PMIXP_ERROR("Bad message header from node %s",
+				    nodename);
 			return;
 		}
 		coll = pmixp_state_coll_find(type, ranges, nranges);
-		PMIXP_DEBUG("FENCE collective message from node \"%s\", type = %s",
-			    pmixp_coll_nodename(coll, hdr->nodeid),
+		xfree(ranges);
+
+		PMIXP_DEBUG("FENCE collective message from node \"%s\", type = %s", nodename,
 			    (PMIXP_MSG_FAN_IN == hdr->type) ? "fan-in" : "fan-out");
 
 		if( PMIXP_MSG_FAN_IN == hdr->type ){
-			pmixp_coll_contrib_node(coll, hdr->nodeid,
+			pmixp_coll_contrib_node(coll, nodename,
 						payload + offset,
-						hdr->msgsize - offset);
+						size - offset);
 		} else {
 			pmixp_coll_fan_out_data(coll, payload + offset,
-						hdr->msgsize - offset);
+						size - offset);
 		}
 		break;
 	}
@@ -330,6 +317,7 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 		PMIXP_ERROR("Unknown message type %d", hdr->type);
 		break;
 	}
+	xfree(nodename);
 }
 
 static int _serv_read(eio_obj_t *obj, List objs)

@@ -37,8 +37,8 @@
 \*****************************************************************************/
 
 
-#ifndef PMIX_INFO_H
-#define PMIX_INFO_H
+#ifndef PMIXP_INFO_H
+#define PMIXP_INFO_H
 
 #include "pmixp_common.h"
 
@@ -120,6 +120,15 @@ inline static uint32_t pmixp_info_nodeid(){
 	return _pmixp_job_info.node_id;
 }
 
+inline static uint32_t pmixp_info_nodeid_job(){
+	// This routine is called from PMIX_DEBUG/ERROR and
+	// this CAN happen before initialization. Relax demand to have
+	// _pmix_job_info.magic == PMIX_INFO_MAGIC
+
+	// ! xassert(_pmix_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmixp_job_info.node_id_job;
+}
+
 inline static uint32_t pmixp_info_nodes(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
 	return _pmixp_job_info.nnodes;
@@ -195,4 +204,22 @@ inline static hostlist_t pmixp_info_step_hostlist(){
 	return _pmixp_job_info.step_hl;
 }
 
-#endif // INFO_H
+inline static char *
+pmixp_info_step_host(int nodeid){
+	xassert( nodeid < _pmixp_job_info.nnodes );
+	char *p = hostlist_nth(_pmixp_job_info.step_hl, nodeid);
+	char *ret = xstrdup(p);
+	free(p);
+	return ret;
+}
+
+inline static char *
+pmixp_info_job_host(int nodeid){
+	xassert( nodeid < _pmixp_job_info.nnodes_job );
+	char *p = hostlist_nth(_pmixp_job_info.job_hl, nodeid);
+	char *ret = xstrdup(p);
+	free(p);
+	return ret;
+}
+
+#endif // PMIXP_INFO_H
