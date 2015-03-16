@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_DB_H
-#define PMIX_DB_H
+#ifndef PMIXP_NSPACES_H
+#define PMIXP_NSPACES_H
 
 #include "pmixp_common.h"
 #include "pmixp_info.h"
@@ -62,7 +62,7 @@ typedef struct {
 #endif
 	char name[PMIX_MAX_NSLEN];
 	uint32_t nnodes;      /* number of nodes in this namespace              */
-	int node_id;          /* relative position of this node in this step  */
+	int node_id;          /* relative position of this node in this step	*/
 	uint32_t ntasks;      /* total number of tasks in this namespace        */
 	uint32_t *task_cnts;  /* Number of tasks on each node in this namespace */
 	char *task_map_packed;  /* string represents packed task mapping information */
@@ -86,14 +86,14 @@ typedef struct {
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIXP_DB_MAGIC 0xCAFEBABE
+#       define PMIXP_NSPACE_DB_MAGIC 0xCAFEBABE
 	int  magic;
 #endif
 	List nspaces;
 } pmixp_db_t;
 
 
-extern pmixp_db_t _pmixp_db;
+extern pmixp_db_t _pmixp_nspaces;
 
 /* namespaces list operations */
 int pmixp_nspaces_init();
@@ -178,18 +178,18 @@ static inline void pmix_db_commit()
 /*
 static inline void pmix_db_dmdx_add_blob(uint32_t gen, int taskid, void *blob, int size)
 {
-	xassert(_pmixp_db.magic == PMIXP_NSPACE_MAGIC);
-	if( _pmixp_db.cur_gen == gen ){
-		_pmixp_db.blobs[taskid] = blob;
-		_pmixp_db.blob_sizes[taskid] = size;
+	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_MAGIC);
+	if( _pmixp_nspaces.cur_gen == gen ){
+		_pmixp_nspaces.blobs[taskid] = blob;
+		_pmixp_nspaces.blob_sizes[taskid] = size;
 	}
 }
 
 static inline int pmix_db_get_blob(int taskid, void **blob)
 {
-	xassert(_pmixp_db.magic == PMIXP_NSPACE_MAGIC);
-	*blob = _pmixp_db.blobs[taskid];
-	return _pmixp_db.blob_sizes[taskid];
+	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_MAGIC);
+	*blob = _pmixp_nspaces.blobs[taskid];
+	return _pmixp_nspaces.blob_sizes[taskid];
 }
 */
-#endif // PMIX_DB_H
+#endif // PMIXP_NSPACES_H

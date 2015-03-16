@@ -45,7 +45,7 @@
 #include "pmixp_client.h"
 #include "pmixp_state.h"
 #include "pmixp_debug.h"
-#include "pmixp_db.h"
+#include "pmixp_nspaces.h"
 #include "pmixp_utils.h"
 
 #define MAX_RETRIES 5
