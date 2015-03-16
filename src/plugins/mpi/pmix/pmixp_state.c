@@ -40,7 +40,7 @@
 #include "pmixp_debug.h"
 #include "pmixp_info.h"
 #include "pmixp_state.h"
-#include "pmixp_db.h"
+#include "pmixp_nspaces.h"
 #include "pmixp_coll.h"
 
 pmixp_state_t _pmixp_state;
@@ -48,6 +48,9 @@ pmixp_state_t _pmixp_state;
 int pmixp_state_init()
 {
 	size_t size, i;
+	pmix_range_t range;
+	pmixp_coll_t *coll = NULL;
+
 #ifndef NDEBUG
 	_pmixp_state.magic = PMIX_STATE_MAGIC;
 #endif
@@ -55,12 +58,24 @@ int pmixp_state_init()
 	size = _pmixp_state.cli_size * sizeof(pmixp_cli_state_t);
 	_pmixp_state.cli_state = xmalloc( size );
 	for( i = 0; i < _pmixp_state.cli_size; i++ ){
+#ifndef NDEBUG
+		_pmixp_state.cli_state[i].magic = PMIXP_CLIENT_STATE_MAGIC;
+#endif
 		_pmixp_state.cli_state[i].state = PMIXP_CLI_UNCONNECTED;
 		_pmixp_state.cli_state[i].localid = i;
 	}
 
 	_pmixp_state.coll = list_create(pmixp_xfree_buffer);
 
+	// Add default collectives
+	range.nranks = 0;
+	range.ranks = NULL;
+	strcpy(range.nspace, pmixp_info_namespace());
+	coll = pmixp_state_coll_new(PMIXP_COLL_TYPE_FENCE, &range, 1);
+	if( NULL == coll ){
+		PMIXP_ERROR("Cannot add default FENCE collective");
+		return SLURM_ERROR;
+	}
 	return SLURM_SUCCESS;
 }
 
@@ -75,9 +90,7 @@ void pmixp_state_finalize()
 	_pmixp_state.cli_state = xmalloc( size );
 	for( i = 0; i < _pmixp_state.cli_size; i++ ){
 		_pmixp_state.cli_state[i].state = PMIXP_CLI_UNCONNECTED;
-		_pmixp_state.cli_state[i].localid = i;
 	}
-
 	list_destroy(_pmixp_state.coll);
 }
 
@@ -86,6 +99,7 @@ pmixp_state_coll_new(pmixp_coll_type_t type, const pmix_range_t *ranges,
 		     size_t nranges)
 {
 	pmixp_coll_t *coll = pmixp_coll_new(ranges, nranges, type);
+	xassert( coll );
 	list_append(_pmixp_state.coll, coll);
 	return coll;
 }
@@ -99,7 +113,7 @@ _compare_ranges(const pmix_range_t *r1, const pmix_range_t *r2,
 		if( 0 != strcmp(r1[i].nspace, r2[i].nspace) ){
 			return false;
 		}
-		if( r1[i].nranks == r2[i].nranks ){
+		if( r1[i].nranks != r2[i].nranks ){
 			return false;
 		}
 		for( j=0; j < r1[i].nranks; j++ ){

@@ -35,8 +35,8 @@
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-#ifndef PMIX_DEBUG_H
-#define PMIX_DEBUG_H
+#ifndef PMIXP_DEBUG_H
+#define PMIXP_DEBUG_H
 
 #include "pmixp_common.h"
 #include "pmixp_info.h"
@@ -103,4 +103,4 @@ inline static void _pmixp_debug_hang(int delay)
 #define pmixp_debug_hang(x) _pmixp_debug_hang(x)
 
 #endif
-#endif				// PMIX_DEBUG_H
+#endif	// PMIXP_DEBUG_H

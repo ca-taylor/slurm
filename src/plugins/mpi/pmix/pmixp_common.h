@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_COMMON_H
-#define PMIX_COMMON_H
+#ifndef PMIXP_COMMON_H
+#define PMIXP_COMMON_H
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -67,7 +67,7 @@
 
 // TODO: use /tmp directory instead
 #define PMIXP_TMPDIR "/home/artpol/slurm_tmp/"
-#define PMIXP_STEPD_ADDR_FMT PMIX_TMPDIR "sock.pmix_stepd.%u.%u"
+#define PMIXP_STEPD_ADDR_FMT PMIXP_TMPDIR "sock.pmix_stepd.%u.%u"
 #define MAX_USOCK_PATH                                      \
 	( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) - \
 	(size_t)&(((struct sockaddr_un *)0)->sun_path) )
@@ -91,4 +91,4 @@
 #define PMIX_SPAWN_BASE_STEP "SLURM_PMIX_SPAWN_BASE_STEP"
 #define PMIX_SPAWN_BASE_NODE "SLURM_PMIX_SPAWN_BASE_NODE"
 
-#endif // PMIX_COMMON_H
+#endif // PMIXP_COMMON_H

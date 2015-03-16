@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_COLL_H
-#define PMIX_COLL_H
+#ifndef PMIXP_COLL_H
+#define PMIXP_COLL_H
 #include "pmixp_common.h"
 
 typedef enum { PMIXP_COLL_SYNC, PMIXP_COLL_FAN_IN, PMIXP_COLL_FAN_OUT } pmixp_coll_state_t;
@@ -90,7 +90,7 @@ inline static void pmixp_coll_sanity_check(pmixp_coll_t *coll)
 int pmixp_coll_init(char ***env, uint32_t hdrsize);
 pmixp_coll_t *pmixp_coll_new(const pmix_range_t *ranges, size_t nranges,
 			     pmixp_coll_type_t type);
-inline static void pmixp_set_callback(pmixp_coll_t *coll,
+inline static void pmixp_coll_set_callback(pmixp_coll_t *coll,
 			       pmix_modex_cbfunc_t cbfunc, void *cbdata){
 	pmixp_coll_sanity_check(coll);
 	coll->cbfunc = cbfunc;
@@ -100,20 +100,11 @@ inline static void pmixp_set_callback(pmixp_coll_t *coll,
 void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
 				uint32_t size);
 int pmixp_coll_contrib_loc(pmixp_coll_t *coll);
-int pmixp_coll_contrib_node(pmixp_coll_t *coll, int nodeid,
+int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 			    void *contrib, size_t size);
 bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
 			 void **data, uint64_t size);
 int pmixp_coll_unpack_ranges(void *data, size_t size, pmixp_coll_type_t *type,
 			     pmix_range_t **ranges, size_t *nranges);
 
-inline static char *
-pmixp_coll_nodename(pmixp_coll_t *coll, int nodeid)
-{
-	if( !(coll->children_cnt > nodeid) ){
-		return NULL;
-	}
-	return hostlist_nth(coll->all_children, nodeid);
-}
-
-#endif // PMIX_COLL_H
+#endif // PMIXP_COLL_H

@@ -40,7 +40,7 @@
 #include "pmixp_common.h"
 #include "pmixp_state.h"
 #include "pmixp_io.h"
-#include "pmixp_db.h"
+#include "pmixp_nspaces.h"
 #include "pmixp_debug.h"
 #include "pmixp_coll.h"
 #include "pmixp_server.h"
@@ -670,8 +670,8 @@ static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
 		return SLURM_ERROR;
 	}
 
+	pmixp_coll_set_callback(coll, cbfunc, cbdata);
 	pmixp_coll_contrib_loc(coll);
-
 	return SLURM_SUCCESS;
 }
 
@@ -695,19 +695,19 @@ static int get_modexnb_fn(const char nspace[], int rank,
 	int i, rc;
 
 	// TODO: Data might be missing and we need to wait for them
-	rc = pmixp_nspace_rank_blob(nspace, rank, PMIX_LOCAL, modex_list);
+	rc = pmixp_nspace_rank_blob(nspace, PMIX_LOCAL, rank, modex_list);
 	if( SLURM_SUCCESS != rc ){
 		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
 		return SLURM_ERROR;
 	}
 
-	rc = pmixp_nspace_rank_blob(nspace, rank, PMIX_GLOBAL, modex_list);
+	rc = pmixp_nspace_rank_blob(nspace, PMIX_GLOBAL, rank, modex_list);
 	if( SLURM_SUCCESS != rc ){
 		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
 		return SLURM_ERROR;
 	}
 
-	rc = pmixp_nspace_rank_blob(nspace, rank, PMIX_REMOTE, modex_list);
+	rc = pmixp_nspace_rank_blob(nspace, PMIX_REMOTE, rank, modex_list);
 	if( SLURM_SUCCESS != rc ){
 		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
 		return SLURM_ERROR;

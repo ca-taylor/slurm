@@ -37,8 +37,8 @@
 \*****************************************************************************/
 
 
-#ifndef PMIX_CLIENT_H
-#define PMIX_CLIENT_H
+#ifndef PMIXP_CLIENT_H
+#define PMIXP_CLIENT_H
 
 #include "pmixp_common.h"
 
@@ -50,4 +50,4 @@ void pmix_libpmix_task_set(int rank, char ***env);
 
 void pmix_client_new_conn(int fd);
 
-#endif // CLIENT_H
+#endif // PMIXP_CLIENT_H

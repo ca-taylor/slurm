@@ -36,8 +36,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef PMIX_IO_H
-#define PMIX_IO_H
+#ifndef PMIXP_IO_H
+#define PMIXP_IO_H
 
 #include <poll.h>
 #include "pmixp_common.h"
@@ -120,4 +120,4 @@ void pmix_io_send_progress(pmixp_io_engine_t *eng);
 bool pmix_io_send_pending(pmixp_io_engine_t *eng);
 
 
-#endif // COMM_ENGINE_H
+#endif // PMIXP_IO_H
