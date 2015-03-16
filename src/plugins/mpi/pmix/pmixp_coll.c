@@ -477,7 +477,7 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 #ifndef NDEBUG
 	nodeid = hostlist_find(coll->all_children, nodename);
 	// Account children contributions with nodeid checking
-	xassert(0 >= (idx = _is_child_no(coll, nodeid)) );
+	xassert(0 <= (idx = _is_child_no(coll, nodeid)) );
 	xassert(0 == coll->ch_contribs[idx]);
 	coll->ch_contribs[idx]++;
 #endif
