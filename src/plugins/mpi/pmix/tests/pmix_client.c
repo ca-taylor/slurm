@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 
 #include <pmix.h>
 #include "test_common.h"
@@ -117,6 +118,12 @@ int get_local_peers(int **_peers)
 	return count;
 }
 
+void release_cb(pmix_status_t status, void *cbdata)
+{
+	int *ptr = (int*)cbdata;
+	*ptr = 0;
+}
+
 int main(int argc, char **argv)
 {
 	char nspace[PMIX_MAX_VALLEN];
@@ -196,9 +203,6 @@ int main(int argc, char **argv)
     }
 */
 
-
-
-
 	for (i=0; i < 3; i++) {
 		(void)snprintf(key, 50, "local-key-%d", i);
 		PMIX_VAL_SET(&value, int, 12340 + i);
@@ -225,9 +229,31 @@ int main(int argc, char **argv)
 	}
 
 	/* Submit the data */
-	if (PMIX_SUCCESS != (rc = PMIx_Fence(NULL, 0, 1))) {
-		TEST_ERROR(("rank %d: PMIx_Fence failed: %d", rank, rc));
-		exit(0);
+	if( !nonblocking ){
+		if (PMIX_SUCCESS != (rc = PMIx_Fence(NULL, 0, 1))) {
+			TEST_ERROR(("rank %d: PMIx_Fence failed: %d", rank, rc));
+			exit(0);
+		}
+	} else {
+		if( barrier && collect ){
+			int in_progress = 1, count;
+			if (PMIX_SUCCESS != (rc = PMIx_Fence_nb(NULL, 0, 1, 1, release_cb, &in_progress))) {
+				TEST_ERROR(("rank %d: PMIx_Fence failed: %d", rank, rc));
+				exit(0);
+			}
+
+			count = 0;
+			while( in_progress ){
+				struct timespec ts;
+				ts.tv_sec = 0;
+				ts.tv_nsec = 100;
+				nanosleep(&ts,NULL);
+				count++;
+
+			}
+			TEST_OUTPUT(("PMIx_Fence_nb(barrier,collect): free time: %lfs", count*100*1E-9));
+		}
+
 	}
 	TEST_OUTPUT(("rank %d: Fence successfully completed", rank));
 
@@ -245,7 +271,6 @@ int main(int argc, char **argv)
 			}
 
 			if( local ){
-				TEST_ERROR(("rank=%d: Check node-local rank %d", rank, i));
 				sprintf(key,"local-key-%d",j);
 				if (PMIX_SUCCESS != (rc = PMIx_Get(nspace, i, key, &val))) {
 					TEST_ERROR(("rank %d: PMIx_Get failed: %d", rank, rc));
