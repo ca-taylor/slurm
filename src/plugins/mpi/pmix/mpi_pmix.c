@@ -1,10 +1,9 @@
 /*****************************************************************************\
  **  mpi_pmix.c - Main plugin callbacks for PMIx support in SLURM
  *****************************************************************************
- *  Copyright (C) 2014 Institude of Semiconductor Physics Siberian Branch of
- *                     Russian Academy of Science
+ *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
+ *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com>.
- *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
