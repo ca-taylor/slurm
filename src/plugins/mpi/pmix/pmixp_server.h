@@ -51,7 +51,7 @@ typedef enum {
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env);
 int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
 void pmix_server_new_conn(int fd);
-int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type,
+int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
 			   const char *addr, void *data, size_t size);
 
 #endif // PMIXP_SERVER_H

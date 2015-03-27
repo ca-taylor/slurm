@@ -47,8 +47,6 @@ pmixp_state_t _pmixp_state;
 int pmixp_state_init()
 {
 	size_t size, i;
-	pmix_range_t range;
-	pmixp_coll_t *coll = NULL;
 
 #ifndef NDEBUG
 	_pmixp_state.magic = PMIX_STATE_MAGIC;
@@ -66,15 +64,6 @@ int pmixp_state_init()
 
 	_pmixp_state.coll = list_create(pmixp_xfree_buffer);
 
-	// Add default collectives
-	range.nranks = 0;
-	range.ranks = NULL;
-	strcpy(range.nspace, pmixp_info_namespace());
-	coll = pmixp_state_coll_new(PMIXP_COLL_TYPE_FENCE, &range, 1);
-	if( NULL == coll ){
-		PMIXP_ERROR("Cannot add default FENCE collective");
-		return SLURM_ERROR;
-	}
 	return SLURM_SUCCESS;
 }
 

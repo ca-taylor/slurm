@@ -53,7 +53,7 @@
 typedef struct {
 	uint32_t magic;
 	uint32_t type;
-	uint32_t gen;
+	uint32_t seq;
 	uint32_t nodeid;
 	uint32_t msgsize;
 } send_header_t;
@@ -191,7 +191,7 @@ static int _send_pack_hdr(void *host, void *net)
 	int size = 0;
 	pack32(ptr->magic, packbuf);
 	pack32(ptr->type, packbuf);
-	pack32(ptr->gen, packbuf);
+	pack32(ptr->seq, packbuf);
 	pack32(ptr->nodeid, packbuf);
 	pack32(ptr->msgsize, packbuf);
 	size = get_buf_offset(packbuf);
@@ -223,7 +223,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 		return -EINVAL;
 	}
 
-	if( unpack32(&ptr->send_hdr.gen, packbuf)){
+	if( unpack32(&ptr->send_hdr.seq, packbuf)){
 		return -EINVAL;
 	}
 
@@ -241,7 +241,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 	return 0;
 }
 
-int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type,
+int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
 			   const char *addr, void *data, size_t size)
 {
 	send_header_t hdr;
@@ -252,13 +252,13 @@ int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type,
 	hdr.magic = PMIX_SERVER_MSG_MAGIC;
 	hdr.type = type;
 	hdr.msgsize = size;
-	hdr.gen = 0; // Not used now
+	hdr.seq = seq;
 	/* Store global nodeid that is
 	 *  independent from exact collective */
 	hdr.nodeid = pmixp_info_nodeid_job();
 
 	hsize = _send_pack_hdr(&hdr, nhdr);
-	memcpy(data,nhdr, hsize);
+	memcpy(data, nhdr, hsize);
 
 	rc = pmixp_stepd_send(hostlist, addr, data, size);
 	if( SLURM_SUCCESS != rc ){
@@ -297,10 +297,26 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 			return;
 		}
 		coll = pmixp_state_coll_find(type, ranges, nranges);
+		if( NULL == coll ){
+			if( PMIXP_MSG_FAN_IN == hdr->type){
+				/* this is node contribution that initiates
+				 * brand new collective */
+				coll = pmixp_state_coll_new(type, ranges, nranges);
+			} else {
+				xfree(ranges);
+				PMIXP_ERROR("Bad collective message type: PMIXP_MSG_FAN_OUT");
+				return;
+			}
+		}
 		xfree(ranges);
 
 		PMIXP_DEBUG("FENCE collective message from node \"%s\", type = %s", nodename,
 			    (PMIXP_MSG_FAN_IN == hdr->type) ? "fan-in" : "fan-out");
+
+		if( SLURM_SUCCESS != pmixp_coll_check_seq(coll, hdr->seq, nodename)){
+			/* stop processing discardig this message */
+			break;
+		}
 
 		if( PMIXP_MSG_FAN_IN == hdr->type ){
 			pmixp_coll_contrib_node(coll, nodename,

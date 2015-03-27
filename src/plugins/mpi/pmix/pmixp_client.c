@@ -52,8 +52,8 @@ static int abort_fn(const char nspace[], int rank, void *server_object,
 		    int status, const char msg[],
 		    pmix_op_cbfunc_t cbfunc, void *cbdata);
 static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
-                      int barrier, int collect_data,
-                      pmix_modex_cbfunc_t cbfunc, void *cbdata);
+		      int collect_data,
+		      pmix_modex_cbfunc_t cbfunc, void *cbdata);
 static int store_modex_fn(const char nspace[], int rank, void *server_object,
 			  pmix_scope_t scope, pmix_modex_data_t *data);
 static int get_modexnb_fn(const char nspace[], int rank,
@@ -443,168 +443,6 @@ static int _peer_write(eio_obj_t *obj, List objs)
 	return 0;
 }
 
-/*
-int _process_cli_request(message_header_t hdr, void *msg, bool inconsistent)
-{
-	uint32_t localid = hdr.localid;
-	uint32_t tag = hdr.tag;
-	pmixp_io_engine_t *eng = pmix_state_cli_io(localid);
-	int *ptr = (int*)msg;
-	void *rmsg, *payload;
-	int rc = 0;
-	uint cmd = ptr[0];
-
-	switch( cmd ){
-	case PMIX_GETATTR_CMD:{
-		job_attr_t jattr;
-		_fill_job_attributes(localid, &jattr);
-		rmsg = _new_msg_tag(localid, tag, sizeof(job_attr_t), (void**)&payload);
-		memcpy(payload, &jattr, sizeof(jattr));
-		pmix_io_send_enqueue(eng, rmsg);
-		goto free_message;
-	}
-		// FIXME: Is it blocking? Do we need non-blocking version?
-	case PMIX_GET_CMD:{
-		// Currently we just put the GID of the requested process
-		// in the first 4 bytes of the message
-		int taskid = *((int*)msg + 1);
-
-		if( taskid >= pmix_info_tasks() ){
-			// return error!
-			rmsg = _new_msg_tag(taskid, tag, sizeof(int), &payload);
-			*(int*)payload = -1;
-			pmix_io_send_enqueue(eng, rmsg);
-			goto free_message;
-		}
-
-		_send_blob_to(hdr.localid, taskid);
-		goto free_message;
-	}
-	case PMIX_FENCE_CMD:
-	case PMIX_FENCENB_CMD:{
-		// remove cmd contribution
-		int size = hdr.nbytes - sizeof(uint32_t);
-		bool blocking = (cmd == PMIX_FENCE_CMD);
-		if( !pmix_info_dmdx() ){
-			pmix_coll_task_contrib(localid, (void*)&ptr[1], size, blocking);
-			goto free_message;
-		} else {
-			// In direct modex we don't send blobs with collective
-			uint32_t *taskid = xmalloc(sizeof(uint32_t));
-			*taskid = pmixp_info_task_id(localid);
-			void *blob = xmalloc(size);
-			memcpy(blob,(void*)&ptr[1], size);
-			// Note: we need to contribute first to increment data generation counter
-			pmix_coll_task_contrib(localid, taskid, sizeof(*taskid), blocking);
-			// Now new blob will belong to the new generation of the data
-			pmix_db_add_blob(*taskid,blob,size);
-		}
-
-		break;
-	}
-	case PMIX_FINALIZE_CMD:{
-	}
-	case PMIX_ABORT_CMD:{
-	}
-
-	default:
-		break;
-	}
-
-free_message:
-	xfree(msg);
-	return rc;
-}
-
-
-inline static void _send_blob_to(uint32_t to_localid, uint32_t taskid)
-{
-	void *msg, *payload, *blob;
-	uint32_t size, msize;
-
-	size = pmix_db_get_blob(taskid, &blob);
-	if( blob == NULL ){
-		// We don't have information about this task
-		if( pmix_state_cli(to_localid) == PMIX_CLI_OPERATE ){
-			// If we are operating - we are in direct modex mode => send request
-			PMIX_DEBUG("Blob not found: localid=%d, taskid=%d, state=%d (send request)",
-				   to_localid, taskid, pmix_state_cli(to_localid));
-			pmix_server_dmdx_request(to_localid, taskid);
-		} else {
-			PMIX_DEBUG("Blob not found: localid=%d, taskid=%d, state=%d (wait till fence end)",
-				   to_localid, taskid, pmix_state_cli(to_localid));
-		}
-		// Save that localid was interested in taskid
-		pmix_state_remote_wait(to_localid,taskid);
-		return;
-	}
-	msize = size + sizeof(uint32_t);
-	msg = _new_msg(to_localid, msize, &payload);
-	*(uint32_t*)payload = taskid;
-	memcpy((uint32_t*)payload + 1, blob, size );
-	pmixp_io_engine_t *me = pmix_state_cli_io(to_localid);
-	pmix_io_send_enqueue(me, msg);
-}
-
-void pmix_client_fence_notify()
-{
-	uint32_t localid = 0;
-
-	// FIXME: here we will need to iterate through postponed requests
-	// and answer them
-	// This will work for both blocking and non-blocking fence
-	// By now we only send ones to all clients
-	for(localid = 0; localid < pmixp_info_ltasks(); localid++){
-		pmix_cli_state_t state = pmix_state_cli(localid);
-		pmix_state_task_coll_finish(localid);
-		pmix_server_dmdx_notify(localid);
-		if( state == PMIX_CLI_COLL ){
-			// Client is waiting for notification that collective
-			// is finished.
-			int *payload;
-			void *msg = _new_msg(localid, sizeof(int), (void**)&payload);
-			pmixp_io_engine_t *me = pmix_state_cli_io(localid);
-			*payload = 0;
-			pmix_io_send_enqueue(me, msg);
-		} else if( state == PMIX_CLI_COLL_NB ){
-			// Client might already send us request about some tasks.
-			// Reply to them.
-			PMIX_DEBUG("Deal with non-blocking fence response for %d", localid);
-			List requests = pmix_state_remote_from(localid);
-			if( list_count(requests) ){
-				int *taskid;
-				while ( (taskid = list_dequeue(requests)) ) {
-					// If we are in direct modex mode we won't send anything
-					// we will send the request and resubmit them into queue
-					PMIX_DEBUG("Send %d data about %d", localid, *taskid);
-					_send_blob_to(localid, *taskid);
-					xfree(taskid);
-				}
-			}
-			list_destroy(requests);
-		}
-	}
-}
-
-void pmix_client_taskid_reply(uint32_t taskid)
-{
-	int *localid;
-	List requests = pmix_state_remote_to(taskid);
-	if( list_count(requests) == 0 ){
-		goto exit;
-	}
-
-	while( (localid = list_dequeue(requests)) ){
-		_send_blob_to(*localid,taskid);
-		xfree(localid);
-	}
-
-exit:
-	list_destroy(requests);
-}
-
-*/
-
 static int finalize_fn(const char nspace[], int rank, void* server_object,
 		pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
@@ -652,26 +490,34 @@ static int abort_fn(const char nspace[], int rank, void *server_object,
 }
 
 static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
-		      int barrier, int collect_data,
+		      int collect_data,
 		      pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
-
 	pmixp_coll_t *coll;
-	coll = pmixp_state_coll_find(PMIXP_COLL_TYPE_FENCE, ranges, nranges);
+	pmixp_coll_type_t type = PMIXP_COLL_TYPE_FENCE;
+
+	if( !collect_data ) {
+		type = PMIXP_COLL_TYPE_FENCE_EMPT;
+	}
+	coll = pmixp_state_coll_find(type, ranges, nranges);
 
 	if( NULL == coll ){
-		coll = pmixp_state_coll_new(PMIXP_COLL_TYPE_FENCE, ranges, nranges);
+		coll = pmixp_state_coll_new(type, ranges, nranges);
 	}
 
 	if( NULL == coll ){
-		cbfunc(PMIX_ERROR,NULL,0,cbdata);
-		return SLURM_ERROR;
+		goto error;
 	}
 
+	if( SLURM_SUCCESS != pmixp_coll_contrib_loc(coll, collect_data) ){
+		goto error;
+	}
 	pmixp_coll_set_callback(coll, cbfunc, cbdata);
-	pmixp_coll_contrib_loc(coll);
-	return SLURM_SUCCESS;
+	return PMIX_SUCCESS;
+error:
+	cbfunc(PMIX_ERROR,NULL,0,cbdata);
+	return PMIX_ERROR;
 }
 
 static int store_modex_fn(const char nspace[], int rank, void *server_object,
