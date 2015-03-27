@@ -38,10 +38,27 @@
 #ifndef PMIXP_COLL_H
 #define PMIXP_COLL_H
 #include "pmixp_common.h"
+#include "pmixp_debug.h"
 
-typedef enum { PMIXP_COLL_SYNC, PMIXP_COLL_FAN_IN, PMIXP_COLL_FAN_OUT } pmixp_coll_state_t;
-typedef enum { PMIXP_COLL_TYPE_FENCE, PMIXP_COLL_TYPE_CONNECT, PMIXP_COLL_TYPE_DISCONNECT } pmixp_coll_type_t;
-typedef enum {PMIX_PARENT_NONE, PMIX_PARENT_ROOT, PMIX_PARENT_SRUN, PMIX_PARENT_STEPD } pmixp_coll_parent_t;
+typedef enum {
+	PMIXP_COLL_SYNC,
+	PMIXP_COLL_FAN_IN,
+	PMIXP_COLL_FAN_OUT
+} pmixp_coll_state_t;
+
+typedef enum {
+	PMIXP_COLL_TYPE_FENCE,
+	PMIXP_COLL_TYPE_FENCE_EMPT,
+	PMIXP_COLL_TYPE_CONNECT,
+	PMIXP_COLL_TYPE_DISCONNECT
+} pmixp_coll_type_t;
+
+typedef enum {
+	PMIX_PARENT_NONE,
+	PMIX_PARENT_ROOT,
+	PMIX_PARENT_SRUN,
+	PMIX_PARENT_STEPD
+} pmixp_coll_parent_t;
 
 
 typedef struct {
@@ -62,14 +79,14 @@ typedef struct {
 	hostlist_t all_children;
 	uint32_t children_cnt;
 	/* contributions accounting */
-	bool local_contrib;
-	uint32_t contrib_cnt;
+	uint32_t seq;
+	uint32_t rcvframe_no;
+	bool local_ok;
+	uint32_t contrib_cntr;
 
 	/* Check who contributes */
 	int *ch_nodeids;
-#ifndef NDEBUG
 	bool *ch_contribs;
-#endif
 	/* collective data */
 	char *data;
 	/* max and actual size used for the
@@ -96,9 +113,71 @@ inline static void pmixp_coll_set_callback(pmixp_coll_t *coll,
 	coll->cbdata = cbdata;
 }
 
+/*
+ * This is important routine that takes responsibility to decide
+ * what messages may appear and what may not. In absence of errors
+ * we won't need this routine. Unfortunately they are exist.
+ * There can be 3 general types of communication errors:
+ * 1. We are trying to send our contribution to a parent and it fails.
+ *    In this case we will be blocked in send function. At some point
+ *    we either succeed or fail after predefined number of trials.
+ *
+ *    If we succeed - we are OK. Otherwise we will abort the whole job step.
+ *
+ * 2. A child of us sends us the message and gets the error, however we
+ *    receive this message (false negative). Child will try again while we might be:
+ *    (a) at FAN-IN step waiting for other contributions.
+ *    (b) at FAN-OUT since we get all we need.
+ *    (c) 2 step forward (SYNC) with coll->seq = (child_seq+1) if root of the tree
+ *        successfuly broadcasted the whole database to us.
+ *    (d) 3 step forward (next FAN-IN) with coll->seq = (child_seq+1)
+ *        if somebody initiated next collective.
+ *    (e) we won't move further because the child with problem won't send us
+ *        next contribution.
+ *
+ *    Cases (a) and (b) can't be noticed here since child and we have the
+ *    same seq number. They will later be detected  in pmixp_coll_contrib_node()
+ *    based on collective contribution accounting vector.
+ *
+ *    Cases (c) and (d) would be visible here and should be treated as possible
+ *    errors that should be ignored discarding the contribution.
+ *
+ *    Other cases are obvious error, we can abort in this case or ignore with
+ *    error.
+ *
+ * 3. Root of the tree broadcasts the data and we get it, however root gets
+ *    false negative. In this case root will try again. We might be:
+ *    (a) at SYNC since we just got the DB and we are fine (coll->seq == root_seq+1)
+ *    (b) at FAN-IN if somebody initiated next collective  (coll->seq == root_seq+1)
+ *    (c) at FAN-OUT if we will collect all necessary contributions and send it to
+ *        our parent.
+ *    (d) we won't be able to switch to SYNC since root will be busy dealing with
+ *        previous DB broadcast.
+ */
+inline static int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
+				       char *nodename)
+{
+	if( coll->seq == seq ){
+		/* accept this message */
+		return SLURM_SUCCESS;
+	} else if( (coll->seq - 1) == seq ){
+		/* his may be our child OR root of the tree that
+			 * had false negatives from SLURM protocol.
+			 * It's normal situation, return error because we
+			 * want to discard this message */
+		return SLURM_ERROR;
+	}
+	PMIXP_ERROR("Bad collective seq. #%d from %s, current is %d",
+		    seq, nodename, coll->seq);
+	/* maybe need more sophisticated handling in presence of
+			 * several steps. However maybe it's enough to just ignore */
+	// slurm_kill_job_step(pmixp_info_jobid(), pmixp_info_stepid(), SIGKILL);
+	return SLURM_SUCCESS;
+}
+
 void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
 				uint32_t size);
-int pmixp_coll_contrib_loc(pmixp_coll_t *coll);
+int pmixp_coll_contrib_loc(pmixp_coll_t *coll, int collect_data);
 int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 			    void *contrib, size_t size);
 bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,

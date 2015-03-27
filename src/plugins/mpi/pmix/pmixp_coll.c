@@ -271,12 +271,12 @@ pmixp_coll_t *pmixp_coll_new(const pmix_range_t *ranges, size_t nranges,
 	coll->nodeid = nodeid;
 
 	// We interested in amount of direct childs
-	coll->local_contrib = false;
-	coll->contrib_cnt = 0;
+	coll->seq = 0;
+	coll->rcvframe_no = 0;
+	coll->local_ok = false;
+	coll->contrib_cntr = 0;
 	coll->ch_nodeids = xmalloc( sizeof(int) * width );
-#ifndef NDEBUG
 	coll->ch_contribs = xmalloc( sizeof(int) * width );
-#endif
 	coll->children_cnt = reverse_tree_direct_children(nodeid, nodes, width,
 						 depth, coll->ch_nodeids);
 
@@ -387,9 +387,9 @@ _fill_local_ranks(pmix_range_t *glob, pmix_range_t *loc)
 	}
 }
 
-int pmixp_coll_contrib_loc(pmixp_coll_t *coll)
+int pmixp_coll_contrib_loc(pmixp_coll_t *coll, int collect_data)
 {
-	List modex_list = list_create(pmixp_xfree_buffer);
+	List modex_list;
 	ListIterator it;
 	pmixp_modex_t *pmdx;
 	size_t size, modex_size;
@@ -397,18 +397,31 @@ int pmixp_coll_contrib_loc(pmixp_coll_t *coll)
 	int rc;
 	pmix_range_t range, *mynsp = NULL;
 
-	/* Check that mynamespace is set correctly */
-	xassert(coll->my_nspace < coll->nranges );
-	mynsp = &coll->ranges[coll->my_nspace];
-	xassert( 0 == strcmp(mynsp->nspace, pmixp_info_namespace()) );
-
-	_fill_local_ranks(mynsp, &range);
-
+	/* sanity check */
 	pmixp_coll_sanity_check(coll);
 	if( PMIXP_COLL_SYNC == coll->state ){
 		coll->state = PMIXP_COLL_FAN_IN;
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
+
+	/* Check that mynamespace is set correctly */
+	xassert(coll->my_nspace < coll->nranges );
+	mynsp = &coll->ranges[coll->my_nspace];
+	xassert( 0 == strcmp(mynsp->nspace, pmixp_info_namespace()) );
+
+	if( !collect_data ){
+		/* If we don't collect the data - we just
+		 * put 0 as contribution count */
+		size = sizeof(uint32_t);
+		_adjust_data_size(coll, size);
+		buf = create_buf(coll->data + coll->data_pay, coll->data_sz - coll->data_pay);
+		pack32(0, buf);
+		return SLURM_SUCCESS;
+	}
+	/* user wants to collect the data */
+	modex_list = list_create(pmixp_xfree_buffer);
+
+	_fill_local_ranks(mynsp, &range);
 
 	if( SLURM_SUCCESS != (rc = _collect_range(&range,PMIX_GLOBAL, modex_list) ) ){
 		goto err_exit;
@@ -428,9 +441,11 @@ int pmixp_coll_contrib_loc(pmixp_coll_t *coll)
 	_adjust_data_size(coll, size);
 
 	buf = create_buf(coll->data + coll->data_pay, coll->data_sz - coll->data_pay);
-	packmem(range.nspace,strlen(range.nspace),buf);
+
 	pack32(list_count(modex_list), buf);
+	packmem(range.nspace,strlen(range.nspace),buf);
 	pack32(modex_size, buf);
+
 	it = list_iterator_create(modex_list);
 	while( NULL != ( pmdx = list_next(it))){
 		uint32_t tmp;
@@ -442,12 +457,14 @@ int pmixp_coll_contrib_loc(pmixp_coll_t *coll)
 		pack32(tmp, buf);
 		packmem((char*)pmdx->data.blob, (uint32_t)pmdx->data.size, buf);
 	}
+
 	list_iterator_destroy(it);
 	coll->data_pay += get_buf_offset(buf);
-	// Protect data
+	// Protect data and free the buffer
 	buf->head = NULL;
 	free_buf(buf);
-	coll->local_contrib = true;
+
+	coll->local_ok = true;
 	_progress_fan_in(coll);
 	return SLURM_SUCCESS;
 err_exit:
@@ -459,9 +476,7 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 			    void *contrib, size_t size)
 {
 	int idx;
-#ifndef NDEBUG
 	int nodeid;
-#endif
 
 	pmixp_coll_sanity_check(coll);
 	if( PMIXP_COLL_SYNC == coll->state ){
@@ -469,20 +484,36 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
-
-	_adjust_data_size(coll, size);
-	memcpy(coll->data + coll->data_pay, contrib, size);
-	coll->data_pay += size;
-#ifndef NDEBUG
+	/* Because of possible timeouts/delays in transmission we theoretically
+	 * can receive a contribution second time. Avoid applying it by checking
+	 * our records. */
 	nodeid = hostlist_find(coll->all_children, nodename);
-	// Account children contributions with nodeid checking
-	xassert(0 <= (idx = _is_child_no(coll, nodeid)) );
-	xassert(0 == coll->ch_contribs[idx]);
+	idx = _is_child_no(coll, nodeid);
+	xassert(0 <= idx );
+	if( 0 < coll->ch_contribs[idx]){
+		/* shouldn't be grater than 1! */
+		xassert(1 == coll->ch_contribs[idx]);
+		/* this is duplication, skip. */
+		return SLURM_SUCCESS;
+	}
+
+	/* Copy data ONLY if we collect data, otherwise we
+	 * will have only one uint32_t cell with 0 in it */
+	if( sizeof(uint32_t) < size ){
+		_adjust_data_size(coll, size);
+		memcpy(coll->data + coll->data_pay, contrib, size);
+		coll->data_pay += size;
+	}
+
+	/* increase number of individual contributions */
 	coll->ch_contribs[idx]++;
-#endif
-	// Increase number of contributions
-	coll->contrib_cnt++;
+
+	/* increase number of total contributions */
+	coll->contrib_cntr++;
+
+	/* make a progress */
 	_progress_fan_in(coll);
+
 	return SLURM_SUCCESS;
 }
 
@@ -500,25 +531,32 @@ static int _push_into_db(void *data, size_t size)
 	Buf buf;
 	int rc;
 
+	if( sizeof(uint32_t) >= size ){
+		return SLURM_SUCCESS;
+	}
+
 	while( 0 < size ){
 		pmixp_namespace_t *nsptr;
 		char nspace[PMIX_MAX_NSLEN];
-		uint32_t cnt, size_estim;
+		uint32_t cnt, tmp, size_estim;
 		int i;
 
-		// There might be up to PMIX_MAX_NSLEN symbols in
-		// namespace, sizeof(int) size of namespace
-		// and 2 parameters
+		/* There might be up to PMIX_MAX_NSLEN symbols in
+		 * namespace, sizeof(int) size of namespace
+		 * and 2 parameters */
 		size_estim = PMIX_MAX_NSLEN + 3*sizeof(uint32_t);
+		size_estim = size_estim < size ? size_estim : size;
 		buf = create_buf(data, size_estim);
-		if( SLURM_SUCCESS != ( rc = unpackmem(nspace,&cnt,buf) ) ){
-			return rc;
-		}
-		nspace[cnt] = '\0';
 
 		if( SLURM_SUCCESS != (rc = unpack32(&cnt,buf)) ){
 			return rc;
 		}
+
+		if( SLURM_SUCCESS != ( rc = unpackmem(nspace,&tmp,buf) ) ){
+			return rc;
+		}
+		nspace[tmp] = '\0';
+
 
 		if( SLURM_SUCCESS != (rc = unpack32(&size_estim,buf)) ){
 			return rc;
@@ -585,7 +623,9 @@ static int _reply_to_libpmix(pmixp_coll_t *coll)
 	list_iterator_destroy(it);
 	list_destroy(modex_list);
 
-	coll->cbfunc(PMIX_SUCCESS, mdx, size, coll->cbdata);
+	if( NULL != coll->cbfunc ){
+		coll->cbfunc(PMIX_SUCCESS, mdx, size, coll->cbdata);
+	}
 	return SLURM_SUCCESS;
 err_exit:
 	list_destroy(modex_list);
@@ -618,7 +658,7 @@ void _progress_fan_in(pmixp_coll_t *coll)
 	pmixp_coll_sanity_check(coll);
 	xassert( PMIXP_COLL_FAN_IN == coll->state );
 
-	if( !coll->local_contrib || (coll->contrib_cnt != coll->children_cnt) ){
+	if( !coll->local_ok || (coll->contrib_cntr != coll->children_cnt) ){
 		// Nothing to do.
 		return;
 	}
@@ -634,7 +674,8 @@ void _progress_fan_in(pmixp_coll_t *coll)
 		type = PMIXP_MSG_FAN_OUT;
 	}
 
-	rc = pmixp_server_send_coll(hostlist, type, addr, coll->data, coll->data_pay);
+	rc = pmixp_server_send_coll(hostlist, type, coll->seq, addr,
+				     coll->data, coll->data_pay);
 	xfree(hostlist);
 
 	if( SLURM_SUCCESS != rc ){
@@ -646,29 +687,9 @@ void _progress_fan_in(pmixp_coll_t *coll)
 	}
 
 	coll->state = PMIXP_COLL_FAN_OUT;
-//	if( NULL != coll->parent_host ){
-		xfree(coll->data);
-		coll->data = NULL;
-		coll->data_pay = coll->data_sz = 0;
-/*	} else {
-		void *data_bkp = coll->data;
-		int offset;
-		pmix_range_t *ranges = NULL;
-		size_t nranges = 0;
-		pmixp_coll_type_t type = 0;
-
-		// We need to remove data targeted for remote receivers
-		offset = pmixp_coll_unpack_ranges(coll->data, coll->data_pay,
-						  &type, &ranges, &nranges);
-		xassert( 0 < offset );
-		xfree(ranges);
-
-		// Now process the data internally
-		coll->data = coll->data + offset;
-		coll->data_sz = coll->data_pay -= offset;
-		_progress_fan_out(coll);
-		xfree(data_bkp);
-	}*/
+	xfree(coll->data);
+	coll->data = NULL;
+	coll->data_pay = coll->data_sz = 0;
 }
 
 void _progress_fan_out(pmixp_coll_t *coll)
@@ -682,16 +703,16 @@ void _progress_fan_out(pmixp_coll_t *coll)
 
 	// Prepare for the next collective operation
 	coll->state = PMIXP_COLL_SYNC;
-#ifndef NDEBUG
 	memset(coll->ch_contribs, 0, sizeof(int) * coll->children_cnt);
-#endif
-	coll->contrib_cnt = 0;
-	coll->local_contrib = false;
+	coll->seq++; /* move to the next collective */
+	coll->contrib_cntr = 0;
+	coll->local_ok = false;
 	// WARRNING: At fan-out stage we are working with data
 	// in message directly. It will be freed elsewhere!
 	// ! NO xfree(coll->data);
 	coll->data = NULL;
 	coll->data_pay = coll->data_sz = 0;
+
 }
 
 void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
