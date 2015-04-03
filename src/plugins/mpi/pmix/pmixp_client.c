@@ -105,7 +105,7 @@ int pmixp_libpmix_init(struct sockaddr_un *address)
     PMIx_Register_errhandler(errhandler);
 
     /* retrieve the rendezvous address */
-    if (PMIX_SUCCESS != ( rc = PMIx_get_rendezvous_address(address) ) ) {
+    if (PMIX_SUCCESS != ( rc = PMIx_get_rendezvous_address(address, NULL) ) ) {
 	PMIXP_ERROR_STD("PMIx_get_rendezvous_address failed with error: %d", rc);
 	return SLURM_ERROR;
     }
