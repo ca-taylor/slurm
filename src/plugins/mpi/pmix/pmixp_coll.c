@@ -633,7 +633,6 @@ err_exit:
 	return SLURM_ERROR;
 }
 
-#ifndef NDEBUG
 static int _is_child_no(pmixp_coll_t *coll, int nodeid)
 {
 	// Check for initialization
@@ -646,7 +645,6 @@ static int _is_child_no(pmixp_coll_t *coll, int nodeid)
 	}
 	return -1;
 }
-#endif
 
 void _progress_fan_in(pmixp_coll_t *coll)
 {
