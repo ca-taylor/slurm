@@ -92,9 +92,15 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 	struct sockaddr_un address;
 	char path[MAX_USOCK_PATH];
 	int fd, rc;
+	char *p;
 
 	// Create UNIX socket for slurmd communication
-	sprintf(path, PMIXP_STEPD_ADDR_FMT, job->jobid, job->stepid );
+	p = getenv("TMPDIR");
+	if( NULL == p ){
+		p = "/tmp";
+	}
+
+	sprintf(path, "%s/" PMIXP_STEPD_ADDR_FMT, p, job->jobid, job->stepid );
 	if( (fd = pmixp_usock_create_srv(path)) < 0 ){
 		return SLURM_ERROR;
 	}

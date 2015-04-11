@@ -93,8 +93,6 @@ int pmixp_libpmix_init(struct sockaddr_un *address)
 {
     int rc;
 
-    setenv("TMPDIR","/home/artpol/slurm_tmp/",1);
-
     /* setup the server library */
     if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb, false))) {
 	PMIXP_ERROR_STD("PMIx_server_init failed with error %d\n", rc);
