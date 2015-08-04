@@ -38,6 +38,8 @@
 #ifndef PMIXP_UTILS_H
 #define PMIXP_UTILS_H
 
+#include "pmixp_common.h"
+
 void pmixp_xfree_buffer(void *x);
 int pmixp_usock_create_srv(char *path);
 size_t pmixp_read_buf(int fd, void *buf, size_t count, int *shutdown, bool blocking);
@@ -46,6 +48,5 @@ bool pmixp_fd_read_ready(int fd, int *shutdown);
 bool pmixp_fd_write_ready(int fd, int *shutdown);
 int pmixp_srun_send(slurm_addr_t *addr, uint32_t len, char *data);
 int pmixp_stepd_send(char *nodelist, const char *address, char *data, uint32_t len);
-
 
 #endif // PMIXP_UTILS_H

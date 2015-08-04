@@ -89,14 +89,12 @@ typedef struct {
 	int  magic;
 #endif
 	List nspaces;
+    pmixp_namespace_t *local;
 } pmixp_db_t;
 
-
-extern pmixp_db_t _pmixp_nspaces;
-
-/* namespaces list operations */
 int pmixp_nspaces_init();
 pmixp_namespace_t *pmixp_nspaces_find(const char *name);
+pmixp_namespace_t *pmixp_nspaces_local();
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 			 uint32_t ntasks, uint32_t *task_cnts,
 			 char *task_map_packed, hostlist_t hl);
@@ -109,11 +107,16 @@ inline static hostlist_t pmixp_nspace_hostlist(pmixp_namespace_t *nsptr)
 }
 hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
 				  int *ranks, size_t nranks);
-int pmixp_nspace_add_blob(const char *nspace, pmix_scope_t scope, int taskid, void *blob, int size);
-int pmixp_nspace_blob(const char *nspace, pmix_scope_t scope, List l);
-int pmixp_nspace_rank_blob(const char *nspace, pmix_scope_t scope,
+int pmixp_nspace_add_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope, int taskid, void *blob, int size);
+int pmixp_nspace_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope, List l);
+int pmixp_nspace_rank_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope,
 			   int rank, List l);
 
+char *pmixp_nspace_resolve(const char *name, int rank);
+
+size_t pmixp_nspace_mdx_lsize(List l);
+void pmixp_nspaces_pack_modex(Buf buf, List modex_list);
+int pmixp_nspaces_push(Buf buf, int cnt);
 
 // TODO: Check the usefulness of this and remove in future.
 

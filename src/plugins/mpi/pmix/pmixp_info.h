@@ -221,4 +221,16 @@ pmixp_info_job_host(int nodeid){
 	return ret;
 }
 
+/* namespaces list operations */
+inline static char *pmixp_info_nspace_usock(char *nspace)
+{
+    char *usock = NULL;
+    char *tmpdir = getenv("TMPDIR");
+    if( NULL == tmpdir ){
+        tmpdir = PMIXP_TMPDIR;
+    }
+    xstrfmtcat(usock,"%s/sock.stepd.%s",tmpdir, nspace);
+    return usock;
+}
+
 #endif // PMIXP_INFO_H

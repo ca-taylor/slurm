@@ -45,6 +45,7 @@
 #include "pmixp_nspaces.h"
 #include "pmixp_state.h"
 #include "pmixp_client.h"
+#include "pmixp_dmdx.h"
 
 #include <pmix_server.h>
 
@@ -90,21 +91,28 @@ pmixp_io_engine_header_t srv_rcvd_header = {
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 {
 	struct sockaddr_un address;
-	char path[MAX_USOCK_PATH];
+    char *path;
 	int fd, rc;
 
+    if( SLURM_SUCCESS != ( rc = pmixp_info_set(job, env) ) ){
+        PMIXP_ERROR("pmixp_info_set(job, env) failed");
+        return rc;
+    }
+
 	// Create UNIX socket for slurmd communication
-	sprintf(path, PMIXP_STEPD_ADDR_FMT, job->jobid, job->stepid );
+    path = pmixp_info_nspace_usock(pmixp_info_namespace());
+    if( NULL == path ){
+        PMIXP_ERROR("Out-of-memory");
+        return SLURM_ERROR;
+    }
 	if( (fd = pmixp_usock_create_srv(path)) < 0 ){
 		return SLURM_ERROR;
 	}
+    free(path);
 	fd_set_close_on_exec(fd);
 	pmixp_info_srv_contacts(path, fd);
 
-	if( SLURM_SUCCESS != ( rc = pmixp_info_set(job, env) ) ){
-		PMIXP_ERROR("pmixp_info_set(job, env) failed");
-		return rc;
-	}
+
 
 	if( ( rc = pmixp_coll_init(env, SEND_HDR_SIZE) ) ){
 		PMIXP_ERROR("pmixp_coll_init() failed");
@@ -118,6 +126,11 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 
 	if( SLURM_SUCCESS != (rc = pmixp_state_init()) ){
 		PMIXP_ERROR("pmixp_state_init() failed");
+		return rc;
+	}
+
+	if( SLURM_SUCCESS != (rc = pmixp_dmdx_init()) ){
+		PMIXP_ERROR("pmixp_dmdx_init() failed");
 		return rc;
 	}
 
@@ -241,7 +254,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 	return 0;
 }
 
-int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
+int pmixp_server_send(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
 			   const char *addr, void *data, size_t size)
 {
 	send_header_t hdr;

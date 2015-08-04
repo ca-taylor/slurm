@@ -65,8 +65,7 @@
 #include <pmix_server.h>
 
 // TODO: use /tmp directory instead
-#define PMIXP_TMPDIR "/home/artpol/slurm_tmp/"
-#define PMIXP_STEPD_ADDR_FMT PMIXP_TMPDIR "sock.pmix_stepd.%u.%u"
+#define PMIXP_TMPDIR "/tmp/"
 #define MAX_USOCK_PATH                                      \
 	( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) - \
 	(size_t)&(((struct sockaddr_un *)0)->sun_path) )

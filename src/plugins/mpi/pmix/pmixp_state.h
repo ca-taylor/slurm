@@ -42,6 +42,7 @@
 #include "pmixp_debug.h"
 #include "pmixp_io.h"
 #include "pmixp_coll.h"
+#include "pmixp_dmdx.h"
 
 /*
  * Client state structure

@@ -310,24 +310,6 @@ err_exit:
 	return NULL;
 }
 
-static size_t _modex_list_size(List l)
-{
-	ListIterator it = list_iterator_create(l);
-	pmix_modex_data_t *data;
-	size_t ret = 0;
-
-	while( NULL != (data = list_next(it) ) ){
-		// we need to save:
-		// - rank (uint32_t)
-		// - scope (uint32_t)
-		// - size of the blob (uint32_t)
-		// - blob data (data->size)
-		ret += data->size + 3*sizeof(int);
-	}
-	list_iterator_destroy(it);
-	return ret;
-}
-
 static int _collect_range(pmix_range_t *range, pmix_scope_t scope, List l)
 {
 	int rc;
@@ -346,15 +328,14 @@ static int _collect_range(pmix_range_t *range, pmix_scope_t scope, List l)
 		}
 	} else {
 		int j;
+        pmixp_namespace_t *nsptr = pmixp_nspaces_find(range->nspace);
+        if( NULL == nsptr ){
+            PMIXP_ERROR("Cannot find namespace %s", range->nspace);
+            return SLURM_ERROR;
+        }
 		for(j=0; j<range->nranks; j++){
 			int rank = range->ranks[j];
-			rc = pmixp_nspace_rank_blob(range->nspace, scope,
-						    rank, l);
-			if( SLURM_SUCCESS != rc ){
-				PMIXP_ERROR("Cannot get blob from nsp=%s, scope=%d, rank=%d",
-					    range->nspace, scope, rank);
-				return SLURM_ERROR;
-			}
+            pmixp_nspace_rank_blob(nsptr, scope, rank, l);
 		}
 	}
 	return SLURM_SUCCESS;
@@ -416,49 +397,37 @@ int pmixp_coll_contrib_loc(pmixp_coll_t *coll, int collect_data)
 		_adjust_data_size(coll, size);
 		buf = create_buf(coll->data + coll->data_pay, coll->data_sz - coll->data_pay);
 		pack32(0, buf);
-		return SLURM_SUCCESS;
-	}
-	/* user wants to collect the data */
-	modex_list = list_create(pmixp_xfree_buffer);
+	} else {
+		/* user wants to collect the data */
+		modex_list = list_create(pmixp_xfree_buffer);
 
-	_fill_local_ranks(mynsp, &range);
+		_fill_local_ranks(mynsp, &range);
 
-	if( SLURM_SUCCESS != (rc = _collect_range(&range,PMIX_GLOBAL, modex_list) ) ){
-		goto err_exit;
-	}
-	if( SLURM_SUCCESS != (rc = _collect_range(&range,PMIX_REMOTE, modex_list) ) ){
-		goto err_exit;
-	}
+		if( SLURM_SUCCESS != (rc = _collect_range(&range,PMIX_GLOBAL, modex_list) ) ){
+			goto err_exit;
+		}
+		if( SLURM_SUCCESS != (rc = _collect_range(&range,PMIX_REMOTE, modex_list) ) ){
+			goto err_exit;
+		}
 
-	// Reserve the space for namespace and it's size
-	size = strlen(range.nspace) + sizeof(uint32_t);
-	// Reserve the space for modex count and size
-	size += 2*sizeof(uint32_t);
-	// Account the datasize
-	modex_size = _modex_list_size(modex_list);
-	size += modex_size;
+		// Reserve the space for namespace and it's size
+		size = strlen(range.nspace) + sizeof(uint32_t);
+		// Reserve the space for modex count and size
+		size += 2*sizeof(uint32_t);
+		// Account the datasize
+        modex_size = pmixp_nspace_mdx_lsize(modex_list);
+		size += modex_size;
 
-	_adjust_data_size(coll, size);
+		_adjust_data_size(coll, size);
 
-	buf = create_buf(coll->data + coll->data_pay, coll->data_sz - coll->data_pay);
-
-	pack32(list_count(modex_list), buf);
-	packmem(range.nspace,strlen(range.nspace),buf);
-	pack32(modex_size, buf);
-
-	it = list_iterator_create(modex_list);
-	while( NULL != ( pmdx = list_next(it))){
-		uint32_t tmp;
-		// Make sure that we correctly allocate the buffer
-		xassert( remaining_buf(buf) >= (pmdx->data.size + 3*sizeof(int)) );
-		tmp = pmdx->data.rank;
-		pack32(tmp, buf);
-		tmp = pmdx->scope;
-		pack32(tmp, buf);
-		packmem((char*)pmdx->data.blob, (uint32_t)pmdx->data.size, buf);
-	}
-
-	list_iterator_destroy(it);
+		buf = create_buf(coll->data + coll->data_pay, coll->data_sz - coll->data_pay);
+        /* Save modex size & count*/
+        pack32(list_count(modex_list), buf);
+        packmem(range.nspace,strlen(range.nspace),buf);
+        pack32(modex_size, buf);
+        pmixp_nspaces_pack_modex(buf,modex_list);
+        list_destroy(modex_list);
+    }
 	coll->data_pay += get_buf_offset(buf);
 	// Protect data and free the buffer
 	buf->head = NULL;
@@ -569,21 +538,7 @@ static int _push_into_db(void *data, size_t size)
 		}
 
 		buf = create_buf(data, size_estim);
-		for(i=0; i<cnt; i++){
-			uint32_t bsize = 0, scope;
-			uint32_t rank = 0;
-			char *blob = NULL;
-			if( SLURM_SUCCESS != (rc = unpack32(&rank,buf)) ){
-				return rc;
-			}
-			if( SLURM_SUCCESS != (rc = unpack32(&scope,buf)) ){
-				return rc;
-			}
-			if( SLURM_SUCCESS != (rc = unpackmem_ptr(&blob, &bsize, buf)) ){
-				return rc;
-			}
-			pmixp_nspace_add_blob(nspace, scope, (int)rank, blob, bsize);
-		}
+        pmixp_nspaces_push(buf, nspace, cnt);
 		_move_and_free(data, size, buf);
 	}
 	return SLURM_SUCCESS;
@@ -592,12 +547,18 @@ static int _push_into_db(void *data, size_t size)
 static int _reply_to_libpmix(pmixp_coll_t *coll)
 {
 	int i;
-	List modex_list = list_create(pmixp_xfree_buffer);
+	List modex_list;
 	ListIterator it;
 	pmix_modex_data_t *mdx = NULL;
 	pmixp_modex_t *pmdx;
-	size_t size;
+	size_t size = 0;
 	int rc;
+
+	if( PMIXP_COLL_TYPE_FENCE_EMPT == coll->type ){
+		goto ok_exit;
+	}
+
+	modex_list = list_create(pmixp_xfree_buffer);
 
 	for( i=0; i < coll->nranges; i++)
 	{
@@ -623,6 +584,7 @@ static int _reply_to_libpmix(pmixp_coll_t *coll)
 	list_iterator_destroy(it);
 	list_destroy(modex_list);
 
+ok_exit:
 	if( NULL != coll->cbfunc ){
 		coll->cbfunc(PMIX_SUCCESS, mdx, size, coll->cbdata);
 	}
@@ -674,7 +636,7 @@ void _progress_fan_in(pmixp_coll_t *coll)
 		type = PMIXP_MSG_FAN_OUT;
 	}
 
-	rc = pmixp_server_send_coll(hostlist, type, coll->seq, addr,
+	rc = pmixp_server_send(hostlist, type, coll->seq, addr,
 				     coll->data, coll->data_pay);
 	xfree(hostlist);
 

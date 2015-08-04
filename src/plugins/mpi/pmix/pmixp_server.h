@@ -43,15 +43,14 @@
 typedef enum {
 	PMIXP_MSG_FAN_IN,
 	PMIXP_MSG_FAN_OUT,
-	PMIX_MSG_DIRECT,
-	PMIX_MSG_DIRESP
+    PMIX_MSG_DMDX
 } pmixp_srv_cmd_t;
 
 
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env);
 int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
 void pmix_server_new_conn(int fd);
-int pmixp_server_send_coll(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
+int pmixp_server_send(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
 			   const char *addr, void *data, size_t size);
 
 #endif // PMIXP_SERVER_H

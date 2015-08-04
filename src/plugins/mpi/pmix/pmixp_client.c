@@ -43,6 +43,7 @@
 #include "pmixp_debug.h"
 #include "pmixp_coll.h"
 #include "pmixp_server.h"
+#include "pmixp_dmdx.h"
 
 #include <pmix_server.h>
 
@@ -497,6 +498,8 @@ static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
 	pmixp_coll_t *coll;
 	pmixp_coll_type_t type = PMIXP_COLL_TYPE_FENCE;
 
+	pmixp_debug_hang(0);
+
 	if( !collect_data ) {
 		type = PMIXP_COLL_TYPE_FENCE_EMPT;
 	}
@@ -510,10 +513,10 @@ static int fencenb_fn(const pmix_range_t ranges[], size_t nranges,
 		goto error;
 	}
 
+	pmixp_coll_set_callback(coll, cbfunc, cbdata);
 	if( SLURM_SUCCESS != pmixp_coll_contrib_loc(coll, collect_data) ){
 		goto error;
 	}
-	pmixp_coll_set_callback(coll, cbfunc, cbdata);
 	return PMIX_SUCCESS;
 error:
 	cbfunc(PMIX_ERROR,NULL,0,cbdata);
@@ -524,7 +527,8 @@ static int store_modex_fn(const char nspace[], int rank, void *server_object,
 			  pmix_scope_t scope, pmix_modex_data_t *data)
 {
 	PMIXP_DEBUG("called: rank = %d", rank);
-	pmixp_nspace_add_blob(nspace, scope, rank, data->blob, data->size);
+    pmixp_namespace_t *nsptr = pmixp_nspaces_find(nspace);
+    pmixp_nspace_add_blob(nsptr, scope, rank, data->blob, data->size);
 
 	return PMIX_SUCCESS;
 }
@@ -538,43 +542,39 @@ static int get_modexnb_fn(const char nspace[], int rank,
 	ListIterator it;
 	size_t ndata;
 	int i, rc;
+    pmixp_namespace_t *nsptr = NULL;
 
-	// TODO: Data might be missing and we need to wait for them
-	rc = pmixp_nspace_rank_blob(nspace, PMIX_LOCAL, rank, modex_list);
-	if( SLURM_SUCCESS != rc ){
-		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
-		return SLURM_ERROR;
-	}
+	pmixp_debug_hang(1);
 
-	rc = pmixp_nspace_rank_blob(nspace, PMIX_GLOBAL, rank, modex_list);
-	if( SLURM_SUCCESS != rc ){
-		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
-		return SLURM_ERROR;
-	}
-
-	rc = pmixp_nspace_rank_blob(nspace, PMIX_REMOTE, rank, modex_list);
-	if( SLURM_SUCCESS != rc ){
-		cbfunc(PMIX_ERROR, NULL, 0, cbdata);
-		return SLURM_ERROR;
-	}
+    nsptr = pmixp_nspaces_find(nspace);
+    pmixp_nspace_rank_blob(nsptr, PMIX_LOCAL, rank, modex_list);
+    pmixp_nspace_rank_blob(nsptr, PMIX_GLOBAL, rank, modex_list);
+    pmixp_nspace_rank_blob(nsptr, PMIX_REMOTE, rank, modex_list);
 
 	ndata = list_count(modex_list);
-	modex_data = xmalloc(ndata * sizeof(*modex_data));
-	it = list_iterator_create(modex_list);
-	i = 0;
-	while( NULL != (mptr = list_next(it) ) ){
-		modex_data[i] = *mptr;
-		i++;
+	if( 0 != ndata ){
+		modex_data = xmalloc(ndata * sizeof(*modex_data));
+		it = list_iterator_create(modex_list);
+		i = 0;
+		while( NULL != (mptr = list_next(it) ) ){
+			modex_data[i] = *mptr;
+			i++;
+		}
+		cbfunc(PMIX_SUCCESS, modex_data, ndata, cbdata);
+        xfree(modex_data);
+    } else {
+        if( SLURM_SUCCESS != pmixp_dmdx_get(nspace, rank, cbfunc,cbdata) ){
+            rc = PMIX_ERROR;
+        }
 	}
-	list_destroy(modex_list);
+    list_destroy(modex_list);
 
-	cbfunc(PMIX_SUCCESS, modex_data, ndata, cbdata);
-	xfree(modex_data);
-
-	return PMIX_SUCCESS;
+exit:
+    if( PMIX_SUCCESS != rc ){
+        cbfunc(rc, NULL, 0, cbdata);
+    }
+    return rc;
 }
-
-
 
 static int publish_fn(pmix_scope_t scope, pmix_persistence_t persist,
 		      const pmix_info_t info[], size_t ninfo,
