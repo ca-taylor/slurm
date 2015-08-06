@@ -48,41 +48,35 @@ typedef enum {
 
 typedef enum {
 	PMIXP_COLL_TYPE_FENCE,
-	PMIXP_COLL_TYPE_FENCE_EMPT,
 	PMIXP_COLL_TYPE_CONNECT,
 	PMIXP_COLL_TYPE_DISCONNECT
 } pmixp_coll_type_t;
-
-typedef enum {
-	PMIX_PARENT_NONE,
-	PMIX_PARENT_ROOT,
-	PMIX_PARENT_SRUN,
-	PMIX_PARENT_STEPD
-} pmixp_coll_parent_t;
-
 
 typedef struct {
 #ifndef NDEBUG
 #       define PMIXP_COLL_STATE_MAGIC 0xCA11CAFE
 	int  magic;
 #endif
+	/* element-wise lock */
+	pthread_mutex_t lock;
+
 	/* general information */
 	pmixp_coll_state_t state;
 	pmixp_coll_type_t type;
 	/* PMIx collective id */
-	pmix_range_t *ranges;
-	size_t nranges;
+	pmix_proc_t *procs;
+	size_t nprocs;
 	int my_nspace;
 	uint32_t nodeid;
 	/* tree structure */
 	char *parent_host;
 	hostlist_t all_children;
 	uint32_t children_cnt;
-	/* contributions accounting */
+
+	/* */
 	uint32_t seq;
-	uint32_t rcvframe_no;
-	bool local_ok;
 	uint32_t contrib_cntr;
+	bool contrib_local;
 
 	/* Check who contributes */
 	int *ch_nodeids;
@@ -103,11 +97,16 @@ inline static void pmixp_coll_sanity_check(pmixp_coll_t *coll)
 	xassert( coll->magic == PMIXP_COLL_STATE_MAGIC );
 }
 
-int pmixp_coll_init(char ***env, uint32_t hdrsize);
-pmixp_coll_t *pmixp_coll_new(const pmix_range_t *ranges, size_t nranges,
-			     pmixp_coll_type_t type);
+int pmixp_coll_fw_init(char ***env, uint32_t hdrsize);
+int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs, size_t nprocs,
+		    pmixp_coll_type_t type);
+
 inline static void pmixp_coll_set_callback(pmixp_coll_t *coll,
-			       pmix_modex_cbfunc_t cbfunc, void *cbdata){
+					   pmix_modex_cbfunc_t cbfunc, void *cbdata){
+	/* no need to protect coll since:
+     * - only libpmix thread may touch this data during fan-in stage
+     * - only slurm thread may touch this data during fan-out stage
+     */
 	pmixp_coll_sanity_check(coll);
 	coll->cbfunc = cbfunc;
 	coll->cbdata = cbdata;
@@ -162,9 +161,9 @@ inline static int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
 		return SLURM_SUCCESS;
 	} else if( (coll->seq - 1) == seq ){
 		/* his may be our child OR root of the tree that
-			 * had false negatives from SLURM protocol.
-			 * It's normal situation, return error because we
-			 * want to discard this message */
+	 * had false negatives from SLURM protocol.
+	 * It's normal situation, return error because we
+	 * want to discard this message */
 		return SLURM_ERROR;
 	}
 	PMIXP_ERROR("Bad collective seq. #%d from %s, current is %d",
@@ -172,17 +171,19 @@ inline static int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
 	/* maybe need more sophisticated handling in presence of
 			 * several steps. However maybe it's enough to just ignore */
 	// slurm_kill_job_step(pmixp_info_jobid(), pmixp_info_stepid(), SIGKILL);
-	return SLURM_SUCCESS;
+	return SLURM_ERROR;
 }
 
 void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
-				uint32_t size);
-int pmixp_coll_contrib_loc(pmixp_coll_t *coll, int collect_data);
+			     uint32_t size);
+int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t ndata);
 int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 			    void *contrib, size_t size);
 bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
 			 void **data, uint64_t size);
 int pmixp_coll_unpack_ranges(void *data, size_t size, pmixp_coll_type_t *type,
-			     pmix_range_t **ranges, size_t *nranges);
+			     pmix_proc_t **ranges, size_t *nranges);
+int pmixp_coll_belong_chk(pmixp_coll_type_t type, const pmix_proc_t *procs,
+			  size_t nprocs);
 
 #endif // PMIXP_COLL_H

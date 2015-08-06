@@ -90,31 +90,28 @@ pmixp_io_engine_header_t srv_rcvd_header = {
 
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 {
-	struct sockaddr_un address;
-    char *path;
+	char *path;
 	int fd, rc;
 
-    if( SLURM_SUCCESS != ( rc = pmixp_info_set(job, env) ) ){
-        PMIXP_ERROR("pmixp_info_set(job, env) failed");
-        return rc;
-    }
+	if( SLURM_SUCCESS != ( rc = pmixp_info_set(job, env) ) ){
+		PMIXP_ERROR("pmixp_info_set(job, env) failed");
+		return rc;
+	}
 
 	// Create UNIX socket for slurmd communication
-    path = pmixp_info_nspace_usock(pmixp_info_namespace());
-    if( NULL == path ){
-        PMIXP_ERROR("Out-of-memory");
-        return SLURM_ERROR;
-    }
+	path = pmixp_info_nspace_usock(pmixp_info_namespace());
+	if( NULL == path ){
+		PMIXP_ERROR("Out-of-memory");
+		return SLURM_ERROR;
+	}
 	if( (fd = pmixp_usock_create_srv(path)) < 0 ){
 		return SLURM_ERROR;
 	}
-    free(path);
+	free(path);
 	fd_set_close_on_exec(fd);
 	pmixp_info_srv_contacts(path, fd);
 
-
-
-	if( ( rc = pmixp_coll_init(env, SEND_HDR_SIZE) ) ){
+	if( ( rc = pmixp_coll_fw_init(env, SEND_HDR_SIZE) ) ){
 		PMIXP_ERROR("pmixp_coll_init() failed");
 		return rc;
 	}
@@ -129,29 +126,33 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 		return rc;
 	}
 
+	/*
 	if( SLURM_SUCCESS != (rc = pmixp_dmdx_init()) ){
 		PMIXP_ERROR("pmixp_dmdx_init() failed");
 		return rc;
 	}
+    */
 
 	// Create UNIX socket for client communication
-	if( SLURM_SUCCESS != pmixp_libpmix_init(&address) ){
+	if( SLURM_SUCCESS != pmixp_libpmix_init() ){
 		PMIXP_ERROR("pmixp_libpmix_init() failed");
 		return SLURM_ERROR;
 	}
-	if( (fd = pmixp_usock_create_srv(address.sun_path)) < 0 ){
-		close( pmixp_info_srv_fd() );
-		PMIXP_ERROR("pmixp_usock_create_srv() failed");
-		return SLURM_ERROR;
-	}
-	fd_set_close_on_exec(fd);
-	pmixp_info_cli_contacts(fd);
 
 	// Create UNIX socket for client communication
 	if( SLURM_SUCCESS != pmixp_libpmix_job_set() ){
 		PMIXP_ERROR("pmixp_libpmix_job_set() failed");
 		return SLURM_ERROR;
 	}
+
+	return SLURM_SUCCESS;
+}
+
+int pmixp_stepd_finalize()
+{
+	pmixp_libpmix_finalize();
+	pmixp_info_free();
+	close(pmixp_info_srv_fd());
 
 	return SLURM_SUCCESS;
 }
@@ -255,7 +256,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 }
 
 int pmixp_server_send(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
-			   const char *addr, void *data, size_t size)
+		      const char *addr, void *data, size_t size)
 {
 	send_header_t hdr;
 	char nhdr[sizeof(send_header_t)];
@@ -299,29 +300,18 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 	case PMIXP_MSG_FAN_OUT:{
 		pmixp_coll_t *coll;
 		int offset = 0;
-		pmix_range_t *ranges = NULL;
-		size_t nranges = 0;
+		pmix_proc_t *procs = NULL;
+		size_t nprocs = 0;
 		pmixp_coll_type_t type = 0;
 
-		offset = pmixp_coll_unpack_ranges(payload, size, &type, &ranges, &nranges);
+		offset = pmixp_coll_unpack_ranges(payload, size, &type, &procs, &nprocs);
 		if( 0 >= offset ){
 			PMIXP_ERROR("Bad message header from node %s",
 				    nodename);
 			return;
 		}
-		coll = pmixp_state_coll_find(type, ranges, nranges);
-		if( NULL == coll ){
-			if( PMIXP_MSG_FAN_IN == hdr->type){
-				/* this is node contribution that initiates
-				 * brand new collective */
-				coll = pmixp_state_coll_new(type, ranges, nranges);
-			} else {
-				xfree(ranges);
-				PMIXP_ERROR("Bad collective message type: PMIXP_MSG_FAN_OUT");
-				return;
-			}
-		}
-		xfree(ranges);
+		coll = pmixp_state_coll_get(type, procs, nprocs);
+		xfree(procs);
 
 		PMIXP_DEBUG("FENCE collective message from node \"%s\", type = %s", nodename,
 			    (PMIXP_MSG_FAN_IN == hdr->type) ? "fan-in" : "fan-out");

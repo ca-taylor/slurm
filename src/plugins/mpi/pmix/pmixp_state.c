@@ -44,100 +44,148 @@
 
 pmixp_state_t _pmixp_state;
 
+
+void _xfree_coll(void *x)
+{
+	pmixp_coll_t *coll = (pmixp_coll_t *)x;
+
+	pthread_mutex_lock(&coll->lock);
+
+	if( NULL != coll->procs ){
+		xfree(coll->procs);
+	}
+	if( NULL != coll->parent_host ){
+		xfree(coll->parent_host);
+	}
+	hostlist_destroy(coll->all_children);
+	if( NULL != coll->ch_nodeids ){
+		xfree(coll->ch_nodeids);
+	}
+	if( NULL != coll->ch_contribs ){
+		xfree(coll->ch_contribs);
+	}
+
+	if( NULL != coll->data ){
+		xfree(coll->data);
+	}
+	pthread_mutex_unlock(&coll->lock);
+	xfree(coll);
+}
+
 int pmixp_state_init()
 {
-	size_t size, i;
-
 #ifndef NDEBUG
 	_pmixp_state.magic = PMIX_STATE_MAGIC;
 #endif
-	_pmixp_state.cli_size = pmixp_info_tasks_loc();
-	size = _pmixp_state.cli_size * sizeof(pmixp_cli_state_t);
-	_pmixp_state.cli_state = xmalloc( size );
-	for( i = 0; i < _pmixp_state.cli_size; i++ ){
-#ifndef NDEBUG
-		_pmixp_state.cli_state[i].magic = PMIXP_CLIENT_STATE_MAGIC;
-#endif
-		_pmixp_state.cli_state[i].state = PMIXP_CLI_UNCONNECTED;
-		_pmixp_state.cli_state[i].localid = i;
-	}
+	_pmixp_state.coll = list_create(_xfree_coll);
 
-	_pmixp_state.coll = list_create(pmixp_xfree_buffer);
-
+	pthread_mutexattr_t attr;
+	pthread_mutexattr_init(&attr);
+	pthread_mutex_init(&_pmixp_state.lock, &attr);
+	pthread_mutexattr_destroy(&attr);
 	return SLURM_SUCCESS;
 }
 
 void pmixp_state_finalize()
 {
-	size_t size, i;
 #ifndef NDEBUG
 	_pmixp_state.magic = 0;
 #endif
-	_pmixp_state.cli_size = pmixp_info_tasks_loc();
-	size = _pmixp_state.cli_size * sizeof(pmixp_cli_state_t);
-	_pmixp_state.cli_state = xmalloc( size );
-	for( i = 0; i < _pmixp_state.cli_size; i++ ){
-		_pmixp_state.cli_state[i].state = PMIXP_CLI_UNCONNECTED;
-	}
 	list_destroy(_pmixp_state.coll);
 }
 
-pmixp_coll_t *
-pmixp_state_coll_new(pmixp_coll_type_t type, const pmix_range_t *ranges,
-		     size_t nranges)
-{
-	pmixp_coll_t *coll = pmixp_coll_new(ranges, nranges, type);
-	xassert( coll );
-	list_append(_pmixp_state.coll, coll);
-	return coll;
-}
-
 static bool
-_compare_ranges(const pmix_range_t *r1, const pmix_range_t *r2,
-	       size_t nranges)
+_compare_ranges(const pmix_proc_t *r1, const pmix_proc_t *r2,
+		size_t nprocs)
 {
-	int i, j;
-	for( i=0; i < nranges; i++){
+	int i;
+	for( i=0; i < nprocs; i++){
 		if( 0 != strcmp(r1[i].nspace, r2[i].nspace) ){
 			return false;
 		}
-		if( r1[i].nranks != r2[i].nranks ){
+		if( r1[i].rank != r2[i].rank ){
 			return false;
-		}
-		for( j=0; j < r1[i].nranks; j++ ){
-			if( r1[i].ranks[j] != r2[i].ranks[j] ){
-				return false;
-			}
 		}
 	}
 	return true;
 }
 
-pmixp_coll_t *
-pmixp_state_coll_find(pmixp_coll_type_t type, const pmix_range_t *ranges,
-		      size_t nranges)
+static pmixp_coll_t *
+_find_collective(pmixp_coll_type_t type, const pmix_proc_t *procs,
+		 size_t nprocs)
 {
-	pmixp_coll_t *coll = NULL;
+	pmixp_coll_t *coll = NULL, *ret = NULL;
 	ListIterator it;
 
+	/* Walk through the list looking for the collective descriptor */
 	it = list_iterator_create(_pmixp_state.coll);
 	while( NULL != ( coll = list_next(it))){
-		if( coll->nranges != nranges ){
+		if( coll->nprocs != nprocs ){
 			continue;
 		}
 		if( coll->type != type ){
 			continue;
 		}
-		if( 0 == coll->nranges ){
-			return coll;
-		} if( _compare_ranges(coll->ranges, ranges, nranges) ){
-			return coll;
+		if( 0 == coll->nprocs ){
+			ret = coll;
+			goto exit;
+		} if( _compare_ranges(coll->procs, procs, nprocs) ){
+			ret = coll;
+			goto exit;
 		}
 	}
+exit:
 	list_iterator_destroy(it);
-	return NULL;
+	return ret;
 }
 
+pmixp_coll_t *
+pmixp_state_coll_get(pmixp_coll_type_t type, const pmix_proc_t *procs,
+		     size_t nprocs)
+{
+	pmixp_coll_t *ret = NULL;
 
+	/* Collectives are created once for each type and process set
+     * and resides till the end of jobstep lifetime.
+     * So in most cases we will find that collective is already
+     * exists.
+     * First we try to find collective in the list without locking. */
 
+	if( NULL != (ret = _find_collective(type, procs, nprocs))){
+		return ret;
+	}
 
+	/* if we failed to find the collective we most probably need
+     * to create a new structure. To do so we need to lo lock the
+     * whole state and try to search again to exclude situation where
+     * concurent thread already created it while we were doing the
+     * first search */
+
+	if( 0 != pmixp_coll_belong_chk(type, procs, nprocs)){
+		return NULL;
+	}
+
+	pthread_mutex_lock(&_pmixp_state.lock);
+
+	if( NULL == (ret = _find_collective(type, procs, nprocs))){
+		/* 1. Create and insert unitialized but locked coll
+	 * structure into the list. We can release the state
+	 * structure right after that */
+		ret = xmalloc( sizeof(*ret) );
+		/* initialize with unlocked list but locked element */
+		if( PMIX_SUCCESS != pmixp_coll_init(ret, procs, nprocs, type) ){
+			if( NULL != ret->procs ){
+				xfree(ret->procs);
+			}
+			xfree(ret);
+			ret = NULL;
+		} else {
+			list_append(_pmixp_state.coll, ret);
+		}
+		pthread_mutex_unlock(&_pmixp_state.lock);
+	} else {
+		pthread_mutex_unlock(&_pmixp_state.lock);
+	}
+
+	return ret;
+}

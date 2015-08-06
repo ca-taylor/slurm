@@ -46,9 +46,6 @@ static void _xfree_nspace(void *n)
 	xfree(nsptr->ntasks);
 	xfree(nsptr->task_map);
 	xfree(nsptr->task_map_packed);
-	xfree(nsptr->local_blobs);
-	xfree(nsptr->remote_blobs);
-	xfree(nsptr->global_blobs);
 	xfree(nsptr);
 }
 
@@ -70,18 +67,17 @@ int pmixp_nspaces_init()
 	task_cnts = pmixp_info_tasks_cnts();
 	task_map = pmixp_info_task_map();
 	hl = pmixp_info_step_hostlist();
-    // Initialize local namespace
+	// Initialize local namespace
 	rc = pmixp_nspaces_add(mynspace, nnodes, nodeid, ntasks,
-				   task_cnts, task_map, hostlist_copy(hl));
-    _pmixp_nspaces.local = pmixp_nspaces_find(mynspace);
+			       task_cnts, task_map, hostlist_copy(hl));
+	_pmixp_nspaces.local = pmixp_nspaces_find(mynspace);
 	return rc;
 }
 
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
-			 uint32_t ntasks, uint32_t *task_cnts,
-			 char *task_map_packed, hostlist_t hl)
+		      uint32_t ntasks, uint32_t *task_cnts,
+		      char *task_map_packed, hostlist_t hl)
 {
-	size_t size;
 	pmixp_namespace_t *nsptr = xmalloc(sizeof(pmixp_namespace_t));
 	int i;
 
@@ -106,20 +102,13 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 		return SLURM_ERROR;
 	}
 	nsptr->hl = hl;
-
-	/* prepare data storage */
-	size = sizeof(pmixp_blob_t) * ntasks;
-	nsptr->local_blobs = xmalloc(size);
-	nsptr->remote_blobs = xmalloc(size);
-	nsptr->global_blobs = xmalloc(size);
-	list_append(_pmixp_nspaces.nspaces, nsptr);
 	return SLURM_SUCCESS;
 }
 
 pmixp_namespace_t *pmixp_nspaces_local()
 {
-    xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC );
-    return _pmixp_nspaces.local;
+	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC );
+	return _pmixp_nspaces.local;
 }
 
 
@@ -142,8 +131,9 @@ exit:
 	return nsptr;
 }
 
-hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
-				  int *ranks, size_t nranks)
+hostlist_t
+pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
+		       const int *ranks, size_t nranks)
 {
 	hostlist_t hl = hostlist_create("");
 	int i;
@@ -158,119 +148,6 @@ hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
 	return hl;
 }
 
-int pmixp_nspace_add_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope,
-			  int taskid, void *blob, int size)
-{
-	pmixp_namespace_t *nsptr;
-	pmixp_blob_t *blob_ptr;
-
-	if( NULL == nsptr ){
-		PMIXP_DEBUG("Trying to add blob to unknown namespace %s", nspace);
-		return SLURM_ERROR;
-	}
-
-	xassert(nsptr->ntasks > taskid);
-
-	switch( scope ){
-	case PMIX_LOCAL:
-		blob_ptr = &nsptr->local_blobs[taskid];
-		break;
-	case PMIX_REMOTE:
-		blob_ptr = &nsptr->remote_blobs[taskid];
-		break;
-	case PMIX_GLOBAL:
-		blob_ptr = &nsptr->global_blobs[taskid];
-		break;
-	default:
-		PMIXP_ERROR_STD("Cannot add blob for %d scope",scope);
-		return SLURM_ERROR;
-	}
-
-	if( 0 < blob_ptr->blob_sz ){
-		// Should we merge db's here?
-		// by now just warn
-		PMIXP_DEBUG("Double blob submission for nspace=%s, taskid = %d",
-			   nspace, taskid);
-		xfree(blob_ptr->blob);
-		blob_ptr->blob = NULL;
-		blob_ptr->blob_sz = 0;
-	}
-	blob_ptr->blob_sz = size;
-	blob_ptr->blob = xmalloc(size);
-	memcpy(blob_ptr->blob, blob, size);
-	return SLURM_SUCCESS;
-}
-
-
-static void
-_add_modex_data(pmixp_namespace_t *nsptr, pmix_scope_t scope,
-			    int rank, List modex_data)
-{
-	pmixp_blob_t *blob_ptr;
-
-	xassert( rank < nsptr->ntasks );
-
-	switch( scope ){
-	case PMIX_LOCAL:
-		blob_ptr = &nsptr->local_blobs[rank];
-		break;
-	case PMIX_GLOBAL:
-		blob_ptr = &nsptr->global_blobs[rank];
-		break;
-	case PMIX_REMOTE:
-		blob_ptr = &nsptr->remote_blobs[rank];
-		break;
-	default:
-        xassert(0);
-	}
-
-	if( 0 < blob_ptr->blob_sz ){
-		pmixp_modex_t *m = xmalloc( sizeof(*m) );
-		m->data.blob = blob_ptr->blob;
-		m->data.size = blob_ptr->blob_sz;
-		m->data.rank = rank;
-		strcpy(m->data.nspace, nsptr->name);
-		m->scope = scope;
-		list_append(modex_data, m);
-	}
-}
-
-static int
-_nspace_modex_data(pmixp_namespace_t *nsptr, pmix_scope_t scope,
-		   List modex_data)
-{
-	int i;
-	for(i=0; i< nsptr->ntasks; i++){
-		if( _add_modex_data(nsptr, scope, i, modex_data) ){
-			return -1;
-		}
-	}
-	return 0;
-}
-
-int pmixp_nspace_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope, List l)
-{
-	pmixp_namespace_t *nsptr;
-
-	if( NULL == nsptr ){
-		return SLURM_ERROR;
-	}
-
-	if( _nspace_modex_data(nsptr, scope, l) ){
-		return SLURM_ERROR;
-	}
-	return SLURM_SUCCESS;
-}
-
-void pmixp_nspace_rank_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope,
-			   int rank, List l)
-{
-    xassert( NULL != nsptr );
-    xassert( nsptr->ntasks > rank );
-    _add_modex_data(nsptr, scope, rank, l);
-	return SLURM_SUCCESS;
-}
-
 char *pmixp_nspace_resolve(const char *name, int rank)
 {
 	pmixp_namespace_t *nsptr;
@@ -280,7 +157,7 @@ char *pmixp_nspace_resolve(const char *name, int rank)
 	ListIterator it = list_iterator_create(_pmixp_nspaces.nspaces);
 	while( NULL != (nsptr = list_next(it)) ){
 		xassert( nsptr->magic == PMIXP_NSPACE_MAGIC );
-		if( 0 == strcmp(nsptr->name, nspace) ){
+		if( 0 == strcmp(nsptr->name, name) ){
 			break;
 		}
 	}
@@ -295,55 +172,19 @@ char *pmixp_nspace_resolve(const char *name, int rank)
 
 size_t pmixp_nspace_mdx_lsize(List l)
 {
-    ListIterator it = list_iterator_create(l);
-    pmix_modex_data_t *data;
-    size_t ret = 0;
+	ListIterator it = list_iterator_create(l);
+	pmix_modex_data_t *data;
+	size_t ret = 0;
 
-    while( NULL != (data = list_next(it) ) ){
-        // we need to save:
-        // - rank (uint32_t)
-        // - scope (uint32_t)
-        // - size of the blob (uint32_t)
-        // - blob data (data->size)
-        ret += data->size + 3*sizeof(int);
-    }
-    list_iterator_destroy(it);
-    return ret;
+	while( NULL != (data = list_next(it) ) ){
+		// we need to save:
+		// - rank (uint32_t)
+		// - scope (uint32_t)
+		// - size of the blob (uint32_t)
+		// - blob data (data->size)
+		ret += data->size + 3*sizeof(int);
+	}
+	list_iterator_destroy(it);
+	return ret;
 }
 
-void pmixp_nspace_pack_modex(Buf buf, List modex_list)
-{
-    ListIterator it;
-    it = list_iterator_create(modex_list);
-    while( NULL != ( pmdx = list_next(it))){
-        uint32_t tmp;
-        // Make sure that we correctly allocate the buffer
-        xassert( remaining_buf(buf) >= (pmdx->data.size + 3*sizeof(int)) );
-        tmp = pmdx->data.rank;
-        pack32(tmp, buf);
-        tmp = pmdx->scope;
-        pack32(tmp, buf);
-        packmem((char*)pmdx->data.blob, (uint32_t)pmdx->data.size, buf);
-    }
-    list_iterator_destroy(it);
-}
-
-int pmixp_nspaces_push(Buf buf, char *nspace, int cnt)
-{
-    pmixp_namespace_t *nsptr = pmixp_nspaces_find(nspace);
-    for(i=0; i<cnt; i++){
-        uint32_t bsize = 0, scope;
-        uint32_t rank = 0;
-        char *blob = NULL;
-        if( SLURM_SUCCESS != (rc = unpack32(&rank,buf)) ){
-            return rc;
-        }
-        if( SLURM_SUCCESS != (rc = unpack32(&scope,buf)) ){
-            return rc;
-        }
-        if( SLURM_SUCCESS != (rc = unpackmem_ptr(&blob, &bsize, buf)) ){
-            return rc;
-        }
-        pmixp_nspace_add_blob(nsptr, scope, (int)rank, blob, bsize);
-    }
-}

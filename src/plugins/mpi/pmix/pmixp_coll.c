@@ -45,37 +45,29 @@
 static int _server_hdr_size = 0;
 
 static void _progress_fan_in(pmixp_coll_t *coll);
-static void _progress_fan_out(pmixp_coll_t *coll);
 static int _is_child_no(pmixp_coll_t *coll, int nodeid);
 
-
-int pmixp_coll_init(char ***env, uint32_t hdrsize)
+int pmixp_coll_fw_init(char ***env, uint32_t hdrsize)
 {
 	_server_hdr_size = hdrsize;
 	return SLURM_SUCCESS;
 }
 
 static int
-_hostset_from_ranges(const pmix_range_t *ranges, size_t nranges, hostlist_t *hl_out)
+_hostset_from_ranges(const pmix_proc_t *procs, size_t nprocs,
+		     hostlist_t *hl_out)
 {
 	int i;
 	hostlist_t hl = hostlist_create("");
 	pmixp_namespace_t *nsptr = NULL;
-	for(i=0; i<nranges; i++){
+	for(i=0; i<nprocs; i++){
 		char *node = NULL;
 		hostlist_t tmp;
-		nsptr = pmixp_nspaces_find(ranges[i].nspace);
+		nsptr = pmixp_nspaces_find(procs[i].nspace);
 		if( NULL == nsptr ){
 			goto err_exit;
 		}
-		if( 0 == ranges[i].nranks){
-			/* use all nodes in the namespace */
-			tmp = pmixp_nspace_hostlist(nsptr);
-		} else {
-			tmp = pmixp_nspace_rankhosts(nsptr, ranges[i].ranks,
-						     ranges[i].nranks);
-		}
-
+		tmp = pmixp_nspace_rankhosts(nsptr, &procs[i].rank, 1);
 		while( NULL != (node = hostlist_pop(tmp)) ){
 			hostlist_push(hl, node);
 			free(node);
@@ -110,8 +102,8 @@ static void _adjust_data_size(pmixp_coll_t *coll, size_t size)
 
 static int _pack_ranges(pmixp_coll_t *coll)
 {
-	pmix_range_t *ranges = coll->ranges;
-	size_t nranges = coll->nranges;
+	pmix_proc_t *procs = coll->procs;
+	size_t nprocs = coll->nprocs;
 	Buf buf;
 	uint32_t size = _server_hdr_size + 2*sizeof(uint32_t);
 	int i;
@@ -123,42 +115,37 @@ static int _pack_ranges(pmixp_coll_t *coll)
 	// 1. store the type of collective
 	size = coll->type;
 	pack32(size,buf);
+
 	// 2. Put the number of ranges
-	pack32(nranges, buf);
-	for(i=0; i< (int)nranges; i++){
-		uint32_t *ranks_tmp = NULL;
-		int j;
+	pack32(nprocs, buf);
+	for(i=0; i< (int)nprocs; i++){
 		// Count cumulative size
 		size = 0;
-		size += strlen(ranges->nspace) + sizeof(uint32_t);
-		size += ranges->nranks * sizeof(int) + sizeof(uint32_t);
+		size += strlen(procs->nspace) + sizeof(uint32_t);
+		size += sizeof(uint32_t);
 		grow_buf(buf, size);
 		// Pack namespace
-		packmem(ranges->nspace, strlen(ranges->nspace), buf);
-		// Pack ranks (with tmp array for type conversion)
-		// TODO: can this be done better?
-		ranks_tmp = xmalloc(ranges->nranks * sizeof(uint32_t));
-		for(j=0; j<ranges->nranks; j++){
-			ranks_tmp[j] = (uint32_t)ranges->ranks[j];
-		}
-		pack32_array(ranks_tmp, ranges->nranks, buf);
-		xfree(ranks_tmp);
+		packmem(procs->nspace, strlen(procs->nspace), buf);
+		pack32(procs->rank, buf);
 	}
+
 	coll->data = buf->head;
 	coll->data_sz = size_buf(buf);
 	coll->data_pay = get_buf_offset(buf);
+
 	/* free buffer protecting data */
 	buf->head = NULL;
 	free_buf(buf);
+
 	return SLURM_SUCCESS;
 }
 
 int pmixp_coll_unpack_ranges(void *data, size_t size,
-			       pmixp_coll_type_t *type,
-			       pmix_range_t **r, size_t *nr)
+			     pmixp_coll_type_t *type,
+			     pmix_proc_t **r, size_t *nr)
 {
-	pmix_range_t *ranges = NULL;
-	uint32_t nranges = 0;
+	pmix_proc_t *procs = NULL;
+	uint32_t nprocs = 0;
 	Buf buf;
 	uint32_t tmp;
 	int i, rc;
@@ -167,50 +154,40 @@ int pmixp_coll_unpack_ranges(void *data, size_t size,
 
 	buf = create_buf(data, size);
 
-	// 1. store the type of collective
+	// 1. extract the type of collective
 	if( SLURM_SUCCESS != ( rc = unpack32(&tmp, buf))){
 		PMIXP_ERROR("Cannot unpack collective type");
 		return rc;
 	}
 	*type = tmp;
 
-	// 2. Put the number of ranges
-	if( SLURM_SUCCESS != ( rc = unpack32(&nranges, buf))){
+	// 2. get the number of ranges
+	if( SLURM_SUCCESS != ( rc = unpack32(&nprocs, buf))){
 		PMIXP_ERROR("Cannot unpack collective type");
 		return rc;
 	}
-	*nr = nranges;
+	*nr = nprocs;
 
-	ranges = xmalloc(sizeof(pmix_range_t) * (nranges));
-	*r = ranges;
+	procs = xmalloc(sizeof(pmix_proc_t) * (nprocs));
+	*r = procs;
 
-	for(i=0; i< (int)nranges; i++){
-		uint32_t *ranks_tmp = NULL;
-		uint32_t nranks_tmp;
-		int j;
-		// 2. Put the number of ranges
-		rc = unpackmem(ranges[i].nspace, &tmp, buf);
+	for(i=0; i< (int)nprocs; i++){
+		// 3. get namespace/rank of particular process
+		rc = unpackmem(procs[i].nspace, &tmp, buf);
 		if( SLURM_SUCCESS != rc ){
-			PMIXP_ERROR("Cannot unpack namespace for range #%d", i);
+			PMIXP_ERROR("Cannot unpack namespace for process #%d", i);
 			return rc;
 		}
-		ranges[i].nspace[tmp] = '\0';
+		procs[i].nspace[tmp] = '\0';
 
-		rc = unpack32_array(&ranks_tmp, &nranks_tmp, buf);
+		unsigned int tmp;
+		rc = unpack32(&tmp, buf);
+		procs[i].rank = tmp;
 		if( SLURM_SUCCESS != rc ){
-			PMIXP_ERROR("Cannot unpack ranks for range #%d, nsp=%s",
-				    i, ranges[i].nspace);
+			PMIXP_ERROR("Cannot unpack ranks for process #%d, nsp=%s",
+				    i, procs[i].nspace);
 			return rc;
 		}
-		ranges[i].nranks = nranks_tmp;
-		ranges[i].ranks = NULL;
-		if( 0 < nranks_tmp ){
-			ranges[i].ranks = xmalloc_nz(sizeof(int)*nranks_tmp);
-			for(j=0; j<nranks_tmp; j++){
-				ranges[i].ranks[j] = ranks_tmp[j];
-			}
-		}
-		xfree(ranks_tmp);
 	}
 	rc = get_buf_offset(buf);
 	buf->head = NULL;
@@ -218,45 +195,49 @@ int pmixp_coll_unpack_ranges(void *data, size_t size,
 	return rc;
 }
 
+int pmixp_coll_belong_chk(pmixp_coll_type_t type, const pmix_proc_t *procs,
+			  size_t nprocs)
+{
+	int i;
+	pmixp_namespace_t *nsptr = pmixp_nspaces_local();
+	// Find my namespace in the range
+	for(i=0; i < nprocs; i++){
+		if( 0 != strcmp(procs[i].nspace, nsptr->name) ){
+			continue;
+		}
+		if( 0 <= pmixp_info_taskid2localid(procs[i].rank) ){
+			return 0;
+		}
+	}
+	// we don't participate in this collective!
+	PMIXP_ERROR("Have collective that doesn't include this job's namespace");
+	return -1;
+}
+
+
 /*
  * Based on ideas provided by Hongjia Cao <hjcao@nudt.edu.cn> in PMI2 plugin
  */
-pmixp_coll_t *pmixp_coll_new(const pmix_range_t *ranges, size_t nranges,
-			     pmixp_coll_type_t type)
+int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs, size_t nprocs,
+		    pmixp_coll_type_t type)
 {
-	pmixp_coll_t *coll;
 	hostlist_t hl;
 	uint32_t nodeid = 0, nodes = 0;
 	int parent_id, depth, max_depth, tmp;
-	int width, i;
-	int my_nspace = -1;
+	int width, my_nspace = -1;
 	char *p;
 
-	// Find my namespace in the range
-	for(i=0; i< nranges; i++){
-		if( 0 == strcmp(ranges[i].nspace, pmixp_info_namespace()) ){
-			my_nspace = i;
-			break;
-		}
-	}
-	if( 0 > my_nspace ){
-		// we don't participate in this collective!
-		PMIXP_ERROR("Have collective that doesn't include this job's namespace");
-		return NULL;
-	}
-
-	coll = xmalloc( sizeof(*coll) );
 #ifndef NDEBUG
 	coll->magic = PMIXP_COLL_STATE_MAGIC;
 #endif
 	coll->type = type;
 	coll->state = PMIXP_COLL_SYNC;
-	coll->ranges = xmalloc( sizeof(*ranges) * nranges);
-	memcpy(coll->ranges, ranges, sizeof(*ranges) * nranges);
-	coll->nranges = nranges;
+	coll->procs = xmalloc( sizeof(*procs) * nprocs);
+	memcpy(coll->procs, procs, sizeof(*procs) * nprocs);
+	coll->nprocs = nprocs;
 	coll->my_nspace = my_nspace;
 
-	if( SLURM_SUCCESS != _hostset_from_ranges(ranges, nranges, &hl) ){
+	if( SLURM_SUCCESS != _hostset_from_ranges(procs, nprocs, &hl) ){
 		// TODO: provide ranges output routine
 		PMIXP_ERROR("Bad ranges information");
 		goto err_exit;
@@ -266,19 +247,18 @@ pmixp_coll_t *pmixp_coll_new(const pmix_range_t *ranges, size_t nranges,
 	nodes = hostlist_count(hl);
 	nodeid = hostlist_find(hl,pmixp_info_hostname());
 	reverse_tree_info(nodeid, nodes, width, &parent_id, &tmp,
-					  &depth, &max_depth);
+			  &depth, &max_depth);
 	coll->children_cnt = tmp;
 	coll->nodeid = nodeid;
 
 	// We interested in amount of direct childs
 	coll->seq = 0;
-	coll->rcvframe_no = 0;
-	coll->local_ok = false;
 	coll->contrib_cntr = 0;
+	coll->contrib_local = false;
 	coll->ch_nodeids = xmalloc( sizeof(int) * width );
 	coll->ch_contribs = xmalloc( sizeof(int) * width );
 	coll->children_cnt = reverse_tree_direct_children(nodeid, nodes, width,
-						 depth, coll->ch_nodeids);
+							  depth, coll->ch_nodeids);
 
 	if( parent_id == -1 ){
 		coll->parent_host = NULL;
@@ -301,144 +281,44 @@ pmixp_coll_t *pmixp_coll_new(const pmix_range_t *ranges, size_t nranges,
 	/* Callback information */
 	coll->cbdata = NULL;
 	coll->cbfunc = NULL;
-	return coll;
-err_exit:
-	if( NULL != coll->ranges ){
-		xfree(coll->ranges);
-	}
-	xfree(coll);
-	return NULL;
-}
 
-static int _collect_range(pmix_range_t *range, pmix_scope_t scope, List l)
-{
-	int rc;
-	pmixp_namespace_t *nsptr;
-	nsptr = pmixp_nspaces_find(range->nspace);
-	if( NULL == nsptr ){
-		PMIXP_ERROR("Cannot find namespace %s", range->nspace);
-		return SLURM_ERROR;
-	}
-	if( 0 == range->nranks ){
-		rc = pmixp_nspace_blob(range->nspace, scope, l);
-		if( SLURM_SUCCESS != rc ){
-			PMIXP_ERROR("Cannot get blob from nsp=%s, scope=%d",
-				    range->nspace, scope);
-			return SLURM_ERROR;
-		}
-	} else {
-		int j;
-        pmixp_namespace_t *nsptr = pmixp_nspaces_find(range->nspace);
-        if( NULL == nsptr ){
-            PMIXP_ERROR("Cannot find namespace %s", range->nspace);
-            return SLURM_ERROR;
-        }
-		for(j=0; j<range->nranks; j++){
-			int rank = range->ranks[j];
-            pmixp_nspace_rank_blob(nsptr, scope, rank, l);
-		}
-	}
+	/* init fine grained lock */
+	pthread_mutexattr_t attr;
+	pthread_mutexattr_init(&attr);
+	pthread_mutex_init(&coll->lock, &attr);
+	pthread_mutexattr_destroy(&attr);
+
 	return SLURM_SUCCESS;
+err_exit:
+	return SLURM_ERROR;
 }
 
-/* extract only local ranks for modex submission */
-static void
-_fill_local_ranks(pmix_range_t *glob, pmix_range_t *loc)
+int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 {
-	int i;
-	strcpy(loc->nspace, glob->nspace);
-	loc->ranks = xmalloc(sizeof(int) * pmixp_info_tasks_loc());
-	loc->nranks = 0;
-	if( 0 < glob->nranks ){
-		/* selected ranks */
-		for(i=0; i < glob->nranks; i++ ){
-			int j;
-			for(j=0; j<pmixp_info_tasks_loc();j++){
-				if( glob->ranks[i] == pmixp_info_taskid(j) ){
-					loc->ranks[loc->nranks++] = glob->ranks[i];
-				}
-			}
-		}
-	} else {
-		int j;
-		/* all ranks */
-		for(j=0; j < pmixp_info_tasks_loc(); j++ ){
-			loc->ranks[loc->nranks++]  = pmixp_info_taskid(j);
-		}
-	}
-}
-
-int pmixp_coll_contrib_loc(pmixp_coll_t *coll, int collect_data)
-{
-	List modex_list;
-	ListIterator it;
-	pmixp_modex_t *pmdx;
-	size_t size, modex_size;
-	Buf buf;
-	int rc;
-	pmix_range_t range, *mynsp = NULL;
-
 	/* sanity check */
 	pmixp_coll_sanity_check(coll);
+
+	/* lock the structure */
+	pthread_mutex_lock(&coll->lock);
+
+	/* change the collective state if need */
 	if( PMIXP_COLL_SYNC == coll->state ){
 		coll->state = PMIXP_COLL_FAN_IN;
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
-	/* Check that mynamespace is set correctly */
-	xassert(coll->my_nspace < coll->nranges );
-	mynsp = &coll->ranges[coll->my_nspace];
-	xassert( 0 == strcmp(mynsp->nspace, pmixp_info_namespace()) );
+	_adjust_data_size(coll, size);
+	coll->data_pay += size;
+	memcpy(coll->data + coll->data_pay, data, size);
+	coll->contrib_local = true;
 
-	if( !collect_data ){
-		/* If we don't collect the data - we just
-		 * put 0 as contribution count */
-		size = sizeof(uint32_t);
-		_adjust_data_size(coll, size);
-		buf = create_buf(coll->data + coll->data_pay, coll->data_sz - coll->data_pay);
-		pack32(0, buf);
-	} else {
-		/* user wants to collect the data */
-		modex_list = list_create(pmixp_xfree_buffer);
+	/* unlock the structure */
+	pthread_mutex_unlock(&coll->lock);
 
-		_fill_local_ranks(mynsp, &range);
-
-		if( SLURM_SUCCESS != (rc = _collect_range(&range,PMIX_GLOBAL, modex_list) ) ){
-			goto err_exit;
-		}
-		if( SLURM_SUCCESS != (rc = _collect_range(&range,PMIX_REMOTE, modex_list) ) ){
-			goto err_exit;
-		}
-
-		// Reserve the space for namespace and it's size
-		size = strlen(range.nspace) + sizeof(uint32_t);
-		// Reserve the space for modex count and size
-		size += 2*sizeof(uint32_t);
-		// Account the datasize
-        modex_size = pmixp_nspace_mdx_lsize(modex_list);
-		size += modex_size;
-
-		_adjust_data_size(coll, size);
-
-		buf = create_buf(coll->data + coll->data_pay, coll->data_sz - coll->data_pay);
-        /* Save modex size & count*/
-        pack32(list_count(modex_list), buf);
-        packmem(range.nspace,strlen(range.nspace),buf);
-        pack32(modex_size, buf);
-        pmixp_nspaces_pack_modex(buf,modex_list);
-        list_destroy(modex_list);
-    }
-	coll->data_pay += get_buf_offset(buf);
-	// Protect data and free the buffer
-	buf->head = NULL;
-	free_buf(buf);
-
-	coll->local_ok = true;
+	/* check if the collective is ready to progress */
 	_progress_fan_in(coll);
+
 	return SLURM_SUCCESS;
-err_exit:
-	list_destroy(modex_list);
-	return SLURM_ERROR;
 }
 
 int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
@@ -448,17 +328,22 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 	int nodeid;
 
 	pmixp_coll_sanity_check(coll);
+
+	/* lock the structure */
+	pthread_mutex_lock(&coll->lock);
+
+	/* fix the collective status if need */
 	if( PMIXP_COLL_SYNC == coll->state ){
 		coll->state = PMIXP_COLL_FAN_IN;
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
-	/* Because of possible timeouts/delays in transmission we theoretically
-	 * can receive a contribution second time. Avoid applying it by checking
-	 * our records. */
+	/* Because of possible timeouts/delays in transmission we
+     * can receive a contribution second time. Avoid duplications
+     * by checking our records. */
 	nodeid = hostlist_find(coll->all_children, nodename);
 	idx = _is_child_no(coll, nodeid);
-	xassert(0 <= idx );
+	xassert( 0 <= idx );
 	if( 0 < coll->ch_contribs[idx]){
 		/* shouldn't be grater than 1! */
 		xassert(1 == coll->ch_contribs[idx]);
@@ -466,13 +351,9 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 		return SLURM_SUCCESS;
 	}
 
-	/* Copy data ONLY if we collect data, otherwise we
-	 * will have only one uint32_t cell with 0 in it */
-	if( sizeof(uint32_t) < size ){
-		_adjust_data_size(coll, size);
-		memcpy(coll->data + coll->data_pay, contrib, size);
-		coll->data_pay += size;
-	}
+	_adjust_data_size(coll, size);
+	memcpy(coll->data + coll->data_pay, contrib, size);
+	coll->data_pay += size;
 
 	/* increase number of individual contributions */
 	coll->ch_contribs[idx]++;
@@ -480,122 +361,15 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 	/* increase number of total contributions */
 	coll->contrib_cntr++;
 
+	/* unlock the structure */
+	pthread_mutex_unlock(&coll->lock);
+
 	/* make a progress */
 	_progress_fan_in(coll);
 
 	return SLURM_SUCCESS;
 }
 
-#define _move_and_free(data, size, buf)		\
-{						\
-	uint32_t offset = get_buf_offset(buf);	\
-	data += offset;			\
-	size -= offset;				\
-	buf->head = NULL;			\
-	free_buf(buf);				\
-}
-
-static int _push_into_db(void *data, size_t size)
-{
-	Buf buf;
-	int rc;
-
-	if( sizeof(uint32_t) >= size ){
-		return SLURM_SUCCESS;
-	}
-
-	while( 0 < size ){
-		pmixp_namespace_t *nsptr;
-		char nspace[PMIX_MAX_NSLEN];
-		uint32_t cnt, tmp, size_estim;
-		int i;
-
-		/* There might be up to PMIX_MAX_NSLEN symbols in
-		 * namespace, sizeof(int) size of namespace
-		 * and 2 parameters */
-		size_estim = PMIX_MAX_NSLEN + 3*sizeof(uint32_t);
-		size_estim = size_estim < size ? size_estim : size;
-		buf = create_buf(data, size_estim);
-
-		if( SLURM_SUCCESS != (rc = unpack32(&cnt,buf)) ){
-			return rc;
-		}
-
-		if( SLURM_SUCCESS != ( rc = unpackmem(nspace,&tmp,buf) ) ){
-			return rc;
-		}
-		nspace[tmp] = '\0';
-
-
-		if( SLURM_SUCCESS != (rc = unpack32(&size_estim,buf)) ){
-			return rc;
-		}
-		_move_and_free(data, size, buf);
-
-		if( NULL == (nsptr = pmixp_nspaces_find(nspace) ) ){
-			PMIXP_ERROR("Unknown namespace %s", nspace);
-			return SLURM_ERROR;
-		}
-
-		buf = create_buf(data, size_estim);
-        pmixp_nspaces_push(buf, nspace, cnt);
-		_move_and_free(data, size, buf);
-	}
-	return SLURM_SUCCESS;
-}
-
-static int _reply_to_libpmix(pmixp_coll_t *coll)
-{
-	int i;
-	List modex_list;
-	ListIterator it;
-	pmix_modex_data_t *mdx = NULL;
-	pmixp_modex_t *pmdx;
-	size_t size = 0;
-	int rc;
-
-	if( PMIXP_COLL_TYPE_FENCE_EMPT == coll->type ){
-		goto ok_exit;
-	}
-
-	modex_list = list_create(pmixp_xfree_buffer);
-
-	for( i=0; i < coll->nranges; i++)
-	{
-		pmix_range_t *range = &coll->ranges[i];
-
-		if( SLURM_SUCCESS != (rc = _collect_range(range,PMIX_LOCAL, modex_list) ) ){
-			goto err_exit;
-		}
-		if( SLURM_SUCCESS != (rc = _collect_range(range,PMIX_GLOBAL, modex_list) ) ){
-			goto err_exit;
-		}
-		if( SLURM_SUCCESS != (rc = _collect_range(range,PMIX_REMOTE, modex_list) ) ){
-			goto err_exit;
-		}
-	}
-	size = list_count(modex_list);
-	mdx = malloc(sizeof(pmix_modex_data_t) * size);
-	it = list_iterator_create(modex_list);
-	for(i=0; i<size; i++){
-		pmdx = list_next(it);
-		mdx[i] = pmdx->data;
-	}
-	list_iterator_destroy(it);
-	list_destroy(modex_list);
-
-ok_exit:
-	if( NULL != coll->cbfunc ){
-		coll->cbfunc(PMIX_SUCCESS, mdx, size, coll->cbdata);
-	}
-	return SLURM_SUCCESS;
-err_exit:
-	list_destroy(modex_list);
-	coll->cbfunc(PMIX_ERROR, NULL, 0, coll->cbdata);
-	return SLURM_ERROR;
-}
-
-#ifndef NDEBUG
 static int _is_child_no(pmixp_coll_t *coll, int nodeid)
 {
 	// Check for initialization
@@ -608,7 +382,6 @@ static int _is_child_no(pmixp_coll_t *coll, int nodeid)
 	}
 	return -1;
 }
-#endif
 
 void _progress_fan_in(pmixp_coll_t *coll)
 {
@@ -618,16 +391,23 @@ void _progress_fan_in(pmixp_coll_t *coll)
 	int rc;
 
 	pmixp_coll_sanity_check(coll);
-	xassert( PMIXP_COLL_FAN_IN == coll->state );
 
-	if( !coll->local_ok || (coll->contrib_cntr != coll->children_cnt) ){
-		// Nothing to do.
-		return;
+	/* lock the */
+	pthread_mutex_lock(&coll->lock);
+
+	if( PMIXP_COLL_FAN_IN != coll->state ){
+		/* In case of race condition between libpmix and
+	 * slurm threads progress_fan_in can be called
+	 * after we moved to the next step. */
+		goto exit;
 	}
 
-	// The root of the collective will have parent_host == NULL
-	// TODO: in future root might need to exchange with other root's
-	// (in case of multiple namespace collective)
+	if( !coll->contrib_local || coll->contrib_cntr != coll->children_cnt ){
+		/* Not yet ready to go to the next step */
+		goto exit;
+	}
+
+	/* The root of the collective will have parent_host == NULL */
 	if( NULL != coll->parent_host ){
 		hostlist = xstrdup(coll->parent_host);
 		type = PMIXP_MSG_FAN_IN;
@@ -637,7 +417,7 @@ void _progress_fan_in(pmixp_coll_t *coll)
 	}
 
 	rc = pmixp_server_send(hostlist, type, coll->seq, addr,
-				     coll->data, coll->data_pay);
+			       coll->data, coll->data_pay);
 	xfree(hostlist);
 
 	if( SLURM_SUCCESS != rc ){
@@ -652,35 +432,33 @@ void _progress_fan_in(pmixp_coll_t *coll)
 	xfree(coll->data);
 	coll->data = NULL;
 	coll->data_pay = coll->data_sz = 0;
+
+exit:
+	/* lock the */
+	pthread_mutex_unlock(&coll->lock);
 }
 
-void _progress_fan_out(pmixp_coll_t *coll)
+void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
+			     uint32_t size)
 {
 	pmixp_coll_sanity_check(coll);
+
 	xassert( PMIXP_COLL_FAN_OUT == coll->state );
 
+	/* lock the structure */
+	pthread_mutex_lock(&coll->lock);
+
 	// update the database
-	_push_into_db(coll->data, coll->data_pay);
-	_reply_to_libpmix(coll);
+	if( NULL != coll->cbfunc ){
+		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata);
+	}
 
 	// Prepare for the next collective operation
 	coll->state = PMIXP_COLL_SYNC;
 	memset(coll->ch_contribs, 0, sizeof(int) * coll->children_cnt);
 	coll->seq++; /* move to the next collective */
 	coll->contrib_cntr = 0;
-	coll->local_ok = false;
-	// WARRNING: At fan-out stage we are working with data
-	// in message directly. It will be freed elsewhere!
-	// ! NO xfree(coll->data);
-	coll->data = NULL;
-	coll->data_pay = coll->data_sz = 0;
 
-}
-
-void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
-				uint32_t size)
-{
-	coll->data = data;
-	coll->data_sz = coll->data_pay = (size_t)size;
-	_progress_fan_out(coll);
+	/* lock the structure */
+	pthread_mutex_lock(&coll->lock);
 }

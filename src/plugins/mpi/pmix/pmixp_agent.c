@@ -36,8 +36,10 @@
 \*****************************************************************************/
 
 #include <pthread.h>
+#include <sched.h>
 #include <poll.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 #include "pmixp_common.h"
 #include "pmixp_server.h"
@@ -49,27 +51,17 @@
 
 #define MAX_RETRIES 5
 
-static pthread_t pmix_agent_tid = 0;
-static eio_handle_t *pmix_io_handle = NULL;
+static pthread_t _agent_tid = 0;
+static int _agent_is_running = 0;
+static eio_handle_t *_io_handle = NULL;
 
 static bool _server_conn_readable(eio_obj_t *obj);
 static int  _server_conn_read(eio_obj_t *obj, List objs);
 
 static struct io_operations srv_ops = {
 	.readable    = &_server_conn_readable,
-	.handle_read = &_server_conn_read,
+	.handle_read = &_server_conn_read
 };
-
-
-static bool _cli_conn_readable(eio_obj_t *obj);
-static int  _cli_conn_read(eio_obj_t *obj, List objs);
-/* static bool _task_writable(eio_obj_t *obj); */
-/* static int  _task_write(eio_obj_t *obj, List objs); */
-static struct io_operations cli_ops = {
-	.readable    =  &_cli_conn_readable,
-	.handle_read =  &_cli_conn_read,
-};
-
 
 static bool _server_conn_readable(eio_obj_t *obj)
 {
@@ -127,98 +119,39 @@ _server_conn_read(eio_obj_t *obj, List objs)
 	return 0;
 }
 
-// Client request processing
-static bool _cli_conn_readable(eio_obj_t *obj)
-{
-	// FIXME: What should we do in addition?
-	PMIXP_DEBUG("fd = %d", obj->fd);
-	if (obj->shutdown == true) {
-		if (obj->fd != -1) {
-			close(obj->fd);
-			obj->fd = -1;
-		}
-		PMIXP_DEBUG("    false, shutdown");
-		return false;
-	}
-	return true;
-}
-
-static int _cli_conn_read(eio_obj_t *obj, List objs)
-{
-	int fd;
-	int shutdown;
-
-	PMIXP_DEBUG("fd = %d", obj->fd);
-
-	while (1) {
-		// Return early if fd is not now ready
-		if (!pmixp_fd_read_ready(obj->fd, &shutdown)){
-			// The error occurs or fd was closed
-			if( shutdown < 0 ){
-				obj->shutdown = true;
-				PMIXP_ERROR(-shutdown, "sd=%d failure", obj->fd);
-			}
-			return 0;
-		}
-
-		while ((fd = accept(obj->fd, NULL, 0)) < 0) {
-			if (errno == EINTR)
-				continue;
-			if (errno == EAGAIN)    /* No more connections */
-				return 0;
-			if ((errno == ECONNABORTED) ||
-					(errno == EWOULDBLOCK)) {
-				return 0;
-			}
-			PMIXP_ERROR_STD("unable to accept new connection");
-			return 0;
-		}
-
-		/* read command from socket and handle it */
-		pmix_client_new_conn(fd);
-	}
-	return 0;
-}
-
-
 /*
  * main loop of agent thread
  */
 static void *_agent(void * unused)
 {
 	PMIXP_DEBUG("Start agent thread");
-	eio_obj_t *srv_obj, *cli_obj;
+	eio_obj_t *srv_obj;
 
-	pmix_io_handle = eio_handle_create(0);
-
+	_io_handle = eio_handle_create(0);
 
 	srv_obj = eio_obj_create(pmixp_info_srv_fd(), &srv_ops, (void *)(-1));
-	eio_new_initial_obj(pmix_io_handle, srv_obj);
+	eio_new_initial_obj(_io_handle, srv_obj);
 
-	/* for stepd, add the sockets to tasks */
-	cli_obj = eio_obj_create(pmix_info_cli_fd(), &cli_ops, (void*)(long)(-1));
-	eio_new_initial_obj(pmix_io_handle, cli_obj);
+	pmixp_info_io_set(_io_handle);
 
-	pmixp_info_io_set(pmix_io_handle);
-
-	eio_handle_mainloop(pmix_io_handle);
+	_agent_is_running = 1;
+	eio_handle_mainloop(_io_handle);
+	_agent_is_running = 0;
 
 	PMIXP_DEBUG("agent thread exit");
 
-	//pmix_state_destroy();
-	eio_handle_destroy(pmix_io_handle);
+	eio_handle_destroy(_io_handle);
 	return NULL;
 }
-
 
 int pmix_agent_start(void)
 {
 	int retries = 0;
 	pthread_attr_t attr;
 
-	pthread_attr_init(&attr);
+	slurm_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&pmix_agent_tid, &attr, _agent, NULL))) {
+	while ((errno = pthread_create(&_agent_tid, &attr, _agent, NULL))) {
 		if (++retries > MAX_RETRIES) {
 			PMIXP_ERROR_STD("pthread_create error");
 			slurm_attr_destroy(&attr);
@@ -227,13 +160,23 @@ int pmix_agent_start(void)
 		sleep(1);
 	}
 	slurm_attr_destroy(&attr);
-	PMIXP_DEBUG("started agent thread (%lu)", (unsigned long) pmix_agent_tid);
+
+	/* wait for the agent thread to initialize */
+	while( !_agent_is_running ){
+		sched_yield();
+	}
+
+	PMIXP_DEBUG("started agent thread (%lu)", (unsigned long) _agent_tid);
 
 	return SLURM_SUCCESS;
 }
 
-void pmix_agent_task_cleanup()
+int pmix_agent_stop(void)
 {
-	close(pmix_info_cli_fd());
-	close(pmixp_info_srv_fd());
+	eio_signal_shutdown(_io_handle);
+	/* wait for the agent thread to stop */
+	while( _agent_is_running ){
+		sched_yield();
+	}
+	return 0;
 }

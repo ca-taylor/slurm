@@ -45,29 +45,6 @@
 #include "pmixp_dmdx.h"
 
 /*
- * Client state structure
- */
-
-typedef enum { PMIXP_CLI_UNCONNECTED, PMIXP_CLI_OPERATE } pmix_cli_state_name_t;
-
-typedef struct {
-#ifndef NDEBUG
-#       define PMIXP_CLIENT_STATE_MAGIC 0xFEEDFACE
-	int  magic;
-#endif
-	pmix_cli_state_name_t state;
-	uint32_t localid;
-	// TODO: To support clones on one rank need variable-size
-	// array of I/O engines here in future
-	pmixp_io_engine_t eng;
-} pmixp_cli_state_t;
-
-/*
- * Collective state structure
- */
-
-
-/*
  * PMIx plugin state structure
  */
 
@@ -76,10 +53,9 @@ typedef struct {
 #       define PMIX_STATE_MAGIC 0xFEEDCAFE
 	int  magic;
 #endif
-	uint32_t cli_size;
-	pmixp_cli_state_t *cli_state;
 	List coll;
-	eio_handle_t *cli_handle, *srv_handle;
+	eio_handle_t *srv_handle;
+	pthread_mutex_t lock;
 } pmixp_state_t;
 
 extern pmixp_state_t _pmixp_state;
@@ -96,76 +72,15 @@ inline static void pmixp_state_sanity_check()
 	xassert( _pmixp_state.magic == PMIX_STATE_MAGIC );
 }
 
-inline static uint32_t pmixp_state_cli_count()
-{
-	pmixp_state_sanity_check();
-	return _pmixp_state.cli_size;
-}
-
-/*
- * Client state manipulation functions
- */
-
-inline static void pmixp_state_cli_sanity_check(uint32_t localid)
-{
-	pmixp_state_sanity_check();
-	xassert( localid < _pmixp_state.cli_size);
-	xassert( _pmixp_state.cli_state[localid].magic == PMIXP_CLIENT_STATE_MAGIC );
-}
-
-inline static int pmixp_state_cli_connected(int localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	pmixp_cli_state_t *cli = &_pmixp_state.cli_state[localid];
-	xassert( cli->state == PMIXP_CLI_UNCONNECTED );
-	cli->state = PMIXP_CLI_OPERATE;
-	return SLURM_SUCCESS;
-}
-
-inline static int pmixp_state_cli_disconnected(int localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	pmixp_cli_state_t *cli = &_pmixp_state.cli_state[localid];
-	xassert( cli->state == PMIXP_CLI_OPERATE );
-	cli->state = PMIXP_CLI_UNCONNECTED;
-	return SLURM_SUCCESS;
-}
-
-inline static pmixp_cli_state_t *
-pmixp_state_cli(uint32_t localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	pmixp_cli_state_t *cli = &_pmixp_state.cli_state[localid];
-	return cli;
-}
-
-inline static pmixp_io_engine_t *
-pmixp_state_cli_io(int localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	pmixp_cli_state_t *cli = pmixp_state_cli(localid);
-	xassert( cli->state == PMIXP_CLI_OPERATE );
-	return &cli->eng;
-}
-
-inline static int pmixp_state_cli_fd(int localid)
-{
-	pmixp_state_cli_sanity_check(localid);
-	pmixp_cli_state_t *cli = pmixp_state_cli(localid);
-	xassert( cli->state == PMIXP_CLI_OPERATE );
-	return cli->eng.sd;
-}
-
-
 /*
  * Collective state
  */
 
 pmixp_coll_t *
-pmixp_state_coll_find(pmixp_coll_type_t type, const pmix_range_t *ranges,
-		      size_t nranges);
+pmixp_state_coll_get(pmixp_coll_type_t type, const pmix_proc_t *ranges,
+		     size_t nranges);
 pmixp_coll_t *
-pmixp_state_coll_new(pmixp_coll_type_t type, const pmix_range_t *ranges,
+pmixp_state_coll_new(pmixp_coll_type_t type, const pmix_proc_t *ranges,
 		     size_t nranges);
 
 #endif // PMIXP_STATE_H

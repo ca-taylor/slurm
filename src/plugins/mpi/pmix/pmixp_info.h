@@ -71,11 +71,6 @@ typedef struct {
 
 extern pmix_jobinfo_t _pmixp_job_info;
 
-// Client contact information
-void pmixp_info_cli_contacts(int fd);
-const char *pmix_info_cli_addr();
-int pmix_info_cli_fd();
-
 // slurmd contact information
 void pmixp_info_srv_contacts(char *path, int fd);
 const char *pmixp_info_srv_addr();
@@ -94,6 +89,7 @@ eio_handle_t *pmixp_info_io();
 
 // Job information
 int pmixp_info_set(const stepd_step_rec_t *job, char ***env);
+int pmixp_info_free();
 
 inline static uint32_t pmixp_info_jobid(){
 	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
@@ -224,13 +220,13 @@ pmixp_info_job_host(int nodeid){
 /* namespaces list operations */
 inline static char *pmixp_info_nspace_usock(char *nspace)
 {
-    char *usock = NULL;
-    char *tmpdir = getenv("TMPDIR");
-    if( NULL == tmpdir ){
-        tmpdir = PMIXP_TMPDIR;
-    }
-    xstrfmtcat(usock,"%s/sock.stepd.%s",tmpdir, nspace);
-    return usock;
+	char *usock = NULL;
+	char *tmpdir = getenv("TMPDIR");
+	if( NULL == tmpdir ){
+		tmpdir = PMIXP_TMPDIR;
+	}
+	xstrfmtcat(usock,"%s/sock.stepd.%s",tmpdir, nspace);
+	return usock;
 }
 
 #endif // PMIXP_INFO_H

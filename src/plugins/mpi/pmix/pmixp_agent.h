@@ -41,6 +41,6 @@
 #include "pmixp_common.h"
 
 int pmix_agent_start(void);
-void pmix_agent_task_cleanup();
+int pmix_agent_stop(void);
 
 #endif // PMIXP_AGENT_H

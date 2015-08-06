@@ -97,7 +97,7 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 }
 
 int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
-							   char ***env)
+			       char ***env)
 {
 	char **tmp_env = NULL;
 	pmixp_debug_hang(0);
@@ -150,5 +150,7 @@ int p_mpi_hook_client_single_task_per_node(void)
 int p_mpi_hook_client_fini()
 {
 	PMIXP_DEBUG("Cleanup client");
+	pmix_agent_stop();
+	pmixp_stepd_finalize();
 	return SLURM_SUCCESS;
 }

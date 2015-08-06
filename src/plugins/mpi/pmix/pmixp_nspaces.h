@@ -67,20 +67,6 @@ typedef struct {
 	char *task_map_packed;  /* string represents packed task mapping information */
 	uint32_t *task_map;	/* i'th task is located on task_map[i] node     */
 	hostlist_t hl;
-
-	/* Current database */
-	pmixp_blob_t *local_blobs;
-	pmixp_blob_t *remote_blobs;
-	pmixp_blob_t *global_blobs;
-	// FIXME:
-	// 1. do we want to account generations of DB?
-	// 2. how will we merge pieces of database?
-	// Next generation of database
-	/*
-	void **blobs_new;
-	int *blob_sizes_new;
-	uint32_t cur_gen, next_gen; // Data generation
-	*/
 } pmixp_namespace_t;
 
 typedef struct {
@@ -89,15 +75,15 @@ typedef struct {
 	int  magic;
 #endif
 	List nspaces;
-    pmixp_namespace_t *local;
+	pmixp_namespace_t *local;
 } pmixp_db_t;
 
 int pmixp_nspaces_init();
 pmixp_namespace_t *pmixp_nspaces_find(const char *name);
 pmixp_namespace_t *pmixp_nspaces_local();
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
-			 uint32_t ntasks, uint32_t *task_cnts,
-			 char *task_map_packed, hostlist_t hl);
+		      uint32_t ntasks, uint32_t *task_cnts,
+		      char *task_map_packed, hostlist_t hl);
 
 /* operations on the specific namespace */
 inline static hostlist_t pmixp_nspace_hostlist(pmixp_namespace_t *nsptr)
@@ -106,92 +92,11 @@ inline static hostlist_t pmixp_nspace_hostlist(pmixp_namespace_t *nsptr)
 	return hl;
 }
 hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
-				  int *ranks, size_t nranks);
-int pmixp_nspace_add_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope, int taskid, void *blob, int size);
-int pmixp_nspace_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope, List l);
-int pmixp_nspace_rank_blob(pmixp_namespace_t *nsptr, pmix_scope_t scope,
-			   int rank, List l);
-
+				  const int *ranks, size_t nranks);
 char *pmixp_nspace_resolve(const char *name, int rank);
 
 size_t pmixp_nspace_mdx_lsize(List l);
 void pmixp_nspaces_pack_modex(Buf buf, List modex_list);
 int pmixp_nspaces_push(Buf buf, int cnt);
 
-// TODO: Check the usefulness of this and remove in future.
-
-/*
-static inline uint32_t pmix_db_generation(){
-	return pmix_db.cur_gen;
-}
-
-static inline uint32_t pmix_db_generation_next(){
-	return pmix_db.next_gen;
-}
-
-static inline uint32_t pmix_db_consistent(){
-	return (pmix_db.cur_gen == pmix_db.next_gen);
-}
-
-static inline void pmix_db_start_update()
-{
-	if( pmix_db_consistent() ){
-		pmix_db.next_gen++;
-		PMIXP_DEBUG("DB: current = %d, next = %d",
-				   pmix_db.cur_gen, pmix_db.next_gen);
-	}
-}
-
-
-static inline void pmix_db_commit()
-{
-	int i;
-	xassert(pmix_db.magic == PMIXP_NSPACE_MAGIC);
-
-	// Make new database to be current.
-	for(i=0; i<pmix_info_tasks(); i++){
-		// Drop old blob
-		if( pmix_db.blobs[i] != NULL ){
-			xfree(pmix_db.blobs[i]);
-			pmix_db.blobs[i] = NULL;
-			pmix_db.blob_sizes[i] = 0;
-		}
-		// Save new one
-		pmix_db.blobs[i] = pmix_db.blobs_new[i];
-		pmix_db.blob_sizes[i] = pmix_db.blob_sizes_new[i];
-		// Clear references in new db
-		pmix_db.blobs_new[i] = NULL;
-		pmix_db.blob_sizes_new[i] = 0;
-	}
-	// Move entire database forward
-	pmix_db.cur_gen = pmix_db.next_gen;
-	PMIXP_DEBUG("DB: current = %d, next = %d",
-			   pmix_db.cur_gen, pmix_db.next_gen);
-
-}
-*/
-
-
-/*
- * With direct modex we have two cases:
- * 1. if (hdr->gen == cur_gen) we submit into the current DB.
- * 2. if (hdr->gen <> cur_gen) we discard the data
- */
-/*
-static inline void pmix_db_dmdx_add_blob(uint32_t gen, int taskid, void *blob, int size)
-{
-	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_MAGIC);
-	if( _pmixp_nspaces.cur_gen == gen ){
-		_pmixp_nspaces.blobs[taskid] = blob;
-		_pmixp_nspaces.blob_sizes[taskid] = size;
-	}
-}
-
-static inline int pmix_db_get_blob(int taskid, void **blob)
-{
-	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_MAGIC);
-	*blob = _pmixp_nspaces.blobs[taskid];
-	return _pmixp_nspaces.blob_sizes[taskid];
-}
-*/
 #endif // PMIXP_NSPACES_H

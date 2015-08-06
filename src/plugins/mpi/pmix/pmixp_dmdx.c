@@ -354,9 +354,6 @@ void _dmdx_resp(pmixp_dmdx_t *dmdx, void *msg, size_t size)
         goto exit;
     }
 
-    /* push the data into database */
-    rc = pmixp_nspaces_push(buf,nspace, cnt);
-
     _match_pending(nspace,rank);
 
 exit:

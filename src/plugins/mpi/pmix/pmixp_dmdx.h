@@ -4,9 +4,8 @@
 #include "pmixp_common.h"
 #include "pmixp_nspaces.h"
 
-pmixp_dmdx_t *pmixp_dmdx_init();
 void pmixp_dmdx_get(char *nspace, int rank,
-		   pmix_modex_cbfunc_t cbfunc, void *cbdata);
+		    pmix_modex_cbfunc_t cbfunc, void *cbdata);
 void pmixp_dmdx_process(void *msg, size_t size);
 
 #endif // PMIXP_DMDX_H

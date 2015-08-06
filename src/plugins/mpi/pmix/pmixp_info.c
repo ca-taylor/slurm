@@ -40,33 +40,11 @@
 #include "pmixp_debug.h"
 #include "pmixp_info.h"
 
-// Client communication
-static int _cli_fd = -1;
-
 // Server communication
 static char *_server_addr = NULL;
 static int _server_fd = -1;
 
 pmix_jobinfo_t _pmixp_job_info  = { 0 };
-
-// Collective tree description
-char *_pmix_job_nodes_list = NULL;
-char *_pmix_step_nodes_list = NULL;
-int _pmix_child_num = -1;
-int *_pmix_child_list = NULL;
-
-// Client contact information
-void pmixp_info_cli_contacts(int fd)
-{
-	_cli_fd = fd;
-}
-
-int pmix_info_cli_fd()
-{
-	// Check that client fd was created
-	xassert( _cli_fd >= 0  );
-	return _cli_fd;
-}
 
 // stepd global contact information
 void pmixp_info_srv_contacts(char *path, int fd)
@@ -122,8 +100,29 @@ int pmixp_info_set(const stepd_step_rec_t *job, char ***env)
 	}
 
 	snprintf(_pmixp_job_info.nspace, PMIX_MAX_NSLEN, "slurm.pmix.%d.%d",
-		   pmixp_info_jobid(), pmixp_info_stepid());
+		 pmixp_info_jobid(), pmixp_info_stepid());
 
+	return SLURM_SUCCESS;
+}
+
+int pmixp_info_free()
+{
+	if( NULL != _pmixp_job_info.task_cnts ){
+		xfree(_pmixp_job_info.task_cnts);
+	}
+	if( NULL != _pmixp_job_info.gtids ) {
+		xfree(_pmixp_job_info.gtids);
+	}
+
+	if( NULL != _pmixp_job_info.task_map_packed ){
+		xfree(_pmixp_job_info.task_map_packed);
+	}
+
+	hostlist_destroy(_pmixp_job_info.job_hl);
+	hostlist_destroy(_pmixp_job_info.step_hl);
+	if( NULL != _pmixp_job_info.hostname ){
+		xfree(_pmixp_job_info.hostname);
+	}
 	return SLURM_SUCCESS;
 }
 
@@ -248,7 +247,7 @@ int pmixp_info_resources_set(char ***env)
 
 	//---------------------------------------------------------------------
 
-	// Get and parse task-to-node mapping
+	// Save task-to-node mapping
 	p = getenvp(*env, PMIX_SLURM_MAPPING_ENV);
 	if( p == NULL ){
 		// Direct modex won't work
