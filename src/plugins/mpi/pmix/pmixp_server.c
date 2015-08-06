@@ -107,9 +107,9 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 	if( (fd = pmixp_usock_create_srv(path)) < 0 ){
 		return SLURM_ERROR;
 	}
-	free(path);
 	fd_set_close_on_exec(fd);
 	pmixp_info_srv_contacts(path, fd);
+	xfree(path);
 
 	if( ( rc = pmixp_coll_fw_init(env, SEND_HDR_SIZE) ) ){
 		PMIXP_ERROR("pmixp_coll_init() failed");
@@ -157,6 +157,11 @@ int pmixp_stepd_finalize()
 	return SLURM_SUCCESS;
 }
 
+/*
+ * TODO: we need to keep track of the "me"
+ * structures created here, because we need to
+ * free them in "pmixp_stepd_finalize"
+ */
 void pmix_server_new_conn(int fd)
 {
 	eio_obj_t *obj;
@@ -182,7 +187,6 @@ void pmix_server_new_conn(int fd)
 /*
  *  Server message processing
  */
-
 
 static uint32_t _recv_payload_size(void *buf)
 {
@@ -344,7 +348,8 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	PMIXP_DEBUG("fd = %d", obj->fd);
 	pmixp_io_engine_t *me = (pmixp_io_engine_t *)obj->arg;
 
-	//	pmix_debug_hang(1);
+	static int delay = 1;
+	pmixp_debug_hang(delay);
 
 	// Read and process all received messages
 	while( 1 ){
@@ -368,4 +373,3 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	}
 	return 0;
 }
-

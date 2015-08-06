@@ -99,9 +99,11 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 						      ntasks, NULL);
 	if(nsptr->task_map == NULL ){
 		xfree(nsptr->task_cnts);
+		xfree(nsptr->task_map_packed);
 		return SLURM_ERROR;
 	}
 	nsptr->hl = hl;
+	list_append(_pmixp_nspaces.nspaces, nsptr);
 	return SLURM_SUCCESS;
 }
 

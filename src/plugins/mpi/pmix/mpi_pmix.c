@@ -137,6 +137,9 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 	}
 	setenvf(env, PMIX_SLURM_MAPPING_ENV, "%s", mapping);
 	xfree(mapping);
+
+	type = 1;
+
 	/* only return NULL on error */
 	return (void *)0xdeadbeef;
 }
@@ -149,8 +152,14 @@ int p_mpi_hook_client_single_task_per_node(void)
 
 int p_mpi_hook_client_fini()
 {
-	PMIXP_DEBUG("Cleanup client");
-	pmix_agent_stop();
-	pmixp_stepd_finalize();
+	/* TODO: CHECK if we need this.
+	 * does this hook called on slurmstepd's at application
+	 * exit?
+	 */
+	if( 0 ){
+		PMIXP_DEBUG("Cleanup client");
+		pmix_agent_stop();
+		pmixp_stepd_finalize();
+	}
 	return SLURM_SUCCESS;
 }

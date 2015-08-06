@@ -221,6 +221,10 @@ pmixp_info_job_host(int nodeid){
 inline static char *pmixp_info_nspace_usock(char *nspace)
 {
 	char *usock = NULL;
+	/* TODO: provide the right way to set this:
+	 * - slrum.conf
+	 * - what else?
+	 */
 	char *tmpdir = getenv("TMPDIR");
 	if( NULL == tmpdir ){
 		tmpdir = PMIXP_TMPDIR;

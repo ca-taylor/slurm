@@ -67,7 +67,11 @@ _hostset_from_ranges(const pmix_proc_t *procs, size_t nprocs,
 		if( NULL == nsptr ){
 			goto err_exit;
 		}
-		tmp = pmixp_nspace_rankhosts(nsptr, &procs[i].rank, 1);
+		if( procs[i].rank == PMIX_RANK_WILDCARD ){
+			tmp = hostlist_copy(nsptr->hl);
+		} else {
+			tmp = pmixp_nspace_rankhosts(nsptr, &procs[i].rank, 1);
+		}
 		while( NULL != (node = hostlist_pop(tmp)) ){
 			hostlist_push(hl, node);
 			free(node);
@@ -205,6 +209,8 @@ int pmixp_coll_belong_chk(pmixp_coll_type_t type, const pmix_proc_t *procs,
 		if( 0 != strcmp(procs[i].nspace, nsptr->name) ){
 			continue;
 		}
+		if( (procs[i].rank == PMIX_RANK_WILDCARD) )
+			return 0;
 		if( 0 <= pmixp_info_taskid2localid(procs[i].rank) ){
 			return 0;
 		}
@@ -308,8 +314,8 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
 	_adjust_data_size(coll, size);
-	coll->data_pay += size;
 	memcpy(coll->data + coll->data_pay, data, size);
+	coll->data_pay += size;
 	coll->contrib_local = true;
 
 	/* unlock the structure */
