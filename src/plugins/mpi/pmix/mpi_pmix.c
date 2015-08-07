@@ -138,8 +138,6 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 	setenvf(env, PMIX_SLURM_MAPPING_ENV, "%s", mapping);
 	xfree(mapping);
 
-	type = 1;
-
 	/* only return NULL on error */
 	return (void *)0xdeadbeef;
 }
