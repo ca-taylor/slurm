@@ -348,8 +348,7 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	PMIXP_DEBUG("fd = %d", obj->fd);
 	pmixp_io_engine_t *me = (pmixp_io_engine_t *)obj->arg;
 
-	static int delay = 1;
-	pmixp_debug_hang(delay);
+	pmixp_debug_hang(0);
 
 	// Read and process all received messages
 	while( 1 ){
