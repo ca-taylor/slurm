@@ -301,6 +301,9 @@ err_exit:
 
 int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 {
+	PMIXP_DEBUG("%s:%d: get local contribution",
+		    pmixp_info_namespace(), pmixp_info_nodeid() );
+
 	/* sanity check */
 	pmixp_coll_sanity_check(coll);
 
@@ -309,6 +312,8 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 
 	/* change the collective state if need */
 	if( PMIXP_COLL_SYNC == coll->state ){
+		PMIXP_DEBUG("%s:%d: get local contribution: switch to PMIXP_COLL_FAN_IN",
+			    pmixp_info_namespace(), pmixp_info_nodeid() );
 		coll->state = PMIXP_COLL_FAN_IN;
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
@@ -324,6 +329,9 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 	/* check if the collective is ready to progress */
 	_progress_fan_in(coll);
 
+	PMIXP_DEBUG("%s:%d: get local contribution: finish",
+		    pmixp_info_namespace(), pmixp_info_nodeid() );
+
 	return SLURM_SUCCESS;
 }
 
@@ -333,6 +341,10 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 	int idx;
 	int nodeid;
 
+
+	PMIXP_DEBUG("%s:%d: get contribution from node %s",
+		    pmixp_info_namespace(), pmixp_info_nodeid(), nodename);
+
 	pmixp_coll_sanity_check(coll);
 
 	/* lock the structure */
@@ -341,12 +353,15 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 	/* fix the collective status if need */
 	if( PMIXP_COLL_SYNC == coll->state ){
 		coll->state = PMIXP_COLL_FAN_IN;
+		PMIXP_DEBUG("%s:%d: get contribution from node %s: switch to PMIXP_COLL_FAN_IN",
+			    pmixp_info_namespace(), pmixp_info_nodeid(), nodename);
+
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
 	/* Because of possible timeouts/delays in transmission we
-     * can receive a contribution second time. Avoid duplications
-     * by checking our records. */
+	 * can receive a contribution second time. Avoid duplications
+	 * by checking our records. */
 	nodeid = hostlist_find(coll->all_children, nodename);
 	idx = _is_child_no(coll, nodeid);
 	xassert( 0 <= idx );
@@ -373,6 +388,9 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 	/* make a progress */
 	_progress_fan_in(coll);
 
+	PMIXP_DEBUG("%s:%d: get contribution from node %s: finish",
+		    pmixp_info_namespace(), pmixp_info_nodeid(), nodename);
+
 	return SLURM_SUCCESS;
 }
 
@@ -396,6 +414,10 @@ void _progress_fan_in(pmixp_coll_t *coll)
 	char *hostlist = NULL;
 	int rc;
 
+	PMIXP_DEBUG("%s:%d: start, local=%d, child_cntr=%d",
+		    pmixp_info_namespace(), pmixp_info_nodeid(),
+		    coll->contrib_local, coll->contrib_cntr);
+
 	pmixp_coll_sanity_check(coll);
 
 	/* lock the */
@@ -403,8 +425,8 @@ void _progress_fan_in(pmixp_coll_t *coll)
 
 	if( PMIXP_COLL_FAN_IN != coll->state ){
 		/* In case of race condition between libpmix and
-	 * slurm threads progress_fan_in can be called
-	 * after we moved to the next step. */
+		 * slurm threads progress_fan_in can be called
+		 * after we moved to the next step. */
 		goto exit;
 	}
 
@@ -422,6 +444,10 @@ void _progress_fan_in(pmixp_coll_t *coll)
 		type = PMIXP_MSG_FAN_OUT;
 	}
 
+	PMIXP_DEBUG("%s:%d: send data to %s",
+		    pmixp_info_namespace(), pmixp_info_nodeid(),
+		    hostlist);
+
 	rc = pmixp_server_send(hostlist, type, coll->seq, addr,
 			       coll->data, coll->data_pay);
 	xfree(hostlist);
@@ -431,13 +457,16 @@ void _progress_fan_in(pmixp_coll_t *coll)
 			    (uint64_t)coll->data_pay, hostlist);
 		// TODO: abort the whole application here?
 		// Currently it will just hang!
-		return;
+		goto exit;
 	}
 
 	coll->state = PMIXP_COLL_FAN_OUT;
 	xfree(coll->data);
 	coll->data = NULL;
 	coll->data_pay = coll->data_sz = 0;
+	PMIXP_DEBUG("%s:%d: switch to PMIXP_COLL_FAN_OUT state",
+		    pmixp_info_namespace(), pmixp_info_nodeid() );
+
 
 exit:
 	/* lock the */
@@ -447,6 +476,8 @@ exit:
 void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
 			     uint32_t size)
 {
+	PMIXP_DEBUG("%s:%d: start", pmixp_info_namespace(), pmixp_info_nodeid());
+
 	pmixp_coll_sanity_check(coll);
 
 	xassert( PMIXP_COLL_FAN_OUT == coll->state );
@@ -456,6 +487,8 @@ void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
 
 	// update the database
 	if( NULL != coll->cbfunc ){
+		PMIXP_DEBUG("%s:%d: use the callback",
+			    pmixp_info_namespace(), pmixp_info_nodeid());
 		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata);
 	}
 
@@ -465,6 +498,9 @@ void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
 	coll->seq++; /* move to the next collective */
 	coll->contrib_cntr = 0;
 
+	PMIXP_DEBUG("%s:%d: collective is prepared for the next use",
+		    pmixp_info_namespace(), pmixp_info_nodeid());
+
 	/* lock the structure */
-	pthread_mutex_lock(&coll->lock);
+	pthread_mutex_unlock(&coll->lock);
 }
