@@ -97,7 +97,6 @@ inline static void pmixp_coll_sanity_check(pmixp_coll_t *coll)
 	xassert( coll->magic == PMIXP_COLL_STATE_MAGIC );
 }
 
-int pmixp_coll_fw_init(char ***env, uint32_t hdrsize);
 int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs, size_t nprocs,
 		    pmixp_coll_type_t type);
 

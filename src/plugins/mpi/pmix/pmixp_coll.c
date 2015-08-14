@@ -42,16 +42,8 @@
 #include "pmixp_nspaces.h"
 #include "pmixp_server.h"
 
-static int _server_hdr_size = 0;
-
 static void _progress_fan_in(pmixp_coll_t *coll);
 static int _is_child_no(pmixp_coll_t *coll, int nodeid);
-
-int pmixp_coll_fw_init(char ***env, uint32_t hdrsize)
-{
-	_server_hdr_size = hdrsize;
-	return SLURM_SUCCESS;
-}
 
 static int
 _hostset_from_ranges(const pmix_proc_t *procs, size_t nprocs,
@@ -108,13 +100,9 @@ static int _pack_ranges(pmixp_coll_t *coll)
 {
 	pmix_proc_t *procs = coll->procs;
 	size_t nprocs = coll->nprocs;
-	Buf buf;
-	uint32_t size = _server_hdr_size + 2*sizeof(uint32_t);
+	Buf buf = pmixp_server_new_buf();
+	uint32_t size;
 	int i;
-
-	buf = create_buf(xmalloc(size), size);
-	// Skip header. It will be filled right before the sending
-	set_buf_offset(buf, _server_hdr_size);
 
 	// 1. store the type of collective
 	size = coll->type;

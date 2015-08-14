@@ -70,8 +70,8 @@ static pmix_status_t
 unpublish_fn(const char nspace[], int rank, pmix_data_range_t scope,
 	     char **keys, pmix_op_cbfunc_t cbfunc, void *cbdata);
 static pmix_status_t
-spawn_fn(const pmix_app_t apps[], size_t napps, pmix_spawn_cbfunc_t cbfunc,
-	 void *cbdata);
+spawn_fn(const char nspace[], int rank, const pmix_app_t apps[], size_t napps,
+	 pmix_spawn_cbfunc_t cbfunc, void *cbdata);
 static pmix_status_t
 connect_fn(const pmix_proc_t procs[], size_t nprocs, pmix_op_cbfunc_t cbfunc,
 	   void *cbdata);
@@ -100,9 +100,11 @@ int pmixp_libpmix_init()
 {
 	int rc;
 
-	/* TODO: remove this once debugged! */
-	PMIXP_ERROR("WARNING: you are using /home/artpol/slurm_tmp/ as tmpdir!");
-	setenv("TMPDIR","/home/artpol/slurm_tmp/",1);
+//	/* TODO: remove this once debugged! */
+//	PMIXP_ERROR("WARNING: you are using /home/artpol/slurm_tmp/ as tmpdir!");
+//	setenv("TMPDIR","/home/artpol/slurm_tmp/",1);
+//	setenv("PMIX_DEBUG", "10", 1);
+//	setenv("PMIX_OUTPUT_REDIRECT","file",1);
 
 	/* setup the server library */
 	if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb, true))) {
@@ -369,11 +371,16 @@ error:
 	return status;
 }
 
-pmix_status_t dmodex_fn(const char nspace[], int rank,
-			pmix_modex_cbfunc_t cbfunc, void *cbdata)
+static pmix_status_t
+dmodex_fn(const char nspace[], int rank,
+	  pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
+	int rc;
 	PMIXP_DEBUG("called");
-	return PMIX_ERR_NOT_IMPLEMENTED;
+
+	rc = pmixp_dmdx_get(nspace, rank, cbfunc, cbdata);
+
+	return ( SLURM_SUCCESS == rc ) ? PMIX_SUCCESS : PMIX_ERROR;
 }
 
 static pmix_status_t
@@ -401,7 +408,8 @@ unpublish_fn(const char nspace[], int rank, pmix_data_range_t scope,
 	return PMIX_ERR_NOT_IMPLEMENTED;
 }
 
-static int spawn_fn(const pmix_app_t apps[], size_t napps,
+static int spawn_fn(const char nspace[], int rank,
+		    const pmix_app_t apps[], size_t napps,
 		    pmix_spawn_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");

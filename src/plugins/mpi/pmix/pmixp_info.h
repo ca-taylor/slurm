@@ -218,7 +218,7 @@ pmixp_info_job_host(int nodeid){
 }
 
 /* namespaces list operations */
-inline static char *pmixp_info_nspace_usock(char *nspace)
+inline static char *pmixp_info_nspace_usock(const char *nspace)
 {
 	char *usock = NULL;
 	/* TODO: provide the right way to set this:

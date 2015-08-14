@@ -1,392 +1,372 @@
-#include "pmixp_common.h"
+﻿#include "pmixp_common.h"
 #include "pmixp_dmdx.h"
 #include "pmixp_server.h"
 
+#include <pmix_server.h>
+
+
+
 typedef enum {
-    DMDX_REQUEST = 1, DMDX_RESPONSE
+	DMDX_REQUEST = 1, DMDX_RESPONSE
 } dmdx_type_t;
-
-typedef struct {
-	List rem_req;
-	List *loc_req;
-} pmixp_dmdx_t;
-
-static pmixp_dmdx_t _dmdx;
-
-typedef struct{
-	char *nspace;
-	int rank;
-	List resp_list;
-} req_to_rem_t;
 
 typedef struct
 {
-    pmix_modex_cbfunc_t cbfunc;
-    void *cbdata;
-} callback_info_t;
+	uint32_t seq_num;
+#ifndef NDEBUG
+	/* we need this only for verification */
+	char nspace[PMIX_MAX_NSLEN];
+	int rank;
+#endif
+	pmix_modex_cbfunc_t cbfunc;
+	void *cbdata;
+} dmdx_req_info_t;
 
-void _free_req_to_rem(void *x)
+typedef struct
 {
-    req_to_rem_t *req = x;
-    xfree(req->nspace);
-    list_destroy(req->resp_list);
-    xfree(req);
-}
+	uint32_t seq_num;
+	char *nspace, *sender_host, *sender_ns;
+	int rank;
+} dmdx_caddy_t;
 
-typedef struct{
-    char *host, *addr;
-} req_to_loc_t;
-
-void _free_req_to_loc(void *x)
+void _dmdx_free_caddy(dmdx_caddy_t *caddy)
 {
-    req_to_loc_t *req = x;
-    xfree(req->addr);
-    xfree(req->host);
-    xfree(req);
-}
-
-static
-static void _account_remote_req(char *nspace, int rank,
-                             pmix_modex_cbfunc_t cbfunc, void *cbdata);
-static void _wait_for_local(int rank, char *host, char *addr);
-static int _respond_bad_param(char *nspace, char *host);
-static int _respond_ok(char *nspace, char *host, List modex_data);
-
-void pmixp_dmdx_init()
-{
-	int localnum = pmixp_info_tasks_loc();
-	int i;
-    _dmdx.rem_req = list_create(_free_req_to_rem);
-	_dmdx.loc_req = xmalloc( sizeof(List));
-	for(i=0; i< localnum; i++){
-        _dmdx.loc_req[i] = list_create(_free_req_to_loc);
+	if( NULL != caddy->nspace ){
+		xfree(caddy->nspace);
 	}
+	if( NULL != caddy->sender_host ){
+		xfree(caddy->sender_host);
+	}
+	if( NULL != caddy->sender_ns ){
+		xfree(caddy->sender_ns);
+	}
+	xfree(caddy);
 }
 
-static void _setup_header(Buf buf, dmdx_type_t t, char *nspace,
-                          int rank, int status)
+static List _dmdx_requests;
+static uint32_t _dmdx_seq_num = 1;
+
+static int _respond_error(char *ns, int rank, char *sender_host, char *sender_ns);
+
+int pmixp_dmdx_init()
 {
-    char type = (char)t;
-    /* 1. pack message type */
-    grow_buf(buf,sizeof(char));
-    pack8(type,buf);
-    /* 2. pack namespace */
-    grow_buf(buf, strlen(nspace) + 1 );
-    packmem(nspace, strlen(nspace), buf);
-    /* 3. pack rank */
-    grow_buf(buf, sizeof(int) );
-    pack32((uint32_t)rank, buf);
-    /* 4. pack our contact info */
-    str = pmixp_info_hostname();
-    grow_buf(buf, strlen(str));
-    packmem(str,strlen(str) + 1, buf);
-    /* 5. pack our contact info */
-    grow_buf(buf, sizeof(int) );
-    pack32((uint32_t)status, buf);
+	_dmdx_requests = list_create(pmixp_xfree_buffer);
+	_dmdx_seq_num = 1;
+	return SLURM_SUCCESS;
+}
+
+static void _setup_header(Buf buf, dmdx_type_t t,
+			  const char *nspace, int rank, int status)
+{
+	char *str;
+	/* 1. pack message type */
+	unsigned char type = (char)t;
+	grow_buf(buf,sizeof(char));
+	pack8(type,buf);
+
+	/* 2. pack namespace */
+	packmem((char*)nspace, strlen(nspace) + 1, buf);
+
+	/* 3. pack rank */
+	grow_buf(buf, sizeof(int) );
+	pack32((uint32_t)rank, buf);
+
+	/* 4. pack our contact info */
+	str = pmixp_info_namespace();
+	packmem(str,strlen(str) + 1, buf);
+
+	/* 5. pack the status */
+	pack32((uint32_t)status, buf);
 }
 
 static int _read_type(Buf buf, dmdx_type_t *type)
 {
-    char t;
-    /* 1. unpack message type */
-    if( SLURM_SUCCESS != (rc = unpack8(&t, buf) ) ){
-        PMIXP_ERROR("Cannot unpack message type!");
-        goto rc;
-    }
-    *type = (dmdx_type_t)t;
-    return SLURM_SUCCESS;
+	unsigned char t;
+	int rc;
+	/* 1. unpack message type */
+	if( SLURM_SUCCESS != (rc = unpack8(&t, buf) ) ){
+		PMIXP_ERROR("Cannot unpack message type!");
+		return SLURM_ERROR;
+	}
+	*type = (dmdx_type_t)t;
+	return SLURM_SUCCESS;
 }
 
-static void _read_info(Buf buf, char **nspace, int *rank,
-                            char **host, int *status)
+static int _read_info(Buf buf, char **ns, int *rank,
+		      char **sender_ns, int *status)
 {
-    int cnt;
-    *nspace = NULL;
-    *host = NULL;
-    /* 2. unpack namespace */
-    if( SLURM_SUCCESS != (rc = unpackmem_xmalloc(nspace, &cnt, buf) ) ){
-        PMIXP_ERROR("Cannot unpack namespace!");
-        goto eexit;
-    }
-    nspace[cnt] = '\0';
-    /* 3. unpack rank */
-    if( SLURM_SUCCESS != (rc = unpack32(rank, buf) ) ){
-        PMIXP_ERROR("Cannot unpack rank!");
-        goto eexit;
-    }
-    /* 4. unpack message type */
-    if( SLURM_SUCCESS != (rc = unpackmem_xmalloc(host, &cnt, buf) ) ){
-        PMIXP_ERROR("Cannot unpack hostname!");
-        goto eexit;
-    }
-    host[cnt] = '\0';
+	uint32_t cnt, uint32_tmp;
+	int rc;
+	*ns = NULL;
+	*sender_ns = NULL;
 
-    /* 5. unpack status */
-    if( SLURM_SUCCESS != (rc = unpack32(status, buf) ) ){
-        PMIXP_ERROR("Cannot unpack rank!");
-        goto eexit;
-    }
-    return SLURM_SUCCESS;
+	/* 1. unpack namespace */
+	if( SLURM_SUCCESS != (rc = unpackmem_xmalloc(ns, &cnt, buf) ) ){
+		PMIXP_ERROR("Cannot unpack requested namespace!");
+		goto eexit;
+	}
+	(*ns)[cnt] = '\0';
+
+	/* 2. unpack rank */
+	if( SLURM_SUCCESS != (rc = unpack32(&uint32_tmp, buf) ) ){
+		PMIXP_ERROR("Cannot unpack requested rank!");
+		goto eexit;
+	}
+	*rank = uint32_tmp;
+
+	if( SLURM_SUCCESS != (rc = unpackmem_xmalloc(sender_ns, &cnt, buf) ) ){
+		PMIXP_ERROR("Cannot unpack sender namespace!");
+		goto eexit;
+	}
+	(*sender_ns)[cnt] = '\0';
+
+	/* 4. unpack status */
+	if( SLURM_SUCCESS != (rc = unpack32(&uint32_tmp, buf) ) ){
+		PMIXP_ERROR("Cannot unpack rank!");
+		goto eexit;
+	}
+	*status = uint32_tmp;
+	return SLURM_SUCCESS;
 eexit:
-    if( NULL != *nspace){
-        xfree(*nspace);
-    }
-    if( NULL != *host ){
-        xfree(*host);
-    }
-    return rc;
+	if( NULL != *ns){
+		xfree(*ns);
+	}
+	if( NULL != *sender_ns ){
+		xfree(*sender_ns);
+	}
+	return rc;
 }
 
-static int _account_remote_req(char *nspace, int rank,
-                             pmix_modex_cbfunc_t cbfunc, void *cbdata)
+static int _respond_error(char *ns, int rank, char *sender_host, char *sender_ns)
 {
-    req_to_rem_t *req;
-    callback_info_t *cbi = xmalloc(callback_info_t);
-    ListIterator it;
-    bool found;
-    cbi->cbfunc = cbfunc;
-    cbi->cbdata = cbdata;
+	Buf buf = create_buf(NULL,0);
+	char *addr;
+	int rc;
 
-    it = list_iterator_create(_dmdx.rem_req);
-    while( NULL != ( req = list_next(it) ) ){
-
-        if( 0 != strcmp(nspace, req->nspace) ){
-            continue;
-        }
-        if( rank != req->rank ){
-            continue;
-        }
-
-        list_append(req->resp_list, cbi);
-        found = true;
-        break;
-    }
-    list_iterator_destroy(it);
-
-    if( found ){
-        /* not fatal, will need to add new request */
-        return SLURM_SUCCESS;
-    }
-
-    /* setup direct modex request */
-    req = xmalloc( sizeof(req_to_rem_t) );
-    req->nspace = strdup(nspace);
-    req->rank = rank;
-    list_append(req->resp_list, cbi);
-    /* add direct modex request */
-    list_append(_dmdx.rem_req, req);
-    /* let caller know that it needs to send request */
-    return SLURM_ERROR;
+	_setup_header(buf,DMDX_RESPONSE,ns,rank,SLURM_ERROR);
+	/* generate namespace usocket name */
+	addr = pmixp_info_nspace_usock(sender_ns);
+	/* send response */
+	rc = pmixp_server_send(sender_host, PMIXP_MSG_DMDX, rank, addr,
+			       buf->head, get_buf_offset(buf));
+	if( SLURM_SUCCESS != rc ){
+		PMIXP_ERROR("Cannot send direct modex request to %s", sender_host);
+	}
+	xfree(addr);
+	free_buf(buf);
+	return rc;
 }
 
-static void _wait_for_local(int rank, char *host, char *addr)
+static void _dmdx_pmix_cb(pmix_status_t status, char *data,
+			  size_t sz, void *cbdata)
 {
-    req_to_loc_t *req = xmalloc(sizeof(req_to_loc_t));
-#ifndef NDEBUG
-    pmixp_namespace_t *nsptr = pmixp_nspaces_local();
-    xassert( NULL != nsptr );
-    xassert( rank < nsptr->ntasks );
-#endif
-    req->host = host;
-    req->addr = addr;
-    list_append(_dmdx.loc_req[rank], req);
+	dmdx_caddy_t *caddy = (dmdx_caddy_t*)cbdata;
+	Buf buf = pmixp_server_new_buf();
+	char *addr;
+	int rc;
+
+	/* setup response header */
+	_setup_header(buf,DMDX_RESPONSE, caddy->nspace, caddy->rank, status);
+
+	/* pack the response */
+	packmem(data, sz, buf);
+
+	/* setup response address */
+	addr = pmixp_info_nspace_usock(caddy->sender_ns);
+
+	/* send the request */
+	rc = pmixp_server_send(caddy->sender_host, PMIXP_MSG_DMDX, caddy->seq_num, addr,
+			       buf->head, get_buf_offset(buf));
+	if( SLURM_SUCCESS != rc ){
+		PMIXP_ERROR("Cannot send direct modex request to %s", caddy->sender_host);
+	}
+	xfree(addr);
+	free_buf(buf);
 }
 
-static int _respond_bad_param(char *nspace, char *host)
-{
-    Buf buf = create_buf(NULL,0);
-    char *addr;
-    _setup_header(buf,DMDX_RESPONSE,nspace,0,SLURM_ERROR);
-    /* generate namespace usocket name */
-    addr = pmixp_info_nspace_usock(nspace);
-    /* send response */
-    rc = pmixp_server_send(host, PMIX_MSG_DIREQ, 0, addr,
-              buf->head, get_buf_offset(buf));
-    if( SLURM_SUCCESS != rc ){
-        PMIXP_ERROR("Cannot send direct modex request to %s", host);
-    }
-    xfree(addr);
-    free_buf(buf);
-
-}
-
-static int _respond_ok(char *nspace, char *host, List modex_list)
-{
-    Buf buf = create_buf(NULL,0);
-    char *addr;
-    size_t size;
-    _setup_header(buf,DMDX_RESPONSE,nspace,0,SLURM_ERROR);
-    /* save modex data */
-    size = pmixp_nspace_mdx_lsize(modex_list);
-    grow_buf(buf,sizeof(uint32_t));
-    pack32((uint32_t)list_count(modex_list), buf);
-    grow_buf(buf,size);
-    pmixp_nspaces_pack_modex(buf, modex_list);
-
-    /* generate namespace usocket name */
-    addr = pmixp_info_nspace_usock(nspace);
-    /* send the request */
-    rc = pmixp_server_send(host, PMIX_MSG_DIREQ, 0, addr,
-              buf->head, get_buf_offset(buf));
-    if( SLURM_SUCCESS != rc ){
-        PMIXP_ERROR("Cannot send direct modex request to %s", host);
-    }
-    xfree(addr);
-    free_buf(buf);
-
-}
-
-
-int pmixp_dmdx_get(char *nspace, int rank,
+int pmixp_dmdx_get(const char *nspace, int rank,
 		   pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
-    int rc;
-	char *host;
+	dmdx_req_info_t *req;
+	char *addr, *host;
 	Buf buf;
-	size_t size;
-	char *str, *addr;
+	int rc;
 
-    rc = _account_remote_req(nspace, rank, cbfunc, cbdata);
-    if( SLURM_SUCCESS == rc ){
-        /* we already requested this data */
-        return rc;
-    }
-
-    /* need to send the request */
+	/* need to send the request */
 	host = pmixp_nspace_resolve(nspace, rank);
 	xassert( NULL != host);
 	if( NULL == host ){
 		return SLURM_ERROR;
 	}
 
-	buf = create_buf(NULL, 0);
-    /* setup message header */
-    _setup_header(buf, DMDX_REQUEST, nspace, rank, SLURM_SUCCESS);
-    /* generate namespace usocket name */
-    addr = pmixp_info_nspace_usock(nspace);
-    /* send the request */
-	rc = pmixp_server_send(host, PMIX_MSG_DIREQ, 0, addr,
-			  buf->head, get_buf_offset(buf));
+	buf = pmixp_server_new_buf();
+
+	/* setup message header */
+	_setup_header(buf, DMDX_REQUEST, nspace, rank, SLURM_SUCCESS);
+	/* generate namespace usocket name */
+	addr = pmixp_info_nspace_usock(nspace);
+
+
+	/* send the request */
+	rc = pmixp_server_send(host, PMIXP_MSG_DMDX, _dmdx_seq_num, addr,
+			       buf->head, get_buf_offset(buf));
 	if( SLURM_SUCCESS != rc ){
 		PMIXP_ERROR("Cannot send direct modex request to %s", host);
 	}
-    xfree(addr);
+	xfree(addr);
 	free_buf(buf);
+
+	/* track this request */
+	req = xmalloc( sizeof(dmdx_req_info_t) );
+	req->seq_num = _dmdx_seq_num;
+	req->cbfunc = cbfunc;
+	req->cbdata = cbdata;
+#ifndef NDEBUG
+	strncpy(req->nspace, nspace, PMIX_MAX_NSLEN);
+	req->rank = rank;
+#endif
+	list_append(_dmdx_requests,req);
+
+	/* move to the next request */
+	_dmdx_seq_num++;
 
 	return rc;
 }
 
-static int _dmdx_req(pmixp_dmdx_t *dmdx, Buf buf)
+static int _dmdx_req(Buf buf, char *from_host, uint32_t seq_num)
 {
-    Buf buf = create_buf(msg, size);
-    uint32_t cnt;
-    int rank, rc = SLURM_SUCCESS;
-    int status;
-    char *nspace = NULL, *host = NULL, *addr = NULL;
+	int rank, rc = SLURM_SUCCESS;
+	int status;
+	char *ns = NULL, *sender_ns = NULL, *sender_host = xstrdup(from_host);
 	pmixp_namespace_t *nsptr;
-	List modex_data;
+	dmdx_caddy_t *caddy;
 
-    if( SLURM_SUCCESS != (rc = _read_info(buf,&nspace, &rank, &host, &status)) ){
-        goto exit;
-    }
-
-	if( 0 != strcmp(nspace, pmixp_info_namespace()) ){
-		PMIXP_ERROR("Bad request from %s: asked for nspace = %s, mine is %s",
-			    host, nspace, pmixp_info_namespace() );
-        _respond_bad_param(nspace, rank, host);
-        goto exit;
+	if( SLURM_SUCCESS != (rc = _read_info(buf, &ns, &rank, &sender_ns, &status)) ){
+		goto exit;
 	}
 
-    nsptr = pmixp_nspaces_local();
+	if( 0 != strcmp(ns, pmixp_info_namespace()) ){
+		/* request for namespase that is not controlled by this daemon
+		 * considered as error. This may change in future.  */
+		PMIXP_ERROR("Bad request from %s: asked for nspace = %s, mine is %s",
+			    sender_host, ns, pmixp_info_namespace() );
+		_respond_error(ns, rank, sender_host, sender_ns);
+		goto exit;
+	}
+
+	nsptr = pmixp_nspaces_local();
 	if( nsptr->ntasks <= rank ){
 		PMIXP_ERROR("Bad request from %s: nspace \"%s\" has only %d ranks,"
 			    " asked for %d",
-			    host, nspace, nsptr->ntasks, rank);
-        rc = SLURM_ERROR;
-        _respond_bad_param(host,addr);
-        goto exit;
+			    sender_host, ns, nsptr->ntasks, rank);
+		rc = SLURM_ERROR;
+		_respond_error(ns, rank, sender_host, sender_ns);
+		goto exit;
 	}
 
-	modex_data = list_create(pmixp_xfree_buffer);
-    pmixp_nspace_rank_blob(nsptr,PMIX_GLOBAL,rank,modex_data);
-    pmixp_nspace_rank_blob(nsptr,PMIX_REMOTE,rank,modex_data);
+	/* setup temp structure to handle information fro _dmdx_pmix_cb */
+	caddy = xmalloc( sizeof(dmdx_caddy_t) );
+	caddy->seq_num = seq_num;
+	caddy->nspace = ns;
+	ns = NULL;              // protect the data
+	caddy->rank = rank;
+	caddy->sender_host = sender_host;
+	sender_host = NULL;
+	caddy->sender_ns = sender_ns;
+	sender_ns = NULL;
 
-    if( 0 == list_count(modex_data) ){
-        /* need to wait for the local data to arrive */
-        _wait_for_local(nspace, rank, host, addr);
-        /* _wait_for_local will use allocated strings host, addr
-         * so we don't want to free them on exit */
-        host = NULL;
-        addr = NULL;
-    } else {
-        _respond_ok(nspace, host, modex_data);
-    }
-
-exit:
-    if( NULL != nspace ){
-        xfree(nspace);
-    }
-    if( NULL != host ){
-        xfree(host);
-    }
-    if( NULL != host ){
-        xfree(host);
-    }
-    return rc;
-}
-
-void _dmdx_resp(pmixp_dmdx_t *dmdx, void *msg, size_t size)
-{
-    Buf buf = create_buf(msg, size);
-    uint32_t cnt;
-    int rank, rc = SLURM_SUCCESS;
-    int status;
-    char *nspace = NULL, *host = NULL, *addr = NULL;
-    pmixp_namespace_t *nsptr;
-
-    if( SLURM_SUCCESS != (rc = _read_info(buf,&nspace, &rank, &host, &status)) ){
-        goto exit;
-    }
-
-    /* unpack count */
-    if( SLURM_SUCCESS != (rc = unpack32(&cnt, buf) ) ){
-        PMIXP_ERROR("Cannot unpack blob count!");
-        goto exit;
-    }
-
-    _match_pending(nspace,rank);
+	rc = PMIx_server_dmodex_request(caddy->nspace, caddy->rank, _dmdx_pmix_cb, (void*)caddy);
+	if( PMIX_SUCCESS != rc ){
+		PMIXP_ERROR("Can't request direct modex from libpmix-server, rc = %d", rc);
+		_dmdx_free_caddy(caddy);
+	}
 
 exit:
-    /* protect the data */
-    buf->head = NULL;
-    free_buf(buf);
-
-    if( NULL != nspace ){
-        xfree(nspace);
-    }
-    if( NULL != host ){
-        xfree(host);
-    }
-    if( NULL != host ){
-        xfree(host);
-    }
-    return rc;
+	if( NULL != ns ){
+		xfree(ns);
+	}
+	if( NULL != sender_host ){
+		xfree(sender_host);
+	}
+	if( NULL != sender_host ){
+		xfree(sender_host);
+	}
+	return rc;
 }
 
-int pmixp_dmdx_process(void *msg, size_t size)
+static int _dmdx_req_cmp(void *x, void *key)
 {
-    dmdx_type_t type;
-    Buf buf = create_buf(msg, size);
-    _read_type(buf,&type);
-    switch( type ){
-    case DMDX_REQUEST:
-        _dmdx_req(buf);
-        break;
-    case DMDX_RESPONSE:
-        _dmdx_resp(buf);
-        break;
-    default:
-        PMIXP_ERROR("Bad request. Skip");
-        break;
-    }
+	dmdx_req_info_t *req = (dmdx_req_info_t*)x;
+	uint32_t seq_num = *((uint32_t*)key);
+	return (req->seq_num == seq_num);
+}
+
+int _dmdx_resp(Buf buf, char *sender_host, uint32_t seq_num)
+{
+	dmdx_req_info_t *req;
+	int rank, rc = SLURM_SUCCESS;
+	int status;
+	char *ns = NULL, *sender_ns = NULL;
+	char *data = NULL;
+	uint32_t size;
+
+	/* get the service data */
+	if( SLURM_SUCCESS != (rc = _read_info(buf, &ns, &rank, &sender_ns, &status)) ){
+		goto exit;
+	}
+	/* get the modex blob */
+	unpackmem_ptr(&data, &size, buf);
+
+	/* find the request tracker */
+	ListIterator it = list_iterator_create(_dmdx_requests);
+	req = (dmdx_req_info_t *)list_find(it,_dmdx_req_cmp,&seq_num);
+	if( NULL == req ){
+		// We haven't sent this request!
+		PMIXP_ERROR("Received DMDX response for %s:%d from %s that wasn't registered locally!",
+			    ns, rank, sender_host);
+		list_iterator_destroy(it);
+		return SLURM_ERROR;
+	}
+
+	/* call back to libpmix-server */
+	req->cbfunc(status, data, size, req->cbdata);
+
+	/* release tracker & list iterator*/
+	req = NULL;
+	list_delete_item(it);
+	list_iterator_destroy(it);
+
+exit:
+	if( NULL != ns ){
+		xfree(ns);
+	}
+	if( NULL != sender_ns ){
+		xfree(sender_ns);
+	}
+	return rc;
+}
+
+int pmixp_dmdx_process(void *msg, size_t size, char *host, uint32_t seq)
+{
+	Buf buf = create_buf(msg, size);
+	dmdx_type_t type;
+	int rc;
+
+	_read_type(buf,&type);
+	switch( type ){
+	case DMDX_REQUEST:
+		rc = _dmdx_req(buf, host, seq);
+		break;
+	case DMDX_RESPONSE:
+		rc = _dmdx_resp(buf, host, seq);
+		break;
+	default:
+		PMIXP_ERROR("Bad request. Skip");
+		rc = PMIX_ERROR;
+		break;
+	}
+	/* free buffer protecting data */
+	buf->head = NULL;
+	free_buf(buf);
+	return rc;
 }

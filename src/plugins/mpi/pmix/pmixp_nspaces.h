@@ -96,7 +96,6 @@ hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
 char *pmixp_nspace_resolve(const char *name, int rank);
 
 size_t pmixp_nspace_mdx_lsize(List l);
-void pmixp_nspaces_pack_modex(Buf buf, List modex_list);
 int pmixp_nspaces_push(Buf buf, int cnt);
 
 #endif // PMIXP_NSPACES_H
