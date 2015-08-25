@@ -60,7 +60,6 @@ int pmixp_usock_create_srv(char *path)
 	static struct sockaddr_un sa;
 	int ret = 0;
 
-	// Make sure that socket file doesn't exists
 	if( strlen(path) >= sizeof(sa.sun_path) ){
 		PMIXP_ERROR_STD("UNIX socket path is too long: %lu, max %lu",
 			    (unsigned long)strlen(path),
