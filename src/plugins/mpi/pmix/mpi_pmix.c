@@ -89,10 +89,16 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 	pmixp_debug_hang(0);
 	PMIXP_DEBUG("slurmstepd initialization");
 
-	if( ( ret = pmixp_stepd_init(job, env) ) ){
-		return ret;
+	if( SLURM_SUCCESS != (ret = pmixp_stepd_init(job, env)) ){
+		goto err_ext;
 	}
-	ret = pmix_agent_start();
+	if( SLURM_SUCCESS != (ret = pmix_agent_start()) ){
+		goto err_ext;
+	}
+	return SLURM_SUCCESS;
+err_ext:
+	/* by now - abort the whole job if error! */
+	slurm_kill_job_step(job->jobid, job->stepid, SIGKILL);
 	return ret;
 }
 
