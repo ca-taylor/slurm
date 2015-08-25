@@ -61,15 +61,6 @@ int pmixp_usock_create_srv(char *path)
 	int ret = 0;
 
 	// Make sure that socket file doesn't exists
-	if( 0 == access(path, F_OK) ){
-		// remove old file
-		if( 0 != unlink(path) ){
-			PMIXP_ERROR_STD("Cannot delete outdated socket fine: %s",
-				    path);
-			return SLURM_ERROR;
-		}
-	}
-
 	if( strlen(path) >= sizeof(sa.sun_path) ){
 		PMIXP_ERROR_STD("UNIX socket path is too long: %lu, max %lu",
 			    (unsigned long)strlen(path),
