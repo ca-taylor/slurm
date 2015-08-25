@@ -47,40 +47,66 @@
 
 #include <pmix_server.h>
 
+static int
+client_connected (const char nspace[], int rank, void* server_object)
+{
+	/* we don't do anything by now */
+	return PMIX_SUCCESS;
+}
+
 static pmix_status_t
-finalize_fn(const char nspace[], int rank, void *server_object,
-	    pmix_op_cbfunc_t cbfunc, void *cbdata);
+client_finalized(const char nspace[], int rank, void* server_object,
+		 pmix_op_cbfunc_t cbfunc, void *cbdata)
+{
+	/* don'n do anything by now */
+	if (NULL != cbfunc) {
+	    cbfunc(PMIX_SUCCESS, cbdata);
+	}
+	return PMIX_SUCCESS;
+}
+
 static pmix_status_t
 abort_fn(const char nspace[], int rank, void *server_object,
 	 int status, const char msg[], pmix_proc_t procs[],
 	 size_t nprocs, pmix_op_cbfunc_t cbfunc, void *cbdata);
+
 static pmix_status_t
 fencenb_fn(const pmix_proc_t procs[], size_t nprocs,
 	   char *data, size_t ndata, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+
 static pmix_status_t
 dmodex_fn(const char nspace[], int rank, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+
 static pmix_status_t
 publish_fn(const char nspace[], int rank, pmix_data_range_t scope,
 	   pmix_persistence_t persist, const pmix_info_t info[], size_t ninfo,
 	   pmix_op_cbfunc_t cbfunc, void *cbdata);
+
 static pmix_status_t
 lookup_fn(const char nspace[], int rank, pmix_data_range_t scope, int wait,
 	  char **keys, pmix_lookup_cbfunc_t cbfunc, void *cbdata);
+
 static pmix_status_t
 unpublish_fn(const char nspace[], int rank, pmix_data_range_t scope,
 	     char **keys, pmix_op_cbfunc_t cbfunc, void *cbdata);
+
 static pmix_status_t
-spawn_fn(const char nspace[], int rank, const pmix_app_t apps[], size_t napps,
+spawn_fn(const char nspace[], int rank,
+	 const pmix_info_t job_info[], size_t ninfo,
+	 const pmix_app_t apps[], size_t napps,
 	 pmix_spawn_cbfunc_t cbfunc, void *cbdata);
+
 static pmix_status_t
 connect_fn(const pmix_proc_t procs[], size_t nprocs, pmix_op_cbfunc_t cbfunc,
 	   void *cbdata);
+
 static pmix_status_t
 disconnect_fn(const pmix_proc_t procs[], size_t nprocs, pmix_op_cbfunc_t cbfunc,
 	      void *cbdata);
 
 pmix_server_module_t _slurm_pmix_cb = {
-	finalize_fn,
+	client_connected,
+	client_finalized,
 	abort_fn,
 	fencenb_fn,
 	dmodex_fn,
@@ -113,7 +139,7 @@ int pmixp_libpmix_init()
 	}
 
 	/* register the errhandler */
-	PMIx_Register_errhandler(errhandler);
+	PMIx_Register_errhandler(NULL, 0, errhandler);
 
 	return 0;
 }
@@ -323,16 +349,6 @@ int pmixp_libpmix_job_set()
 	return SLURM_SUCCESS;
 }
 
-static int finalize_fn(const char nspace[], int rank, void* server_object,
-		       pmix_op_cbfunc_t cbfunc, void *cbdata)
-{
-	// TODO: think what we supposed to do here.
-	PMIXP_DEBUG("called");
-
-	cbfunc(PMIX_SUCCESS, cbdata);
-	return PMIX_SUCCESS;
-}
-
 pmix_status_t abort_fn(const char nspace[], int rank,
 		       void *server_object,
 		       int status, const char msg[],
@@ -408,9 +424,11 @@ unpublish_fn(const char nspace[], int rank, pmix_data_range_t scope,
 	return PMIX_ERR_NOT_IMPLEMENTED;
 }
 
-static int spawn_fn(const char nspace[], int rank,
-		    const pmix_app_t apps[], size_t napps,
-		    pmix_spawn_cbfunc_t cbfunc, void *cbdata)
+static pmix_status_t
+spawn_fn(const char nspace[], int rank,
+	 const pmix_info_t job_info[], size_t ninfo,
+	 const pmix_app_t apps[], size_t napps,
+	 pmix_spawn_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
 	return PMIX_ERR_NOT_IMPLEMENTED;
