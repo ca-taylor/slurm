@@ -48,14 +48,14 @@
 #include <pmix_server.h>
 
 static int
-client_connected (const char nspace[], int rank, void* server_object)
+client_connected (const pmix_proc_t *proc, void* server_object)
 {
 	/* we don't do anything by now */
 	return PMIX_SUCCESS;
 }
 
 static pmix_status_t
-client_finalized(const char nspace[], int rank, void* server_object,
+client_finalized(const pmix_proc_t *proc, void* server_object,
 		 pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
 	/* don'n do anything by now */
@@ -66,43 +66,52 @@ client_finalized(const char nspace[], int rank, void* server_object,
 }
 
 static pmix_status_t
-abort_fn(const char nspace[], int rank, void *server_object,
-	 int status, const char msg[], pmix_proc_t procs[],
-	 size_t nprocs, pmix_op_cbfunc_t cbfunc, void *cbdata);
+abort_fn(const pmix_proc_t *proc, void *server_object, int status,
+	 const char msg[], pmix_proc_t procs[], size_t nprocs,
+	 pmix_op_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
 fencenb_fn(const pmix_proc_t procs[], size_t nprocs,
-	   char *data, size_t ndata, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+	   const pmix_info_t info[], size_t ninfo,
+	   char *data, size_t ndata,
+	   pmix_modex_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-dmodex_fn(const char nspace[], int rank, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+dmodex_fn(const pmix_proc_t *proc,
+	  const pmix_info_t info[], size_t ninfo,
+	  pmix_modex_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-publish_fn(const char nspace[], int rank, pmix_data_range_t scope,
-	   pmix_persistence_t persist, const pmix_info_t info[], size_t ninfo,
+publish_fn(const pmix_proc_t *proc,
+	   pmix_data_range_t scope, pmix_persistence_t persist,
+	   const pmix_info_t info[], size_t ninfo,
 	   pmix_op_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-lookup_fn(const char nspace[], int rank, pmix_data_range_t scope, int wait,
+lookup_fn(const pmix_proc_t *proc, pmix_data_range_t scope,
+	  const pmix_info_t info[], size_t ninfo,
 	  char **keys, pmix_lookup_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-unpublish_fn(const char nspace[], int rank, pmix_data_range_t scope,
-	     char **keys, pmix_op_cbfunc_t cbfunc, void *cbdata);
+unpublish_fn(const pmix_proc_t *proc,
+	     pmix_data_range_t scope, char **keys,
+	     pmix_op_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-spawn_fn(const char nspace[], int rank,
+spawn_fn(const pmix_proc_t *proc,
 	 const pmix_info_t job_info[], size_t ninfo,
 	 const pmix_app_t apps[], size_t napps,
 	 pmix_spawn_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-connect_fn(const pmix_proc_t procs[], size_t nprocs, pmix_op_cbfunc_t cbfunc,
-	   void *cbdata);
+connect_fn(const pmix_proc_t procs[], size_t nprocs,
+	   const pmix_info_t info[], size_t ninfo,
+	   pmix_op_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-disconnect_fn(const pmix_proc_t procs[], size_t nprocs, pmix_op_cbfunc_t cbfunc,
-	      void *cbdata);
+disconnect_fn(const pmix_proc_t procs[], size_t nprocs,
+	      const pmix_info_t info[], size_t ninfo,
+	      pmix_op_cbfunc_t cbfunc, void *cbdata);
 
 pmix_server_module_t _slurm_pmix_cb = {
 	client_connected,
@@ -116,6 +125,7 @@ pmix_server_module_t _slurm_pmix_cb = {
 	spawn_fn,
 	connect_fn,
 	disconnect_fn,
+	NULL,
 	NULL
 };
 
@@ -127,13 +137,13 @@ int pmixp_libpmix_init()
 	int rc;
 
 //	/* TODO: remove this once debugged! */
-//	PMIXP_ERROR("WARNING: you are using /home/artpol/slurm_tmp/ as tmpdir!");
-//	setenv("TMPDIR","/home/artpol/slurm_tmp/",1);
-//	setenv("PMIX_DEBUG", "10", 1);
+//    PMIXP_ERROR("WARNING: you are using /home/artpol/slurm_tmp/ as tmpdir!");
+//    setenv("TMPDIR","/home/artpol/slurm_tmp/",1);
+//    setenv("PMIX_DEBUG", "10", 1);
 //	setenv("PMIX_OUTPUT_REDIRECT","file",1);
 
 	/* setup the server library */
-	if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb, true))) {
+	if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb))) {
 		PMIXP_ERROR_STD("PMIx_server_init failed with error %d\n", rc);
 		return SLURM_ERROR;
 	}
@@ -162,42 +172,49 @@ static void errhandler(pmix_status_t status,
 	slurm_kill_job_step(pmixp_info_jobid(), pmixp_info_stepid(), SIGKILL);
 }
 
-#define PMIXP_ALLOC_KEY(kvp, key_str) {				\
+#define PMIXP_ALLOC_KEY(kvp, key_str)				\
+{								\
 	char *key = key_str;					\
 	kvp = (pmix_info_t*)xmalloc(sizeof(pmix_info_t));	\
 	(void)strncpy(kvp->key, key, PMIX_MAX_KEYLEN);		\
-	}
-
-static void _release_cb(pmix_status_t status, void *cbdata)
-{
-	int *ptr = (int*)cbdata;
-	*ptr = 0;
 }
 
-int pmixp_libpmix_job_set()
+/*
+ * general proc-level attributes
+ */
+static void _general_proc_info(List lresp)
 {
-	List lresp;
-	pmix_info_t *info;
-	int ninfo;
-	char *p = NULL;
-	ListIterator it;
 	pmix_info_t *kvp;
-	uint32_t tmp;
-	int i, rc;
-	uid_t uid = getuid();
-	gid_t gid = getgid();
-	int in_progress = 1;
+//	TODO: how can we get this information in SLURM?
+//	PMIXP_ALLOC_KEY(kvp, PMIX_CPUSET);
+//	PMIX_VAL_SET(&kvp->value, string, "");
+//	list_append(lresp, kvp);
 
-	// Use list to safely expand/reduce key-value pairs.
-	lresp = list_create(pmixp_xfree_buffer);
+//	TODO: what should we provide for credentials?
+//	#define PMIX_CREDENTIAL            "pmix.cred"         // (char*) security credential assigned to proc
 
-	/* The name of the current host */
-	PMIXP_ALLOC_KEY(kvp, PMIX_HOSTNAME);
-	PMIX_VAL_SET(&kvp->value, string, pmixp_info_hostname());
+//	TODO: Once spawn will be implemented we'll need to check here
+	PMIXP_ALLOC_KEY(kvp, PMIX_SPAWNED);
+    PMIX_VAL_SET(&kvp->value, flag, 0);
 	list_append(lresp, kvp);
 
-	/* Setup temprary directory */
-	/* TODO: consider all ways of setting TMPDIR here: fixed, prolog, what else? */
+//	 TODO: what is the portable way to get arch string?
+//	 #define PMIX_ARCH                  "pmix.arch"         // (uint32_t) datatype architecture flag
+}
+
+/*
+ * scratch directory locations for use by applications
+ */
+static void _set_tmpdirs(List lresp)
+{
+	pmix_info_t *kvp;
+	char *p = NULL;
+	// TODO: Current implementation is wrong. Need more reliable way to retrieve
+	//       the TMPDIR value. Server environment should not be used for users.
+	// 1. consider all ways of setting TMPDIR here: fixed, prolog, what else?
+	// 2. How we want to do the separation of tmpdirs in SLURM?
+	// 3. This can be set from slurm.conf.
+
 	p = getenv("TMPDIR");
 	if( NULL == p ){
 		p = "/tmp/";
@@ -205,43 +222,118 @@ int pmixp_libpmix_job_set()
 	PMIXP_ALLOC_KEY(kvp, PMIX_TMPDIR);
 	PMIX_VAL_SET(&kvp->value, string, p);
 	list_append(lresp, kvp);
+	PMIXP_ALLOC_KEY(kvp, PMIX_NSDIR);
+	PMIX_VAL_SET(&kvp->value, string, p);
+	list_append(lresp, kvp);
+	PMIXP_ALLOC_KEY(kvp, PMIX_PROCDIR);
+	PMIX_VAL_SET(&kvp->value, string, p);
+	list_append(lresp, kvp);
+}
 
-	/* jobid assigned by scheduler */
-	p = NULL;
+
+/*
+ * information about relative ranks as assigned by the RM
+ */
+static void _set_procdatas(List lresp)
+{
+	pmixp_namespace_t *nsptr = pmixp_nspaces_local();
+	pmix_info_t *kvp, *tkvp;
+	char *p = NULL;
+	int i;
+
+	/* (char*) jobid assigned by scheduler */
 	xstrfmtcat(p, "%d.%d", pmixp_info_jobid(), pmixp_info_stepid());
 	PMIXP_ALLOC_KEY(kvp, PMIX_JOBID);
 	PMIX_VAL_SET(&kvp->value, string, p);
 	xfree(p);
 	list_append(lresp, kvp);
 
-	/* process identification ranks */
-	// TODO: what to put here for slurm?
-	// FIXME: This information supposed to be related to the precise rank
-	/*
-	PMIXP_ALLOC_KEY(kvp, PMIX_GLOBAL_RANK);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
-	list_append(lresp, kvp);
+	/* store information about local processes */
+	for (i=0; i < pmixp_info_tasks(); i++) {
+		List rankinfo;
+		ListIterator it;
+		int count, j, nodeid, localid;
+		char *nodename;
+		pmix_info_t *info;
 
-	PMIXP_ALLOC_KEY(kvp, PMIX_RANK);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
-	list_append(lresp, kvp);
+		rankinfo = list_create(pmixp_xfree_xmalloced);
 
-	PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_RANK);
-	PMIX_VAL_SET(&kvp->value, uint32_t, taskid);
-	list_append(lresp, kvp);
+		PMIXP_ALLOC_KEY(kvp, PMIX_RANK);
+		PMIX_VAL_SET(&kvp->value, int, i);
+		list_append(rankinfo, kvp);
 
-	PMIXP_ALLOC_KEY(kvp, PMIX_APP_RANK);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_task_id(taskid));
-	list_append(lresp, kvp);
-*/
-	PMIXP_ALLOC_KEY(kvp, PMIX_APPNUM);
-	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
-	list_append(lresp, kvp);
+		// TODO: always use 0 so far. this is not the general case though
+		// (see SLURM MIMD: man srun, section MULTIPLE PROGRAM CONFIGURATION)
+		PMIXP_ALLOC_KEY(kvp, PMIX_APPNUM);
+		PMIX_VAL_SET(&kvp->value, int, 0);
+		list_append(rankinfo, kvp);
 
-	PMIXP_ALLOC_KEY(kvp, PMIX_NODE_RANK);
-	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_nodeid());
-	list_append(lresp, kvp);
+		// TODO: the same as for previous here
+		PMIXP_ALLOC_KEY(kvp, PMIX_APPLDR);
+		PMIX_VAL_SET(&kvp->value, int, 0);
+		list_append(rankinfo, kvp);
 
+		// TODO: fix when several apps will appear
+		PMIXP_ALLOC_KEY(kvp, PMIX_GLOBAL_RANK);
+		PMIX_VAL_SET(&kvp->value, uint32_t, i);
+		list_append(rankinfo, kvp);
+
+		// TODO: fix when several apps will appear
+		PMIXP_ALLOC_KEY(kvp, PMIX_APP_RANK);
+		PMIX_VAL_SET(&kvp->value, uint32_t, i);
+		list_append(rankinfo, kvp);
+
+		localid = pmixp_info_taskid2localid(i);
+		/* this rank is local, store local info ab't it! */
+		if( 0 <= localid ){
+			PMIXP_ALLOC_KEY(kvp, PMIX_LOCAL_RANK);
+			PMIX_VAL_SET(&kvp->value, uint32_t, localid);
+			list_append(rankinfo, kvp);
+
+			// TODO: fix when several apps will appear
+			PMIXP_ALLOC_KEY(kvp, PMIX_NODE_RANK);
+			PMIX_VAL_SET(&kvp->value, uint32_t, localid);
+			list_append(rankinfo, kvp);
+		}
+
+		nodeid = nsptr->task_map[i];
+		nodename = hostlist_nth(nsptr->hl,nodeid);
+		PMIXP_ALLOC_KEY(kvp, PMIX_HOSTNAME);
+		PMIX_VAL_SET(&kvp->value, string, nodename);
+		list_append(rankinfo, kvp);
+		free(nodename);
+		PMIXP_ALLOC_KEY(kvp, PMIX_NODEID);
+		PMIX_VAL_SET(&kvp->value, uint32_t, nodeid);
+		list_append(rankinfo, kvp);
+
+		/* merge rankinfo into one PMIX_PROC_DATA key */
+		count = list_count(rankinfo);
+		PMIXP_ALLOC_KEY(kvp, PMIX_PROC_DATA);
+		kvp->value.type = PMIX_INFO_ARRAY;
+		kvp->value.data.array.size = count;
+		PMIX_INFO_CREATE(info, count);
+		it = list_iterator_create(rankinfo);
+		j = 0;
+		while( NULL != (tkvp = list_next(it) ) ){
+			// Just copy all the fields here. We will free original kvp's
+			// using list_destroy without free'ing their fields so it is
+			// safe to do so.
+			info[j] = *tkvp;
+			j++;
+		}
+		list_destroy(rankinfo);
+
+		kvp->value.data.array.array = (struct pmix_info_t*)info;
+		info = NULL;
+
+		/* put the complex key to the list */
+		list_append(lresp, kvp);
+	}
+}
+
+static void _set_sizeinfo(List lresp)
+{
+	pmix_info_t *kvp;
 	/* size information */
 	PMIXP_ALLOC_KEY(kvp, PMIX_UNIV_SIZE);
 	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_tasks_uni());
@@ -264,15 +356,68 @@ int pmixp_libpmix_job_set()
 	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_tasks_uni());
 	list_append(lresp, kvp);
 
-	/* offset information */
-	// TODO: Fix this in future once Spawn will be implemented
-	PMIXP_ALLOC_KEY(kvp, PMIX_NPROC_OFFSET);
-	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
+}
+
+static int _set_mapsinfo(List lresp)
+{
+	pmix_info_t *kvp;
+	char *regexp, *input;
+	pmixp_namespace_t *nsptr = pmixp_nspaces_local();
+	hostlist_t hl = nsptr->hl;
+	int rc, i, j;
+	int count = hostlist_count(hl);
+
+	input = hostlist_deranged_string_malloc(hl);
+	rc = PMIx_generate_regex(input, &regexp);
+	free(input);
+	if( PMIX_SUCCESS != rc ){
+		return SLURM_ERROR;
+	}
+	PMIXP_ALLOC_KEY(kvp, PMIX_NODE_MAP);
+	PMIX_VAL_SET(&kvp->value, string, regexp);
+	regexp = NULL;
 	list_append(lresp, kvp);
 
-	PMIXP_ALLOC_KEY(kvp, PMIX_APPLDR);
-	PMIX_VAL_SET(&kvp->value, uint32_t, 0);
+	input = NULL;
+	for(i = 0; i < count; i++){
+		/* for each node - run through all tasks and
+		 * record taskid's that reside on this node
+		 */
+		int first = 1;
+		for(j=0; j < nsptr->ntasks; j++){
+			if( nsptr->task_map[j] == i ){
+				if( first ){
+					first = 0;
+				} else {
+					xstrfmtcat(input,",");
+				}
+				xstrfmtcat(input,"%u", j);
+			}
+		}
+		if( i < (count - 1) ){
+			xstrfmtcat(input,";");
+		}
+	}
+	rc = PMIx_generate_ppn(input, &regexp);
+	xfree(input);
+	if( PMIX_SUCCESS != rc ){
+		return SLURM_ERROR;
+	}
+
+	PMIXP_ALLOC_KEY(kvp, PMIX_PROC_MAP);
+	PMIX_VAL_SET(&kvp->value, string, regexp);
+	regexp = NULL;
 	list_append(lresp, kvp);
+
+	return SLURM_SUCCESS;
+}
+
+static void _set_localinfo(List lresp)
+{
+	pmix_info_t *kvp;
+	uint32_t tmp;
+	char *p = NULL;
+	int i;
 
 	xstrfmtcat(p,"%u", pmixp_info_taskid(0));
 	tmp = pmixp_info_taskid(0);
@@ -292,13 +437,55 @@ int pmixp_libpmix_job_set()
 	PMIXP_ALLOC_KEY(kvp, PMIX_LOCALLDR);
 	PMIX_VAL_SET(&kvp->value, uint32_t, tmp);
 	list_append(lresp, kvp);
+}
 
-	PMIXP_ALLOC_KEY(kvp, PMIX_PROC_MAP);
-	PMIX_VAL_SET(&kvp->value, string, pmixp_info_task_map());
-	list_append(lresp, kvp);
+typedef struct {
+	volatile int active;
+} _register_caddy_t;
+
+static void _release_cb(pmix_status_t status, void *cbdata)
+{
+	(void)status;
+	_register_caddy_t *caddy = (_register_caddy_t*)cbdata;
+	caddy->active = 0;
+}
+
+int pmixp_libpmix_job_set()
+{
+	List lresp;
+	pmix_info_t *info;
+	int ninfo;
+	ListIterator it;
+	pmix_info_t *kvp;
+
+	int i, rc;
+	uid_t uid = getuid();
+	gid_t gid = getgid();
+	_register_caddy_t register_caddy;
+
+	pmixp_debug_hang(0);
+
+	// Use list to safely expand/reduce key-value pairs.
+	lresp = list_create(pmixp_xfree_xmalloced);
+
+	_general_proc_info(lresp);
+
+	_set_tmpdirs(lresp);
+
+	_set_procdatas(lresp);
+
+	_set_sizeinfo(lresp);
+
+	if( SLURM_SUCCESS != _set_mapsinfo(lresp) ){
+		list_destroy(lresp);
+		PMIXP_ERROR("Can't build nodemap");
+		return SLURM_ERROR;
+	}
+
+	_set_localinfo(lresp);
 
 	ninfo = list_count(lresp);
-	info = xmalloc(sizeof(pmix_info_t) * ninfo);
+	PMIX_INFO_CREATE(info, ninfo);
 	it = list_iterator_create(lresp);
 	i = 0;
 	while( NULL != (kvp = list_next(it) ) ){
@@ -307,18 +494,19 @@ int pmixp_libpmix_job_set()
 	}
 	list_destroy(lresp);
 
-	in_progress = 1;
+	register_caddy.active = 1;
 	rc = PMIx_server_register_nspace(pmixp_info_namespace(), pmixp_info_tasks_loc(),
-					 info, ninfo, _release_cb, &in_progress);
+					 info, ninfo, _release_cb, &register_caddy);
 	if (PMIX_SUCCESS == rc ) {
-		while( in_progress ){
+		while( register_caddy.active ){
 			struct timespec ts;
 			ts.tv_sec = 0;
 			ts.tv_nsec = 100;
 			nanosleep(&ts,NULL);
 		}
 	}
-	xfree(info);
+	PMIX_INFO_FREE(info, ninfo);
+
 	if( PMIX_SUCCESS != rc ){
 		PMIXP_ERROR("Cannot register namespace %s, nlocalproc=%d, "
 			    "ninfo = %d", pmixp_info_namespace(),
@@ -328,12 +516,14 @@ int pmixp_libpmix_job_set()
 
 	PMIXP_DEBUG("task initialization");
 	for(i=0;i<pmixp_info_tasks_loc();i++){
-		in_progress = 1;
-		rc = PMIx_server_register_client(pmixp_info_namespace(),
-						 pmixp_info_taskid(i), uid, gid, NULL,
-						 _release_cb, &in_progress);
+		pmix_proc_t proc;
+		register_caddy.active = 1;
+		strncpy(proc.nspace, pmixp_info_namespace(), PMIX_MAX_NSLEN);
+		proc.rank = pmixp_info_taskid(i);
+		rc = PMIx_server_register_client(&proc, uid, gid, NULL,
+						 _release_cb, &register_caddy);
 		if (PMIX_SUCCESS == rc ) {
-			while( in_progress ){
+			while( register_caddy.active ){
 				struct timespec ts;
 				ts.tv_sec = 0;
 				ts.tv_nsec = 100;
@@ -349,11 +539,10 @@ int pmixp_libpmix_job_set()
 	return SLURM_SUCCESS;
 }
 
-pmix_status_t abort_fn(const char nspace[], int rank,
-		       void *server_object,
-		       int status, const char msg[],
-		       pmix_proc_t procs[], size_t nprocs,
-		       pmix_op_cbfunc_t cbfunc, void *cbdata)
+static pmix_status_t
+abort_fn(const pmix_proc_t *proc, void *server_object, int status,
+	 const char msg[], pmix_proc_t procs[], size_t nprocs,
+	 pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
 	// Just kill this stepid for now. Think what we can do for FT here?
 	PMIXP_DEBUG("called: status = %d, msg = %s", status, msg);
@@ -366,6 +555,7 @@ pmix_status_t abort_fn(const char nspace[], int rank,
 }
 
 pmix_status_t fencenb_fn(const pmix_proc_t procs[], size_t nprocs,
+			 const pmix_info_t info[], size_t ninfo,
 			 char *data, size_t ndata,
 			 pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
@@ -383,25 +573,27 @@ pmix_status_t fencenb_fn(const pmix_proc_t procs[], size_t nprocs,
 	}
 	return PMIX_SUCCESS;
 error:
-	cbfunc(status,NULL,0,cbdata);
+	cbfunc(status,NULL,0,cbdata, NULL, NULL);
 	return status;
 }
 
 static pmix_status_t
-dmodex_fn(const char nspace[], int rank,
+dmodex_fn(const pmix_proc_t *proc,
+	  const pmix_info_t info[], size_t ninfo,
 	  pmix_modex_cbfunc_t cbfunc, void *cbdata)
 {
 	int rc;
 	PMIXP_DEBUG("called");
 
-	rc = pmixp_dmdx_get(nspace, rank, cbfunc, cbdata);
+	rc = pmixp_dmdx_get(proc->nspace, proc->rank, cbfunc, cbdata);
 
 	return ( SLURM_SUCCESS == rc ) ? PMIX_SUCCESS : PMIX_ERROR;
 }
 
 static pmix_status_t
-publish_fn(const char nspace[], int rank, pmix_data_range_t scope,
-	   pmix_persistence_t persist, const pmix_info_t info[], size_t ninfo,
+publish_fn(const pmix_proc_t *proc,
+	   pmix_data_range_t scope, pmix_persistence_t persist,
+	   const pmix_info_t info[], size_t ninfo,
 	   pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
@@ -409,7 +601,8 @@ publish_fn(const char nspace[], int rank, pmix_data_range_t scope,
 }
 
 static pmix_status_t
-lookup_fn(const char nspace[], int rank, pmix_data_range_t scope, int wait,
+lookup_fn(const pmix_proc_t *proc, pmix_data_range_t scope,
+	  const pmix_info_t info[], size_t ninfo,
 	  char **keys, pmix_lookup_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
@@ -417,15 +610,16 @@ lookup_fn(const char nspace[], int rank, pmix_data_range_t scope, int wait,
 }
 
 static pmix_status_t
-unpublish_fn(const char nspace[], int rank, pmix_data_range_t scope,
-	     char **keys, pmix_op_cbfunc_t cbfunc, void *cbdata)
+unpublish_fn(const pmix_proc_t *proc,
+	     pmix_data_range_t scope, char **keys,
+	     pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
 	return PMIX_ERR_NOT_IMPLEMENTED;
 }
 
 static pmix_status_t
-spawn_fn(const char nspace[], int rank,
+spawn_fn(const pmix_proc_t *proc,
 	 const pmix_info_t job_info[], size_t ninfo,
 	 const pmix_app_t apps[], size_t napps,
 	 pmix_spawn_cbfunc_t cbfunc, void *cbdata)
@@ -435,15 +629,17 @@ spawn_fn(const char nspace[], int rank,
 }
 
 static pmix_status_t
-connect_fn(const pmix_proc_t procs[], size_t nprocs, pmix_op_cbfunc_t cbfunc,
-	   void *cbdata){
+connect_fn(const pmix_proc_t procs[], size_t nprocs,
+	   const pmix_info_t info[], size_t ninfo,
+	   pmix_op_cbfunc_t cbfunc, void *cbdata){
 	PMIXP_DEBUG("called");
 	return PMIX_ERR_NOT_IMPLEMENTED;
 }
 
 static pmix_status_t
-disconnect_fn(const pmix_proc_t procs[], size_t nprocs, pmix_op_cbfunc_t cbfunc,
-	      void *cbdata)
+disconnect_fn(const pmix_proc_t procs[], size_t nprocs,
+	      const pmix_info_t info[], size_t ninfo,
+	      pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
 	return PMIX_ERR_NOT_IMPLEMENTED;

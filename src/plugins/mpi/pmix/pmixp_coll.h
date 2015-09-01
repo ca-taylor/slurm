@@ -82,10 +82,7 @@ typedef struct {
 	int *ch_nodeids;
 	bool *ch_contribs;
 	/* collective data */
-	char *data;
-	/* max and actual size used for the
-	 * collective data */
-	size_t data_sz, data_pay;
+	Buf buf;
 
 	/* libpmix callback data*/
 	pmix_modex_cbfunc_t cbfunc;
@@ -173,14 +170,12 @@ inline static int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
 	return SLURM_ERROR;
 }
 
-void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
-			     uint32_t size);
+void pmixp_coll_fan_out_data(pmixp_coll_t *coll, Buf buf);
 int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t ndata);
-int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
-			    void *contrib, size_t size);
+int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf);
 bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
 			 void **data, uint64_t size);
-int pmixp_coll_unpack_ranges(void *data, size_t size, pmixp_coll_type_t *type,
+int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
 			     pmix_proc_t **ranges, size_t *nranges);
 int pmixp_coll_belong_chk(pmixp_coll_type_t type, const pmix_proc_t *procs,
 			  size_t nprocs);

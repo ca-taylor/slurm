@@ -25,15 +25,13 @@ typedef struct
 typedef struct
 {
 	uint32_t seq_num;
-	char *nspace, *sender_host, *sender_ns;
+	pmix_proc_t proc;
+	char *sender_host, *sender_ns;
 	int rank;
 } dmdx_caddy_t;
 
 void _dmdx_free_caddy(dmdx_caddy_t *caddy)
 {
-	if( NULL != caddy->nspace ){
-		xfree(caddy->nspace);
-	}
 	if( NULL != caddy->sender_host ){
 		xfree(caddy->sender_host);
 	}
@@ -50,7 +48,7 @@ static int _respond_error(char *ns, int rank, char *sender_host, char *sender_ns
 
 int pmixp_dmdx_init()
 {
-	_dmdx_requests = list_create(pmixp_xfree_buffer);
+	_dmdx_requests = list_create(pmixp_xfree_xmalloced);
 	_dmdx_seq_num = 1;
 	return SLURM_SUCCESS;
 }
@@ -64,14 +62,15 @@ static void _setup_header(Buf buf, dmdx_type_t t,
 	grow_buf(buf,sizeof(char));
 	pack8(type,buf);
 
-	/* 2. pack namespace */
+	/* 2. pack namespace _with_ '\0' (strlen(nspace) + 1)! */
 	packmem((char*)nspace, strlen(nspace) + 1, buf);
 
 	/* 3. pack rank */
 	grow_buf(buf, sizeof(int) );
 	pack32((uint32_t)rank, buf);
 
-	/* 4. pack our contact info */
+    /* 4. pack my rendezvous point - local namespace
+	 * ! _with_ '\0' (strlen(nspace) + 1) ! */
 	str = pmixp_info_namespace();
 	packmem(str,strlen(str) + 1, buf);
 
@@ -101,11 +100,12 @@ static int _read_info(Buf buf, char **ns, int *rank,
 	*sender_ns = NULL;
 
 	/* 1. unpack namespace */
-	if( SLURM_SUCCESS != (rc = unpackmem_xmalloc(ns, &cnt, buf) ) ){
+	if( SLURM_SUCCESS != (rc = unpackmem_ptr(ns, &cnt, buf) ) ){
 		PMIXP_ERROR("Cannot unpack requested namespace!");
 		goto eexit;
 	}
-	(*ns)[cnt] = '\0';
+	// We supposed to unpack a whole null-terminated string (with '\0')!
+	// (*ns)[cnt] = '\0';
 
 	/* 2. unpack rank */
 	if( SLURM_SUCCESS != (rc = unpack32(&uint32_tmp, buf) ) ){
@@ -114,11 +114,12 @@ static int _read_info(Buf buf, char **ns, int *rank,
 	}
 	*rank = uint32_tmp;
 
-	if( SLURM_SUCCESS != (rc = unpackmem_xmalloc(sender_ns, &cnt, buf) ) ){
+	if( SLURM_SUCCESS != (rc = unpackmem_ptr(sender_ns, &cnt, buf) ) ){
 		PMIXP_ERROR("Cannot unpack sender namespace!");
 		goto eexit;
 	}
-	(*sender_ns)[cnt] = '\0';
+	// We supposed to unpack a whole null-terminated string (with '\0')!
+	// (*sender_ns)[cnt] = '\0';
 
 	/* 4. unpack status */
 	if( SLURM_SUCCESS != (rc = unpack32(&uint32_tmp, buf) ) ){
@@ -128,12 +129,6 @@ static int _read_info(Buf buf, char **ns, int *rank,
 	*status = uint32_tmp;
 	return SLURM_SUCCESS;
 eexit:
-	if( NULL != *ns){
-		xfree(*ns);
-	}
-	if( NULL != *sender_ns ){
-		xfree(*sender_ns);
-	}
 	return rc;
 }
 
@@ -148,7 +143,7 @@ static int _respond_error(char *ns, int rank, char *sender_host, char *sender_ns
 	addr = pmixp_info_nspace_usock(sender_ns);
 	/* send response */
 	rc = pmixp_server_send(sender_host, PMIXP_MSG_DMDX, rank, addr,
-			       buf->head, get_buf_offset(buf));
+			       get_buf_data(buf), get_buf_offset(buf));
 	if( SLURM_SUCCESS != rc ){
 		PMIXP_ERROR("Cannot send direct modex request to %s", sender_host);
 	}
@@ -166,7 +161,7 @@ static void _dmdx_pmix_cb(pmix_status_t status, char *data,
 	int rc;
 
 	/* setup response header */
-	_setup_header(buf,DMDX_RESPONSE, caddy->nspace, caddy->rank, status);
+	_setup_header(buf, DMDX_RESPONSE, caddy->proc.nspace, caddy->proc.rank, status);
 
 	/* pack the response */
 	packmem(data, sz, buf);
@@ -176,7 +171,7 @@ static void _dmdx_pmix_cb(pmix_status_t status, char *data,
 
 	/* send the request */
 	rc = pmixp_server_send(caddy->sender_host, PMIXP_MSG_DMDX, caddy->seq_num, addr,
-			       buf->head, get_buf_offset(buf));
+			       get_buf_data(buf), get_buf_offset(buf));
 	if( SLURM_SUCCESS != rc ){
 		PMIXP_ERROR("Cannot send direct modex request to %s", caddy->sender_host);
 	}
@@ -209,7 +204,7 @@ int pmixp_dmdx_get(const char *nspace, int rank,
 
 	/* send the request */
 	rc = pmixp_server_send(host, PMIXP_MSG_DMDX, _dmdx_seq_num, addr,
-			       buf->head, get_buf_offset(buf));
+			       get_buf_data(buf), get_buf_offset(buf));
 	if( SLURM_SUCCESS != rc ){
 		PMIXP_ERROR("Cannot send direct modex request to %s", host);
 	}
@@ -233,13 +228,13 @@ int pmixp_dmdx_get(const char *nspace, int rank,
 	return rc;
 }
 
-static int _dmdx_req(Buf buf, char *from_host, uint32_t seq_num)
+static int _dmdx_req(Buf buf, char *sender_host, uint32_t seq_num)
 {
 	int rank, rc = SLURM_SUCCESS;
 	int status;
-	char *ns = NULL, *sender_ns = NULL, *sender_host = xstrdup(from_host);
+	char *ns = NULL, *sender_ns = NULL;
 	pmixp_namespace_t *nsptr;
-	dmdx_caddy_t *caddy;
+	dmdx_caddy_t *caddy = NULL;
 
 	if( SLURM_SUCCESS != (rc = _read_info(buf, &ns, &rank, &sender_ns, &status)) ){
 		goto exit;
@@ -267,30 +262,33 @@ static int _dmdx_req(Buf buf, char *from_host, uint32_t seq_num)
 	/* setup temp structure to handle information fro _dmdx_pmix_cb */
 	caddy = xmalloc( sizeof(dmdx_caddy_t) );
 	caddy->seq_num = seq_num;
-	caddy->nspace = ns;
-	ns = NULL;              // protect the data
-	caddy->rank = rank;
-	caddy->sender_host = sender_host;
-	sender_host = NULL;
-	caddy->sender_ns = sender_ns;
+
+	/* ns is a pointer inside incoming buffer */
+	strncpy(caddy->proc.nspace, ns, PMIX_MAX_NSLEN);
+	ns = NULL;              /* protect the data */
+	caddy->proc.rank = rank;
+
+	/* sender_host was passed from outside - copy it */
+	caddy->sender_host = xstrdup(sender_host);
+	sender_host = NULL;     /* protect the data */
+
+	/* sender_ns is a pointer inside incoming buffer */
+	caddy->sender_ns = xstrdup(sender_ns);
 	sender_ns = NULL;
 
-	rc = PMIx_server_dmodex_request(caddy->nspace, caddy->rank, _dmdx_pmix_cb, (void*)caddy);
+	rc = PMIx_server_dmodex_request(&caddy->proc, _dmdx_pmix_cb, (void*)caddy);
 	if( PMIX_SUCCESS != rc ){
 		PMIXP_ERROR("Can't request direct modex from libpmix-server, rc = %d", rc);
 		_dmdx_free_caddy(caddy);
+		rc = SLURM_ERROR;
 	}
 
 exit:
-	if( NULL != ns ){
-		xfree(ns);
+	if( SLURM_SUCCESS != rc ){
+		/* cleanup in case of error */
+		_dmdx_free_caddy(caddy);
 	}
-	if( NULL != sender_host ){
-		xfree(sender_host);
-	}
-	if( NULL != sender_host ){
-		xfree(sender_host);
-	}
+
 	return rc;
 }
 
@@ -301,14 +299,14 @@ static int _dmdx_req_cmp(void *x, void *key)
 	return (req->seq_num == seq_num);
 }
 
-int _dmdx_resp(Buf buf, char *sender_host, uint32_t seq_num)
+static int _dmdx_resp(Buf buf, char *sender_host, uint32_t seq_num)
 {
 	dmdx_req_info_t *req;
 	int rank, rc = SLURM_SUCCESS;
 	int status;
 	char *ns = NULL, *sender_ns = NULL;
-	char *data = NULL;
-	uint32_t size;
+	char *data = get_buf_data(buf) + get_buf_offset(buf);
+	uint32_t size = remaining_buf(buf);
 
 	/* get the service data */
 	if( SLURM_SUCCESS != (rc = _read_info(buf, &ns, &rank, &sender_ns, &status)) ){
@@ -329,14 +327,17 @@ int _dmdx_resp(Buf buf, char *sender_host, uint32_t seq_num)
 	}
 
 	/* call back to libpmix-server */
-	req->cbfunc(status, data, size, req->cbdata);
+	req->cbfunc(status, data, size, req->cbdata, pmixp_free_Buf, (void*)buf);
 
-	/* release tracker & list iterator*/
+	/* release tracker & list iterator */
 	req = NULL;
 	list_delete_item(it);
 	list_iterator_destroy(it);
 
 exit:
+	if( SLURM_SUCCESS != rc ){
+		free_buf(buf);
+	}
 	if( NULL != ns ){
 		xfree(ns);
 	}
@@ -346,9 +347,8 @@ exit:
 	return rc;
 }
 
-int pmixp_dmdx_process(void *msg, size_t size, char *host, uint32_t seq)
+int pmixp_dmdx_process(Buf buf, char *host, uint32_t seq)
 {
-	Buf buf = create_buf(msg, size);
 	dmdx_type_t type;
 	int rc;
 

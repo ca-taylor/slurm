@@ -82,7 +82,7 @@ void pmix_io_init(pmixp_io_engine_t *eng, int fd, pmixp_io_engine_header_t heade
 	eng->send_hdr_size = eng->send_hdr_offs = 0;
 	eng->send_payload = NULL;
 	eng->send_pay_size = eng->send_pay_offs = 0;
-	eng->send_queue = list_create(pmixp_xfree_buffer);
+	eng->send_queue = list_create(pmixp_xfree_xmalloced);
 }
 
 void pmix_io_finalize(pmixp_io_engine_t *eng, int error)

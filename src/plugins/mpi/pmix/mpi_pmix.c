@@ -105,11 +105,14 @@ err_ext:
 int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 			       char ***env)
 {
+	pmix_proc_t proc;
 	char **tmp_env = NULL;
 	pmixp_debug_hang(0);
 
 	PMIXP_DEBUG("Patch environment for task %d", job->gtaskid);
-	PMIx_server_setup_fork(pmixp_info_namespace(), job->gtaskid, &tmp_env);
+	proc.rank = job->gtaskid;
+	strncpy(proc.nspace, pmixp_info_namespace(), PMIX_MAX_NSLEN);
+	PMIx_server_setup_fork(&proc, &tmp_env);
 	if( NULL != tmp_env ){
 		int i;
 		for(i=0; NULL != tmp_env[i]; i++){

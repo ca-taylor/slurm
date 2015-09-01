@@ -65,9 +65,8 @@ void _xfree_coll(void *x)
 		xfree(coll->ch_contribs);
 	}
 
-	if( NULL != coll->data ){
-		xfree(coll->data);
-	}
+	free_buf(coll->buf);
+
 	pthread_mutex_unlock(&coll->lock);
 	xfree(coll);
 }
@@ -182,10 +181,8 @@ pmixp_state_coll_get(pmixp_coll_type_t type, const pmix_proc_t *procs,
 		} else {
 			list_append(_pmixp_state.coll, ret);
 		}
-		pthread_mutex_unlock(&_pmixp_state.lock);
-	} else {
-		pthread_mutex_unlock(&_pmixp_state.lock);
 	}
 
+	pthread_mutex_unlock(&_pmixp_state.lock);
 	return ret;
 }

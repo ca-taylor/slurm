@@ -78,73 +78,35 @@ err_exit:
 	return SLURM_ERROR;
 }
 
-static void _adjust_data_size(pmixp_coll_t *coll, size_t size)
-{
-	if( NULL == coll->data ){
-		coll->data = xmalloc( size );
-		coll->data_sz = size;
-		coll->data_pay = 0;
-		return;
-	}
-
-	// reallocate only if there is a need
-	if( coll->data_pay + size > coll->data_sz ){
-		// not enough space for the new contribution
-		size_t size_new = coll->data_pay + size;
-		coll->data_sz = size_new;
-		coll->data = xrealloc_nz(coll->data, coll->data_sz);
-	}
-}
-
 static int _pack_ranges(pmixp_coll_t *coll)
 {
 	pmix_proc_t *procs = coll->procs;
 	size_t nprocs = coll->nprocs;
-	Buf buf = pmixp_server_new_buf();
 	uint32_t size;
 	int i;
 
 	// 1. store the type of collective
 	size = coll->type;
-	pack32(size,buf);
+	pack32(size,coll->buf);
 
 	// 2. Put the number of ranges
-	pack32(nprocs, buf);
+	pack32(nprocs, coll->buf);
 	for(i=0; i< (int)nprocs; i++){
-		// Count cumulative size
-		size = 0;
-		size += strlen(procs->nspace) + sizeof(uint32_t);
-		size += sizeof(uint32_t);
-		grow_buf(buf, size);
 		// Pack namespace
-		packmem(procs->nspace, strlen(procs->nspace), buf);
-		pack32(procs->rank, buf);
+		packmem(procs->nspace, strlen(procs->nspace) + 1, coll->buf);
+		pack32(procs->rank, coll->buf);
 	}
-
-	coll->data = buf->head;
-	coll->data_sz = size_buf(buf);
-	coll->data_pay = get_buf_offset(buf);
-
-	/* free buffer protecting data */
-	buf->head = NULL;
-	free_buf(buf);
 
 	return SLURM_SUCCESS;
 }
 
-int pmixp_coll_unpack_ranges(void *data, size_t size,
-			     pmixp_coll_type_t *type,
+int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
 			     pmix_proc_t **r, size_t *nr)
 {
 	pmix_proc_t *procs = NULL;
 	uint32_t nprocs = 0;
-	Buf buf;
 	uint32_t tmp;
 	int i, rc;
-
-	size = (size < MAX_PACK_MEM_LEN) ? size : MAX_PACK_MEM_LEN;
-
-	buf = create_buf(data, size);
 
 	// 1. extract the type of collective
 	if( SLURM_SUCCESS != ( rc = unpack32(&tmp, buf))){
@@ -181,10 +143,7 @@ int pmixp_coll_unpack_ranges(void *data, size_t size,
 			return rc;
 		}
 	}
-	rc = get_buf_offset(buf);
-	buf->head = NULL;
-	free_buf(buf);
-	return rc;
+	return SLURM_SUCCESS;
 }
 
 int pmixp_coll_belong_chk(pmixp_coll_type_t type, const pmix_proc_t *procs,
@@ -264,9 +223,8 @@ int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs, size_t nprocs,
 	coll->all_children = hl;
 
 	/* Collective data */
-	coll->data = NULL;
-	coll->data_sz = 0;
-	coll->data_pay = 0;
+	coll->buf = pmixp_server_new_buf();
+
 	if( SLURM_SUCCESS != _pack_ranges(coll) ){
 		PMIXP_ERROR("Cannot pack ranges to coll message header!");
 		goto err_exit;
@@ -306,10 +264,11 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
-	_adjust_data_size(coll, size);
-	memcpy(coll->data + coll->data_pay, data, size);
-	coll->data_pay += size;
+	/* save & mark local contribution */
 	coll->contrib_local = true;
+	grow_buf(coll->buf,size);
+	memcpy(get_buf_data(coll->buf) + get_buf_offset(coll->buf), data, size);
+	set_buf_offset(coll->buf, get_buf_offset(coll->buf) + size);
 
 	/* unlock the structure */
 	pthread_mutex_unlock(&coll->lock);
@@ -323,11 +282,12 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 	return SLURM_SUCCESS;
 }
 
-int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
-			    void *contrib, size_t size)
+int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 {
 	int idx;
 	int nodeid;
+    char *data = NULL;
+	uint32_t size;
 
 
 	PMIXP_DEBUG("%s:%d: get contribution from node %s",
@@ -360,9 +320,11 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename,
 		return SLURM_SUCCESS;
 	}
 
-	_adjust_data_size(coll, size);
-	memcpy(coll->data + coll->data_pay, contrib, size);
-	coll->data_pay += size;
+	data = get_buf_data(buf) + get_buf_offset(buf);
+	size = remaining_buf(buf);
+	grow_buf(coll->buf,size);
+	memcpy(get_buf_data(coll->buf) + get_buf_offset(coll->buf), data, size);
+	set_buf_offset(coll->buf, get_buf_offset(coll->buf) + size);
 
 	/* increase number of individual contributions */
 	coll->ch_contribs[idx]++;
@@ -437,32 +399,30 @@ void _progress_fan_in(pmixp_coll_t *coll)
 		    hostlist);
 
 	rc = pmixp_server_send(hostlist, type, coll->seq, addr,
-			       coll->data, coll->data_pay);
+			       get_buf_data(coll->buf), get_buf_offset(coll->buf));
 	xfree(hostlist);
 
 	if( SLURM_SUCCESS != rc ){
 		PMIXP_ERROR("Cannot send database (size = %lu), to hostlist:\n%s",
-			    (uint64_t)coll->data_pay, hostlist);
+			    (uint64_t)get_buf_offset(coll->buf), hostlist);
 		// TODO: abort the whole application here?
 		// Currently it will just hang!
 		goto exit;
 	}
 
 	coll->state = PMIXP_COLL_FAN_OUT;
-	xfree(coll->data);
-	coll->data = NULL;
-	coll->data_pay = coll->data_sz = 0;
+
+	/* reset the old buffer */
+	set_buf_offset(coll->buf, 0);
+
 	PMIXP_DEBUG("%s:%d: switch to PMIXP_COLL_FAN_OUT state",
 		    pmixp_info_namespace(), pmixp_info_nodeid() );
-
-
 exit:
 	/* lock the */
 	pthread_mutex_unlock(&coll->lock);
 }
 
-void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
-			     uint32_t size)
+void pmixp_coll_fan_out_data(pmixp_coll_t *coll, Buf buf)
 {
 	PMIXP_DEBUG("%s:%d: start", pmixp_info_namespace(), pmixp_info_nodeid());
 
@@ -475,9 +435,11 @@ void pmixp_coll_fan_out_data(pmixp_coll_t *coll, void *data,
 
 	// update the database
 	if( NULL != coll->cbfunc ){
+		void *data = get_buf_data(buf) + get_buf_offset(buf);
+		size_t size = remaining_buf(buf);
 		PMIXP_DEBUG("%s:%d: use the callback",
 			    pmixp_info_namespace(), pmixp_info_nodeid());
-		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata);
+		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata, pmixp_free_Buf, (void*)buf);
 	}
 
 	// Prepare for the next collective operation

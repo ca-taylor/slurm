@@ -50,9 +50,15 @@
 
 #define PMIXP_MAX_RETRY 7
 
-void pmixp_xfree_buffer(void *x)
+void pmixp_xfree_xmalloced(void *x)
 {
 	xfree(x);
+}
+
+void pmixp_free_Buf(void *x)
+{
+	Buf buf = (Buf)x;
+	free_buf(buf);
 }
 
 int pmixp_usock_create_srv(char *path)
