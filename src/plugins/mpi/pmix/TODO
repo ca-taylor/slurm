@@ -1,0 +1,12 @@
+The list of thing stat remain unfixed in this plugin
+
+* Fix finalization logic
+
+There might be several ways to do that:
+1. Current SLURM mpi plugin API doesn't have finalization routine for stepd's. 
+I've asked for it, if it would be added - this will completely solve the finalization
+problem.
+2. I intend to extend PMIx server-side API to make it clear when all processes are finalzed.
+
+* Add direct modex timer check to avoid application forever-hangs in case there was communication 
+error.
