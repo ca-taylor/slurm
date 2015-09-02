@@ -33,7 +33,7 @@ AC_DEFUN([X_AC_PMIX],
           _x_ac_pmix_cppflags_save="$CPPFLAGS"
           CPPFLAGS="-I$d/include $CPPFLAGS"
           _x_ac_pmix_libs_save="$LIBS"
-          LIBS="-L$d/$d1 -lpmix_server $LIBS"
+          LIBS="-L$d/$d1 -lpmix $LIBS"
           AC_LINK_IFELSE(
             [AC_LANG_CALL([], PMIx_Get_version)],
             AS_VAR_SET(x_ac_cv_pmix_dir, $d))
@@ -58,7 +58,7 @@ AC_DEFUN([X_AC_PMIX],
           _x_ac_pmix_cppflags_save="$CPPFLAGS"
           CPPFLAGS="-I$x_ac_cv_pmix_dir/include $CPPFLAGS"
           _x_ac_pmix_libs_save="$LIBS"
-          LIBS="-L$d -lpmix_server $LIBS"
+          LIBS="-L$d -lpmix $LIBS"
           AC_LINK_IFELSE(
             [AC_LANG_CALL([], PMIx_Get_version)],
             AS_VAR_SET(x_ac_cv_pmix_libdir, $d))
@@ -73,7 +73,7 @@ AC_DEFUN([X_AC_PMIX],
     else
       PMIX_LDFLAGS="-L$x_ac_cv_pmix_libdir"
     fi
-    PMIX_LIBS="-lpmix_server"
+    PMIX_LIBS="-lpmix"
     AC_DEFINE(HAVE_PMIX, 1, [Define to 1 if pmix library found])
   fi
 
