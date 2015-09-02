@@ -196,25 +196,6 @@ inline static bool _rcvd_need_header(pmixp_io_engine_t *eng)
 	return eng->rcvd_hdr_offs < eng->header.net_size;
 }
 
-
-/*
- * Add already unpacked (converted from net to host format) header.
- *//*
- * // TODO: Remove this function as it is needed anymore
-void pmix_io_add_hdr(pmixp_io_engine_t *eng, void *buf)
-{
-	int rc;
-	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
-	xassert( eng->operating );
-
-	memcpy(eng->rcvd_hdr_host, buf, eng->header.host_size);
-	eng->rcvd_hdr_offs = eng->header.net_size;
-	if( (rc = _rcvd_swithch_to_body(eng) ) ){
-		pmix_io_finalize(eng, rc);
-	}
-}
-*/
-
 void pmix_io_rcvd(pmixp_io_engine_t *eng)
 {
 	size_t size, remain;
