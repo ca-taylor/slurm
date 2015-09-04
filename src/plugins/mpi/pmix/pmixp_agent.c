@@ -51,19 +51,30 @@
 
 #define MAX_RETRIES 5
 
-static pthread_t _agent_tid = 0;
 static int _agent_is_running = 0;
+static int _timer_is_running = 0;
 static eio_handle_t *_io_handle = NULL;
 
-static bool _server_conn_readable(eio_obj_t *obj);
-static int  _server_conn_read(eio_obj_t *obj, List objs);
+struct timer_data_t {
+	int work_in, work_out;
+	int stop_in, stop_out;
+};
+static struct timer_data_t timer_data;
 
+static bool _conn_readable(eio_obj_t *obj);
+static int  _server_conn_read(eio_obj_t *obj, List objs);
+static int  _timer_conn_read(eio_obj_t *obj, List objs);
 static struct io_operations srv_ops = {
-	.readable    = &_server_conn_readable,
+	.readable    = &_conn_readable,
 	.handle_read = &_server_conn_read
 };
 
-static bool _server_conn_readable(eio_obj_t *obj)
+static struct io_operations to_ops = {
+	.readable    = &_conn_readable,
+	.handle_read = &_timer_conn_read
+};
+
+static bool _conn_readable(eio_obj_t *obj)
 {
 	PMIXP_DEBUG("fd = %d", obj->fd);
 	if (obj->shutdown == true) {
@@ -119,39 +130,158 @@ _server_conn_read(eio_obj_t *obj, List objs)
 	return 0;
 }
 
+static int
+_timer_conn_read(eio_obj_t *obj, List objs)
+{
+	char *tmpbuf[32];
+	int shutdown;
+	PMIXP_DEBUG("Timeout thread, fd = %d", obj->fd);
+
+	/* drain everything from in fd */
+	while( 32 == pmixp_read_buf(obj->fd, tmpbuf, 32, &shutdown, false) );
+	if( shutdown ){
+		PMIXP_ERROR("readin from timer fd, shouldn't happen");
+		obj->shutdown = true;
+	}
+
+	/* call handlers to check if there is stalled
+	 * collectives or direct modex requests */
+
+	return 0;
+}
+
+
+static void _shutdown_timeout_fds();
+
+#define SETUP_FDS(fds) { \
+	fd_set_nonblocking(fds[0]);	\
+	fd_set_close_on_exec(fds[0]);	\
+	fd_set_nonblocking(fds[1]);	\
+	fd_set_close_on_exec(fds[1]);	\
+}
+
+static int _setup_timeout_fds()
+{
+	int fds[2];
+
+	timer_data.work_in = timer_data.work_out = -1;
+	timer_data.stop_in = timer_data.stop_out = -1;
+
+	if( pipe(fds) ){
+		return SLURM_ERROR;
+	}
+	SETUP_FDS(fds);
+	timer_data.work_in = fds[0];
+	timer_data.work_out = fds[1];
+
+	if( pipe(fds) ){
+		_shutdown_timeout_fds();
+		return SLURM_ERROR;
+	}
+	SETUP_FDS(fds);
+	timer_data.stop_in = fds[0];
+	timer_data.stop_out = fds[1];
+
+	return SLURM_SUCCESS;
+}
+
+static void _shutdown_timeout_fds()
+{
+	if( 0 <= timer_data.work_in ){
+		close(timer_data.work_in);
+		timer_data.work_in = -1;
+	}
+	if( 0 <= timer_data.work_out ){
+		close(timer_data.work_out);
+		timer_data.work_out = -1;
+	}
+	if( 0 <= timer_data.stop_in ){
+		close(timer_data.stop_in);
+		timer_data.stop_in = -1;
+	}
+	if( 0 <= timer_data.stop_out ){
+		close(timer_data.stop_out);
+		timer_data.stop_out = -1;
+	}
+}
+
+
 /*
  * main loop of agent thread
  */
-static void *_agent(void * unused)
+static void *_agent_thread(void * unused)
 {
 	PMIXP_DEBUG("Start agent thread");
-	eio_obj_t *srv_obj;
+	eio_obj_t *obj;
 
 	_io_handle = eio_handle_create(0);
 
-	srv_obj = eio_obj_create(pmixp_info_srv_fd(), &srv_ops, (void *)(-1));
-	eio_new_initial_obj(_io_handle, srv_obj);
+	obj = eio_obj_create(pmixp_info_srv_fd(), &srv_ops, (void *)(-1));
+	eio_new_initial_obj(_io_handle, obj);
+
+	obj = eio_obj_create(timer_data.work_in, &to_ops, (void *)(-1));
+	eio_new_initial_obj(_io_handle, obj);
 
 	pmixp_info_io_set(_io_handle);
 
 	_agent_is_running = 1;
+
 	eio_handle_mainloop(_io_handle);
-	_agent_is_running = 0;
 
 	PMIXP_DEBUG("agent thread exit");
-
 	eio_handle_destroy(_io_handle);
+
+	_agent_is_running = 0;
 	return NULL;
 }
 
-int pmix_agent_start(void)
+static void *_pmix_timer_thread(void * unused)
+{
+	struct pollfd pfds[1];
+
+	PMIXP_DEBUG("Start timer thread");
+
+	pfds[0].fd = timer_data.stop_in;
+	pfds[0].events = POLLIN;
+
+	_timer_is_running = 1;
+
+	/* our job is to sleep 1 sec and then trigger
+	 * the timer event in the main loop */
+
+	while( 1 ){
+		/* during normal operation there should be no
+		 * activity on the stop fd.
+		 * So normally we need to exit by the timeout.
+		 * This forses periodic timer events (once each second) */
+		int ret = poll (pfds, 1, 1000);
+		char c = 1;
+		if( 0 < ret ) {
+			/* there was an event on stop_fd, exit */
+			break;
+		}
+		/* activate main thread's timer event */
+		write(timer_data.work_out,&c,1);
+	}
+
+	_timer_is_running = 0;
+
+	return NULL;
+}
+
+int pmixp_agent_start(void)
 {
 	int retries = 0;
+	pthread_t tid = 0;
 	pthread_attr_t attr;
 
+	_setup_timeout_fds();
+
 	slurm_attr_init(&attr);
+
+	/* start agent thread */
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&_agent_tid, &attr, _agent, NULL))) {
+	while ((errno = pthread_create(&tid, &attr, _agent_thread, NULL))) {
 		if (++retries > MAX_RETRIES) {
 			PMIXP_ERROR_STD("pthread_create error");
 			slurm_attr_destroy(&attr);
@@ -159,24 +289,50 @@ int pmix_agent_start(void)
 		}
 		sleep(1);
 	}
-	slurm_attr_destroy(&attr);
 
 	/* wait for the agent thread to initialize */
 	while( !_agent_is_running ){
 		sched_yield();
 	}
 
-	PMIXP_DEBUG("started agent thread (%lu)", (unsigned long) _agent_tid);
+
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	while ((errno = pthread_create(&tid, &attr, _pmix_timer_thread, NULL))) {
+		if (++retries > MAX_RETRIES) {
+			PMIXP_ERROR_STD("pthread_create error");
+			slurm_attr_destroy(&attr);
+			return SLURM_ERROR;
+		}
+		sleep(1);
+	}
+
+	/* wait for the agent thread to initialize */
+	while( !_timer_is_running ){
+		sched_yield();
+	}
+
+	slurm_attr_destroy(&attr);
+
+
+	PMIXP_DEBUG("started agent thread (%lu)", (unsigned long) tid);
 
 	return SLURM_SUCCESS;
 }
 
-int pmix_agent_stop(void)
+int pmixp_agent_stop(void)
 {
+	char c = 1;
 	eio_signal_shutdown(_io_handle);
 	/* wait for the agent thread to stop */
 	while( _agent_is_running ){
 		sched_yield();
 	}
+	/* cancel timer */
+	write(timer_data.stop_out,&c,1);
+	while( _timer_is_running ){
+		sched_yield();
+	}
+	/* close timer fds */
+	_shutdown_timeout_fds();
 	return 0;
 }

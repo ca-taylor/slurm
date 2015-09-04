@@ -81,18 +81,18 @@
  */
 const char plugin_name[]        = "PMIx plugin";
 const char plugin_type[]        = "mpi/pmix";
-const uint32_t plugin_version   = 100;
+const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
 	int ret;
-    pmixp_debug_hang(0);
+	pmixp_debug_hang(0);
 	PMIXP_DEBUG("slurmstepd initialization");
 
 	if( SLURM_SUCCESS != (ret = pmixp_stepd_init(job, env)) ){
 		goto err_ext;
 	}
-	if( SLURM_SUCCESS != (ret = pmix_agent_start()) ){
+	if( SLURM_SUCCESS != (ret = pmixp_agent_start()) ){
 		goto err_ext;
 	}
 	return SLURM_SUCCESS;
@@ -159,5 +159,12 @@ int p_mpi_hook_client_single_task_per_node(void)
 
 int p_mpi_hook_client_fini()
 {
+	return SLURM_SUCCESS;
+}
+
+int fini()
+{
+	pmixp_agent_stop();
+	pmixp_stepd_finalize();
 	return SLURM_SUCCESS;
 }
