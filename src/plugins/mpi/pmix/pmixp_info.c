@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -45,6 +45,9 @@ static char *_server_addr = NULL;
 static int _server_fd = -1;
 
 pmix_jobinfo_t _pmixp_job_info  = { 0 };
+
+static int _resources_set(char ***env);
+static int _env_set(char ***env);
 
 // stepd global contact information
 void pmixp_info_srv_contacts(char *path, int fd)
@@ -95,7 +98,11 @@ int pmixp_info_set(const stepd_step_rec_t *job, char ***env)
 	}
 
 	// Setup hostnames and job-wide info
-	if( (rc = pmixp_info_resources_set(env)) ){
+	if( (rc = _resources_set(env)) ){
+		return rc;
+	}
+
+	if( (rc = _env_set(env)) ){
 		return rc;
 	}
 
@@ -198,8 +205,7 @@ static int _get_task_count(char ***env, uint32_t *tasks, uint32_t *cpus)
 }
 */
 
-
-int pmixp_info_resources_set(char ***env)
+static int _resources_set(char ***env)
 {
 	char *p = NULL;
 
@@ -210,9 +216,9 @@ int pmixp_info_resources_set(char ***env)
 	_pmixp_job_info.hostname = NULL;
 
 	// Save step host list
-	p = getenvp(*env, PMIX_STEP_NODES_ENV);
+	p = getenvp(*env, PMIXP_STEP_NODES_ENV);
 	if (!p) {
-		PMIXP_ERROR_NO(ENOENT, "Environment variable %s not found", PMIX_STEP_NODES_ENV);
+		PMIXP_ERROR_NO(ENOENT, "Environment variable %s not found", PMIXP_STEP_NODES_ENV);
 		goto err_exit;
 	}
 	hostlist_push(_pmixp_job_info.step_hl, p);
@@ -223,10 +229,10 @@ int pmixp_info_resources_set(char ***env)
 	free(p);
 
 	// Determine job-wide node id and job-wide node count
-	p = getenvp(*env, PMIX_JOB_NODES_ENV);
+	p = getenvp(*env, PMIXP_JOB_NODES_ENV);
 	if( p == NULL ){
 		// shouldn't happen if we are under SLURM!
-		PMIXP_ERROR_NO(ENOENT, "No %s environment variable found!", PMIX_JOB_NODES_ENV);
+		PMIXP_ERROR_NO(ENOENT, "No %s environment variable found!", PMIXP_JOB_NODES_ENV);
 		goto err_exit;
 	}
 	hostlist_push(_pmixp_job_info.job_hl, p);
@@ -248,10 +254,10 @@ int pmixp_info_resources_set(char ***env)
 	//---------------------------------------------------------------------
 
 	// Save task-to-node mapping
-	p = getenvp(*env, PMIX_SLURM_MAPPING_ENV);
+	p = getenvp(*env, PMIXP_SLURM_MAPPING_ENV);
 	if( p == NULL ){
 		// Direct modex won't work
-		PMIXP_ERROR_NO(ENOENT, "No %s environment variable found!", PMIX_SLURM_MAPPING_ENV);
+		PMIXP_ERROR_NO(ENOENT, "No %s environment variable found!", PMIXP_SLURM_MAPPING_ENV);
 		goto err_exit;
 	}
 
@@ -265,4 +271,49 @@ err_exit:
 		xfree(_pmixp_job_info.hostname);
 	}
 	return SLURM_ERROR;
+}
+
+static int _env_set(char ***env)
+{
+	char *p = NULL;
+
+	/* ----------- Temp directories settings -------------*/
+	/* set server temp directory - change
+	 * this process environment */
+	p = getenvp(*env, PMIXP_TMPDIR_SRV);
+	if ( NULL != p) {
+		setenv("TMPDIR",p, 1);
+	}
+
+	/* save client temp directory if requested */
+	// TODO: We want to get TmpFS value as well if exists.
+	// Need to sync with SLURM developers.
+	p = getenvp(*env, PMIXP_TMPDIR_CLI);
+	if ( NULL != p) {
+		_pmixp_job_info.cli_tmpdir = xstrdup(p);
+	}
+
+	/* ----------- Timeout setting -------------*/
+	// TODO: also would be nice to have a cluster-wide setting in SLURM
+	_pmixp_job_info.timeout = PMIXP_TIMEOUT_DEFAULT;
+	p = getenvp(*env, PMIXP_TIMEOUT);
+	if ( NULL != p) {
+		int tmp;
+		tmp = atoi(p);
+		if( tmp > 0 ){
+			_pmixp_job_info.timeout = tmp;
+		}
+	}
+
+	/* ----------- Forward PMIX settings -------------*/
+	p = getenvp(*env, PMIXP_TIMEOUT);
+	if ( NULL != p) {
+		setenv("PMIX_DEBUG", p, 1);
+		/* output into the file since we are in slurmstepd
+		 * and stdout is muted.
+		 * One needs to check TMPDIR for the results */
+		setenv("PMIX_OUTPUT_REDIRECT","file",1);
+	}
+
+	return SLURM_SUCCESS;
 }

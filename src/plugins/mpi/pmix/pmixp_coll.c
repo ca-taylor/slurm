@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -98,6 +98,27 @@ static int _pack_ranges(pmixp_coll_t *coll)
 	}
 
 	return SLURM_SUCCESS;
+}
+
+static void _reset_coll(pmixp_coll_t *coll)
+{
+	switch( coll->state ){
+	case PMIXP_COLL_SYNC:
+		/* already reset */
+		break;
+	case PMIXP_COLL_FAN_IN:
+		set_buf_offset(coll->buf, 0);
+	case PMIXP_COLL_FAN_OUT:
+		coll->state = PMIXP_COLL_SYNC;
+		memset(coll->ch_contribs, 0, sizeof(int) * coll->children_cnt);
+		coll->seq++; /* move to the next collective */
+		coll->contrib_cntr = 0;
+		coll->cbdata = NULL;
+		coll->cbfunc = NULL;
+		break;
+	default:
+		PMIXP_ERROR("Bad collective state = %d", coll->state);
+	}
 }
 
 int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
@@ -261,6 +282,7 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 		PMIXP_DEBUG("%s:%d: get local contribution: switch to PMIXP_COLL_FAN_IN",
 			    pmixp_info_namespace(), pmixp_info_nodeid() );
 		coll->state = PMIXP_COLL_FAN_IN;
+		coll->ts = time(NULL);
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
@@ -286,24 +308,24 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 {
 	int idx;
 	int nodeid;
-    char *data = NULL;
+	char *data = NULL;
 	uint32_t size;
 
 
 	PMIXP_DEBUG("%s:%d: get contribution from node %s",
 		    pmixp_info_namespace(), pmixp_info_nodeid(), nodename);
 
-	pmixp_coll_sanity_check(coll);
-
 	/* lock the structure */
 	pthread_mutex_lock(&coll->lock);
 
+	pmixp_coll_sanity_check(coll);
+
 	/* fix the collective status if need */
 	if( PMIXP_COLL_SYNC == coll->state ){
-		coll->state = PMIXP_COLL_FAN_IN;
 		PMIXP_DEBUG("%s:%d: get contribution from node %s: switch to PMIXP_COLL_FAN_IN",
 			    pmixp_info_namespace(), pmixp_info_nodeid(), nodename);
-
+		coll->state = PMIXP_COLL_FAN_IN;
+		coll->ts = time(NULL);
 	}
 	xassert( PMIXP_COLL_FAN_IN == coll->state);
 
@@ -314,10 +336,14 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 	idx = _is_child_no(coll, nodeid);
 	xassert( 0 <= idx );
 	if( 0 < coll->ch_contribs[idx]){
-		/* shouldn't be grater than 1! */
+		/* shouldn't be grater than 1!
+		 * it's OK - may happend because of retransmissions.
+		 * just ignore */
 		xassert(1 == coll->ch_contribs[idx]);
+		PMIXP_DEBUG("Multiple contributions from nodeid=%d, hostname=%s",
+			    nodeid, nodename);
 		/* this is duplication, skip. */
-		return SLURM_SUCCESS;
+		goto proceed;
 	}
 
 	data = get_buf_data(buf) + get_buf_offset(buf);
@@ -332,6 +358,7 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 	/* increase number of total contributions */
 	coll->contrib_cntr++;
 
+proceed:
 	/* unlock the structure */
 	pthread_mutex_unlock(&coll->lock);
 
@@ -347,7 +374,6 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 static int _is_child_no(pmixp_coll_t *coll, int nodeid)
 {
 	// Check for initialization
-	pmixp_coll_sanity_check(coll);
 	int i;
 	for(i=0;i< coll->children_cnt; i++){
 		if( nodeid == coll->ch_nodeids[i] ){
@@ -368,21 +394,21 @@ void _progress_fan_in(pmixp_coll_t *coll)
 		    pmixp_info_namespace(), pmixp_info_nodeid(),
 		    coll->contrib_local, coll->contrib_cntr);
 
-	pmixp_coll_sanity_check(coll);
-
-	/* lock the */
+	/* lock the collective*/
 	pthread_mutex_lock(&coll->lock);
+
+	pmixp_coll_sanity_check(coll);
 
 	if( PMIXP_COLL_FAN_IN != coll->state ){
 		/* In case of race condition between libpmix and
 		 * slurm threads progress_fan_in can be called
 		 * after we moved to the next step. */
-		goto exit;
+		goto unlock;
 	}
 
 	if( !coll->contrib_local || coll->contrib_cntr != coll->children_cnt ){
 		/* Not yet ready to go to the next step */
-		goto exit;
+		goto unlock;
 	}
 
 	/* The root of the collective will have parent_host == NULL */
@@ -407,7 +433,7 @@ void _progress_fan_in(pmixp_coll_t *coll)
 			    (uint64_t)get_buf_offset(coll->buf), hostlist);
 		// TODO: abort the whole application here?
 		// Currently it will just hang!
-		goto exit;
+		goto unlock;
 	}
 
 	coll->state = PMIXP_COLL_FAN_OUT;
@@ -417,7 +443,7 @@ void _progress_fan_in(pmixp_coll_t *coll)
 
 	PMIXP_DEBUG("%s:%d: switch to PMIXP_COLL_FAN_OUT state",
 		    pmixp_info_namespace(), pmixp_info_nodeid() );
-exit:
+unlock:
 	/* lock the */
 	pthread_mutex_unlock(&coll->lock);
 }
@@ -426,12 +452,12 @@ void pmixp_coll_fan_out_data(pmixp_coll_t *coll, Buf buf)
 {
 	PMIXP_DEBUG("%s:%d: start", pmixp_info_namespace(), pmixp_info_nodeid());
 
+	/* lock the structure */
+	pthread_mutex_lock(&coll->lock);
+
 	pmixp_coll_sanity_check(coll);
 
 	xassert( PMIXP_COLL_FAN_OUT == coll->state );
-
-	/* lock the structure */
-	pthread_mutex_lock(&coll->lock);
 
 	// update the database
 	if( NULL != coll->cbfunc ){
@@ -443,14 +469,34 @@ void pmixp_coll_fan_out_data(pmixp_coll_t *coll, Buf buf)
 	}
 
 	// Prepare for the next collective operation
-	coll->state = PMIXP_COLL_SYNC;
-	memset(coll->ch_contribs, 0, sizeof(int) * coll->children_cnt);
-	coll->seq++; /* move to the next collective */
-	coll->contrib_cntr = 0;
+	_reset_coll(coll);
 
 	PMIXP_DEBUG("%s:%d: collective is prepared for the next use",
 		    pmixp_info_namespace(), pmixp_info_nodeid());
 
-	/* lock the structure */
+	/* unlock the structure */
 	pthread_mutex_unlock(&coll->lock);
 }
+
+void pmixp_coll_reset_if_to(pmixp_coll_t *coll, time_t ts)
+{
+	/* lock the */
+	pthread_mutex_lock(&coll->lock);
+
+	if( PMIXP_COLL_SYNC == coll->state ){
+		goto unlock;
+	}
+
+	if( ts - coll->ts > pmixp_info_timeout() ){
+		/* respond to the libpmix */
+		coll->cbfunc(PMIX_ERR_TIMEOUT, NULL, 0, coll->cbdata, NULL, NULL);
+		/* drop the collective */
+		_reset_coll(coll);
+		/* report the timeout event */
+		PMIXP_ERROR("Collective timeout!");
+	}
+unlock:
+	/* unlock the structure */
+	pthread_mutex_unlock(&coll->lock);
+}
+

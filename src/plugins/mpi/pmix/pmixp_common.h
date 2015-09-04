@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -65,29 +65,21 @@
 #include <pmix_server.h>
 
 // TODO: use /tmp directory instead
-#define PMIXP_TMPDIR "/tmp/"
-//#define PMIXP_TMPDIR "/home/artpol/slurm_tmp/"
 #define MAX_USOCK_PATH                                      \
 	( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) - \
 	(size_t)&(((struct sockaddr_un *)0)->sun_path) )
 
-#define SERVER_URI_ENV "PMIX_SERVER_URI"
-#define JOBID_ENV "PMIX_ID"
-
-// Job master process contact info
-#define PMIX_SRUN_HOST_ENV "SLURM_SRUN_COMM_HOST"
-#define PMIX_SRUN_PORT_ENV "SLURM_PMIX_SRUN_PORT"
 // Job/step resource description
-#define PMIX_SLURM_MAPPING_ENV "PMIX_TASK_NODE_MAPPING"
-#define PMIX_STEP_NODES_ENV "SLURM_STEP_NODELIST"
-#define PMIX_JOB_NODES_ENV "SLURM_JOB_NODELIST"
-#define PMIX_CPUS_PER_NODE_ENV "SLURM_JOB_CPUS_PER_NODE"
-#define PMIX_CPUS_PER_TASK "SLURM_CPUS_PER_TASK"
+#define PMIXP_STEP_NODES_ENV "SLURM_STEP_NODELIST"
+#define PMIXP_JOB_NODES_ENV "SLURM_JOB_NODELIST"
+#define PMIXP_CPUS_PER_NODE_ENV "SLURM_JOB_CPUS_PER_NODE"
+#define PMIXP_CPUS_PER_TASK "SLURM_CPUS_PER_TASK"
+#define PMIXP_SLURM_MAPPING_ENV "SLURM_PMIX_MAPPING_SERV"
 // Mode
-#define PMIX_DIRECT_MODEX_ENV "PMIX_DIRECT_MODEX"
-
-// For future spawn implementation
-#define PMIX_SPAWN_BASE_STEP "SLURM_PMIX_SPAWN_BASE_STEP"
-#define PMIX_SPAWN_BASE_NODE "SLURM_PMIX_SPAWN_BASE_NODE"
+#define PMIXP_TIMEOUT "SLURM_PMIX_TIMEOUT"
+#define PMIXP_TIMEOUT_DEFAULT 10
+#define PMIXP_TMPDIR_SRV "SLURM_PMIX_SRV_TMPDIR"
+#define PMIXP_TMPDIR_CLI "SLURM_PMIX_CLI_TMPDIR"
+#define PMIXP_TMPDIR_DEFAULT "/tmp/"
 
 #endif // PMIXP_COMMON_H

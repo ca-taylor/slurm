@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Y. Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -144,8 +144,11 @@ _timer_conn_read(eio_obj_t *obj, List objs)
 		obj->shutdown = true;
 	}
 
-	/* call handlers to check if there is stalled
-	 * collectives or direct modex requests */
+	/* check direct modex requests */
+	pmixp_dmdx_timeout_cleanup();
+
+	/* check collective statuses */
+	pmixp_state_coll_cleanup();
 
 	return 0;
 }

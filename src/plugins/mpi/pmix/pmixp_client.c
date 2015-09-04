@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -135,12 +135,6 @@ static void errhandler(pmix_status_t status, pmix_proc_t proc[],
 int pmixp_libpmix_init()
 {
 	int rc;
-
-//	/* TODO: remove this once debugged! */
-//    PMIXP_ERROR("WARNING: you are using /home/artpol/slurm_tmp/ as tmpdir!");
-//    setenv("TMPDIR","/home/artpol/slurm_tmp/",1);
-//    setenv("PMIX_DEBUG", "10", 1);
-//	setenv("PMIX_OUTPUT_REDIRECT","file",1);
 
 	/* setup the server library */
 	if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb))) {

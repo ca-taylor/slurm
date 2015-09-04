@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -67,6 +67,8 @@ typedef struct {
 	uint32_t node_tasks;  /* number of tasks on *this* node               */
 	uint32_t *gtids;      /* global ids of tasks located on *this* node   */
 	char *task_map_packed;  /* string represents packed task mapping information */
+	int timeout;
+	char *cli_tmpdir;
 } pmix_jobinfo_t;
 
 extern pmix_jobinfo_t _pmixp_job_info;
@@ -76,12 +78,15 @@ void pmixp_info_srv_contacts(char *path, int fd);
 const char *pmixp_info_srv_addr();
 int pmixp_info_srv_fd();
 
+inline static int pmixp_info_timeout(){
+	xassert(_pmixp_job_info.magic == PMIX_INFO_MAGIC );
+	return _pmixp_job_info.timeout;
+}
+
 // Dealing with hostnames
 static inline char *pmixp_info_hostname(){
 	return _pmixp_job_info.hostname;
 }
-
-int pmixp_info_resources_set(char ***env);
 
 // Dealing with I/O
 void pmixp_info_io_set(eio_handle_t *h);
@@ -227,7 +232,7 @@ inline static char *pmixp_info_nspace_usock(const char *nspace)
 	 */
 	char *tmpdir = getenv("TMPDIR");
 	if( NULL == tmpdir ){
-		tmpdir = PMIXP_TMPDIR;
+		tmpdir = PMIXP_TMPDIR_DEFAULT;
 	}
 	xstrfmtcat(usock,"%s/sock.stepd.%s",tmpdir, nspace);
 	return usock;

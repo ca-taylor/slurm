@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -185,4 +185,18 @@ pmixp_state_coll_get(pmixp_coll_type_t type, const pmix_proc_t *procs,
 
 	pthread_mutex_unlock(&_pmixp_state.lock);
 	return ret;
+}
+
+void pmixp_state_coll_cleanup()
+{
+	pmixp_coll_t *coll = NULL;
+	ListIterator it;
+	time_t ts = time(NULL);
+
+	/* Walk through the list looking for the collective descriptor */
+	it = list_iterator_create(_pmixp_state.coll);
+	while( NULL != ( coll = list_next(it))){
+		pmixp_coll_reset_if_to(coll, ts);
+	}
+	list_iterator_destroy(it);
 }

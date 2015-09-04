@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
  *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
- *  Written by Artem Polyakov <artpol84@gmail.com>.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://slurm.schedmd.com/>.
@@ -87,6 +87,9 @@ typedef struct {
 	/* libpmix callback data*/
 	pmix_modex_cbfunc_t cbfunc;
 	void *cbdata;
+
+	/* timestamp for stale collectives detection */
+	time_t ts;
 } pmixp_coll_t;
 
 inline static void pmixp_coll_sanity_check(pmixp_coll_t *coll)
@@ -157,9 +160,9 @@ inline static int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
 		return SLURM_SUCCESS;
 	} else if( (coll->seq - 1) == seq ){
 		/* his may be our child OR root of the tree that
-	 * had false negatives from SLURM protocol.
-	 * It's normal situation, return error because we
-	 * want to discard this message */
+		 * had false negatives from SLURM protocol.
+		 * It's normal situation, return error because we
+		 * want to discard this message */
 		return SLURM_ERROR;
 	}
 	PMIXP_ERROR("Bad collective seq. #%d from %s, current is %d",
@@ -179,5 +182,6 @@ int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
 			     pmix_proc_t **ranges, size_t *nranges);
 int pmixp_coll_belong_chk(pmixp_coll_type_t type, const pmix_proc_t *procs,
 			  size_t nprocs);
+void pmixp_coll_reset_if_to(pmixp_coll_t *coll, time_t ts);
 
 #endif // PMIXP_COLL_H

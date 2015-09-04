@@ -1,10 +1,46 @@
-﻿#include "pmixp_common.h"
+﻿/*****************************************************************************\
+ **  pmix_debug.h - PMIx debug primitives
+ *****************************************************************************
+ *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
+ *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
+ *
+ *  This file is part of SLURM, a resource management program.
+ *  For details, see <http://slurm.schedmd.com/>.
+ *  Please also read the included file: DISCLAIMER.
+ *
+ *  SLURM is free software; you can redistribute it and/or modify it under
+ *  the terms of the GNU General Public License as published by the Free
+ *  Software Foundation; either version 2 of the License, or (at your option)
+ *  any later version.
+ *
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
+ *  so. If you do not wish to do so, delete this exception statement from your
+ *  version.  If you delete this exception statement from all source files in
+ *  the program, then also delete it here.
+ *
+ *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+ *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ *  details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with SLURM; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+\*****************************************************************************/
+
+#include "pmixp_common.h"
 #include "pmixp_dmdx.h"
 #include "pmixp_server.h"
 
-#include <pmix_server.h>
-
-
+/* set default direct modex timeout to 10 sec */
+#define DMDX_DEFAULT_TIMEOUT 10
 
 typedef enum {
 	DMDX_REQUEST = 1, DMDX_RESPONSE
@@ -13,6 +49,7 @@ typedef enum {
 typedef struct
 {
 	uint32_t seq_num;
+	time_t ts;
 #ifndef NDEBUG
 	/* we need this only for verification */
 	char nspace[PMIX_MAX_NSLEN];
@@ -180,6 +217,7 @@ static void _dmdx_pmix_cb(pmix_status_t status, char *data,
 	}
 	xfree(addr);
 	free_buf(buf);
+	_dmdx_free_caddy(caddy);
 }
 
 int pmixp_dmdx_get(const char *nspace, int rank,
@@ -228,6 +266,7 @@ int pmixp_dmdx_get(const char *nspace, int rank,
 	req->seq_num = seq;
 	req->cbfunc = cbfunc;
 	req->cbdata = cbdata;
+	req->ts = time(NULL);
 #ifndef NDEBUG
 	strncpy(req->nspace, nspace, PMIX_MAX_NSLEN);
 	req->rank = rank;
@@ -377,4 +416,22 @@ void pmixp_dmdx_process(Buf buf, char *host, uint32_t seq)
 		PMIXP_ERROR("Bad request from host %s. Skip", host);
 		break;
 	}
+}
+
+void pmixp_dmdx_timeout_cleanup()
+{
+	ListIterator it = list_iterator_create(_dmdx_requests);
+	dmdx_req_info_t *req = NULL;
+	time_t ts = time(NULL);
+
+	/* run through all requests and discard stale one's */
+	while( NULL != (req = list_next(it)) ){
+		if( ts - req->ts > pmixp_info_timeout() ){
+			/* respond with the timeout to libpmix */
+			req->cbfunc(PMIX_ERR_TIMEOUT, NULL, 0, req->cbdata, NULL, NULL);
+			/* release tracker & list iterator */
+			list_delete_item(it);
+		}
+	}
+	list_iterator_destroy(it);
 }
