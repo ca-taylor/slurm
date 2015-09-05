@@ -83,18 +83,17 @@ dmodex_fn(const pmix_proc_t *proc,
 
 static pmix_status_t
 publish_fn(const pmix_proc_t *proc,
-	   pmix_data_range_t scope, pmix_persistence_t persist,
 	   const pmix_info_t info[], size_t ninfo,
 	   pmix_op_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-lookup_fn(const pmix_proc_t *proc, pmix_data_range_t scope,
+lookup_fn(const pmix_proc_t *proc, char **keys,
 	  const pmix_info_t info[], size_t ninfo,
-	  char **keys, pmix_lookup_cbfunc_t cbfunc, void *cbdata);
+	  pmix_lookup_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
-unpublish_fn(const pmix_proc_t *proc,
-	     pmix_data_range_t scope, char **keys,
+unpublish_fn(const pmix_proc_t *proc, char **keys,
+	     const pmix_info_t info[], size_t ninfo,
 	     pmix_op_cbfunc_t cbfunc, void *cbdata);
 
 static pmix_status_t
@@ -586,7 +585,6 @@ dmodex_fn(const pmix_proc_t *proc,
 
 static pmix_status_t
 publish_fn(const pmix_proc_t *proc,
-	   pmix_data_range_t scope, pmix_persistence_t persist,
 	   const pmix_info_t info[], size_t ninfo,
 	   pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
@@ -595,17 +593,17 @@ publish_fn(const pmix_proc_t *proc,
 }
 
 static pmix_status_t
-lookup_fn(const pmix_proc_t *proc, pmix_data_range_t scope,
+lookup_fn(const pmix_proc_t *proc, char **keys,
 	  const pmix_info_t info[], size_t ninfo,
-	  char **keys, pmix_lookup_cbfunc_t cbfunc, void *cbdata)
+	  pmix_lookup_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
 	return PMIX_ERR_NOT_IMPLEMENTED;
 }
 
 static pmix_status_t
-unpublish_fn(const pmix_proc_t *proc,
-	     pmix_data_range_t scope, char **keys,
+unpublish_fn(const pmix_proc_t *proc, char **keys,
+	     const pmix_info_t info[], size_t ninfo,
 	     pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
 	PMIXP_DEBUG("called");
