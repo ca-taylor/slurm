@@ -428,6 +428,13 @@ void pmixp_dmdx_timeout_cleanup()
 	while( NULL != (req = list_next(it)) ){
 		if( ts - req->ts > pmixp_info_timeout() ){
 			/* respond with the timeout to libpmix */
+			char *host = pmixp_nspace_resolve(req->nspace, req->rank);
+			xassert( NULL != host);
+			PMIXP_ERROR("DMDX timeout: nspace = %s, rank = %d, host = %s, ts = %lu",
+				    req->nspace, req->rank, (NULL != host) ? host : "unknown", ts);
+			if( NULL != host ){
+				free(host);
+			}
 			req->cbfunc(PMIX_ERR_TIMEOUT, NULL, 0, req->cbdata, NULL, NULL);
 			/* release tracker & list iterator */
 			list_delete_item(it);
