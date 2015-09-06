@@ -151,11 +151,14 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 
 int pmixp_stepd_finalize()
 {
-    pmixp_libpmix_finalize();
-    pmixp_info_free();
-    close(pmixp_info_srv_fd());
-
-    return SLURM_SUCCESS;
+	char *path;
+	pmixp_libpmix_finalize();
+	pmixp_info_free();
+	close(pmixp_info_srv_fd());
+	path = pmixp_info_nspace_usock(pmixp_info_namespace());
+	unlink(path);
+	xfree(path);
+	return SLURM_SUCCESS;
 }
 
 /*
