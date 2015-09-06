@@ -83,9 +83,14 @@ inline static int pmixp_info_timeout(){
 	return _pmixp_job_info.timeout;
 }
 
-// Dealing with hostnames
+// My hostname
 static inline char *pmixp_info_hostname(){
 	return _pmixp_job_info.hostname;
+}
+
+// Cli tempdir
+static inline char *pmixp_info_tmpdir_cli(){
+	return _pmixp_job_info.cli_tmpdir;
 }
 
 // Dealing with I/O

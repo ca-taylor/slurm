@@ -202,15 +202,15 @@ static void _set_tmpdirs(List lresp)
 {
 	pmix_info_t *kvp;
 	char *p = NULL;
-	// TODO: Current implementation is wrong. Need more reliable way to retrieve
-	//       the TMPDIR value. Server environment should not be used for users.
-	// 1. consider all ways of setting TMPDIR here: fixed, prolog, what else?
-	// 2. How we want to do the separation of tmpdirs in SLURM?
-	// 3. This can be set from slurm.conf.
 
-	p = getenv("TMPDIR");
+	/* We consider two sources of the tempdir:
+	 * - SLURM's slurm.conf TmpFS option;
+	 * - env var SLURM_PMIX_TMPDIR;
+	 * do we need to do anything else?
+	 */
+	p = pmixp_info_tmpdir_cli();
 	if( NULL == p ){
-		p = "/tmp/";
+		p = PMIXP_TMPDIR_DEFAULT;
 	}
 	PMIXP_ALLOC_KEY(kvp, PMIX_TMPDIR);
 	PMIX_VAL_SET(&kvp->value, string, p);

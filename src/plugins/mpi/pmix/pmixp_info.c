@@ -291,6 +291,11 @@ static int _env_set(char ***env)
 	p = getenvp(*env, PMIXP_TMPDIR_CLI);
 	if ( NULL != p) {
 		_pmixp_job_info.cli_tmpdir = xstrdup(p);
+	} else {
+		p = slurm_get_tmp_fs();
+		if( NULL != p ){
+			_pmixp_job_info.cli_tmpdir = p;
+		}
 	}
 
 	/* ----------- Timeout setting -------------*/
