@@ -48,26 +48,7 @@ pmixp_state_t _pmixp_state;
 void _xfree_coll(void *x)
 {
 	pmixp_coll_t *coll = (pmixp_coll_t *)x;
-
-	pthread_mutex_lock(&coll->lock);
-
-	if( NULL != coll->procs ){
-		xfree(coll->procs);
-	}
-	if( NULL != coll->parent_host ){
-		xfree(coll->parent_host);
-	}
-	hostlist_destroy(coll->all_children);
-	if( NULL != coll->ch_nodeids ){
-		xfree(coll->ch_nodeids);
-	}
-	if( NULL != coll->ch_contribs ){
-		xfree(coll->ch_contribs);
-	}
-
-	free_buf(coll->buf);
-
-	pthread_mutex_unlock(&coll->lock);
+	pmixp_coll_free(coll);
 	xfree(coll);
 }
 

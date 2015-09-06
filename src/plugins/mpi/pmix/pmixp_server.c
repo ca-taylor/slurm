@@ -336,8 +336,8 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 	    /* we don't need this buffer anymore */
 	    free_buf(buf);
 	} else {
-	    pmixp_coll_fan_out_data(coll, buf);
-	    /* buf will be free'd by the PMIx callback */
+		pmixp_coll_bcast(coll, buf);
+		/* buf will be free'd by the PMIx callback */
 	}
 
 	break;

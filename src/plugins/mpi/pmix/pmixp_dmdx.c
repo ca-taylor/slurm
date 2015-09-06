@@ -403,8 +403,8 @@ exit:
 void pmixp_dmdx_process(Buf buf, char *host, uint32_t seq)
 {
 	dmdx_type_t type;
-
 	_read_type(buf,&type);
+
 	switch( type ){
 	case DMDX_REQUEST:
 		_dmdx_req(buf, host, seq);

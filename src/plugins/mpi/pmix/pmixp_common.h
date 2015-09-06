@@ -65,8 +65,8 @@
 #include <pmix_server.h>
 
 // TODO: use /tmp directory instead
-#define MAX_USOCK_PATH                                      \
-	( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) - \
+#define MAX_USOCK_PATH							\
+	( (size_t) &(((struct sockaddr_un *)0 + 1)->sun_family) -	\
 	(size_t)&(((struct sockaddr_un *)0)->sun_path) )
 
 // Job/step resource description
@@ -79,7 +79,7 @@
 #define PMIXP_TIMEOUT "SLURM_PMIX_TIMEOUT"
 #define PMIXP_TIMEOUT_DEFAULT 10
 #define PMIXP_TMPDIR_SRV "SLURM_PMIX_SRV_TMPDIR"
-#define PMIXP_TMPDIR_CLI "SLURM_PMIX_CLI_TMPDIR"
+#define PMIXP_TMPDIR_CLI "SLURM_PMIX_TMPDIR"
 #define PMIXP_TMPDIR_DEFAULT "/tmp/"
 
 #endif // PMIXP_COMMON_H
