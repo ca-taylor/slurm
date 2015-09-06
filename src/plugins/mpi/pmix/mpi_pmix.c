@@ -87,17 +87,19 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
 	int ret;
 	pmixp_debug_hang(0);
-	PMIXP_DEBUG("slurmstepd initialization");
+	PMIXP_DEBUG("start");
 
 	if( SLURM_SUCCESS != (ret = pmixp_stepd_init(job, env)) ){
+		PMIXP_ERROR("pmixp_stepd_init() failed");
 		goto err_ext;
 	}
 	if( SLURM_SUCCESS != (ret = pmixp_agent_start()) ){
+		PMIXP_ERROR("pmixp_agent_start() failed");
 		goto err_ext;
 	}
 	return SLURM_SUCCESS;
 err_ext:
-	/* by now - abort the whole job if error! */
+	/* Abort the whole job if error! */
 	slurm_kill_job_step(job->jobid, job->stepid, SIGKILL);
 	return ret;
 }
@@ -153,7 +155,6 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 
 int p_mpi_hook_client_single_task_per_node(void)
 {
-	PMIXP_DEBUG("Single task per node");
 	return false;
 }
 
@@ -164,6 +165,7 @@ int p_mpi_hook_client_fini()
 
 int fini()
 {
+	PMIXP_DEBUG("%s: call fini()", pmixp_info_hostname());
 	pmixp_agent_stop();
 	pmixp_stepd_finalize();
 	return SLURM_SUCCESS;
