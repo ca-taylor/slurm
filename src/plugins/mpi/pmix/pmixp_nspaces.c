@@ -43,7 +43,7 @@ pmixp_db_t _pmixp_nspaces;
 static void _xfree_nspace(void *n)
 {
 	pmixp_namespace_t *nsptr = n;
-	xfree(nsptr->ntasks);
+	xfree(nsptr->task_cnts);
 	xfree(nsptr->task_map);
 	xfree(nsptr->task_map_packed);
 	xfree(nsptr);
@@ -72,6 +72,12 @@ int pmixp_nspaces_init()
 			       task_cnts, task_map, hostlist_copy(hl));
 	_pmixp_nspaces.local = pmixp_nspaces_find(mynspace);
 	return rc;
+}
+
+int pmixp_nspaces_finalize()
+{
+	list_destroy(_pmixp_nspaces.nspaces);
+	return 0;
 }
 
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,

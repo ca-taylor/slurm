@@ -69,6 +69,7 @@ typedef struct {
 	char *task_map_packed;  /* string represents packed task mapping information */
 	int timeout;
 	char *cli_tmpdir;
+	char *lib_tmpdir;
 } pmix_jobinfo_t;
 
 extern pmix_jobinfo_t _pmixp_job_info;
@@ -91,6 +92,11 @@ static inline char *pmixp_info_hostname(){
 // Cli tempdir
 static inline char *pmixp_info_tmpdir_cli(){
 	return _pmixp_job_info.cli_tmpdir;
+}
+
+// Cli tempdir
+static inline char *pmixp_info_tmpdir_lib(){
+	return _pmixp_job_info.lib_tmpdir;
 }
 
 // Dealing with I/O

@@ -96,6 +96,8 @@ pmixp_io_engine_header_t srv_rcvd_header = {
     .pay_size_cb = _recv_payload_size
 };
 
+static volatile int _was_initialized = 0;
+
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 {
     char *path;
@@ -110,54 +112,85 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
     path = pmixp_info_nspace_usock(pmixp_info_namespace());
     if( NULL == path ){
 	PMIXP_ERROR("Out-of-memory");
-	return SLURM_ERROR;
+	rc = SLURM_ERROR;
+	goto err_path;
     }
     if( (fd = pmixp_usock_create_srv(path)) < 0 ){
-	return SLURM_ERROR;
+	    rc = SLURM_ERROR;
+	    goto err_usock;
     }
     fd_set_close_on_exec(fd);
     pmixp_info_srv_contacts(path, fd);
-    xfree(path);
+
 
     if( SLURM_SUCCESS != (rc = pmixp_nspaces_init()) ){
 	PMIXP_ERROR("pmixp_nspaces_init() failed");
-	return rc;
+	goto err_usock;
     }
 
     if( SLURM_SUCCESS != (rc = pmixp_state_init()) ){
 	PMIXP_ERROR("pmixp_state_init() failed");
-	return rc;
+	goto err_state;
     }
 
     if( SLURM_SUCCESS != (rc = pmixp_dmdx_init()) ){
 	PMIXP_ERROR("pmixp_dmdx_init() failed");
-	return rc;
+	goto err_dmdx;
     }
 
     // Create UNIX socket for client communication
-    if( SLURM_SUCCESS != pmixp_libpmix_init() ){
+    if( SLURM_SUCCESS != (rc = pmixp_libpmix_init() ) ){
 	PMIXP_ERROR("pmixp_libpmix_init() failed");
-	return SLURM_ERROR;
+	goto err_lib;
     }
 
     // Create UNIX socket for client communication
-    if( SLURM_SUCCESS != pmixp_libpmix_job_set() ){
+    if( SLURM_SUCCESS != (rc = pmixp_libpmix_job_set()) ){
 	PMIXP_ERROR("pmixp_libpmix_job_set() failed");
-	return SLURM_ERROR;
+	goto err_job;
     }
 
+    xfree(path);
+    _was_initialized = 1;
     return SLURM_SUCCESS;
+
+err_job:
+    pmixp_libpmix_finalize();
+err_lib:
+    pmixp_dmdx_finalize();
+err_dmdx:
+     pmixp_state_finalize();
+err_state:
+     pmixp_nspaces_finalize();
+err_usock:
+    xfree(path);
+err_path:
+    pmixp_info_free();
+    return rc;
 }
 
 int pmixp_stepd_finalize()
 {
 	char *path;
+	if( !_was_initialized ){
+		/* nothing to do */
+		return 0;
+	}
+
 	pmixp_libpmix_finalize();
-	pmixp_info_free();
+	pmixp_dmdx_finalize();
+	pmixp_state_finalize();
+	pmixp_nspaces_finalize();
+
+	/* cleanup the usock */
+	PMIXP_DEBUG("Remove PMIx plugin usock");
 	close(pmixp_info_srv_fd());
 	path = pmixp_info_nspace_usock(pmixp_info_namespace());
 	unlink(path);
 	xfree(path);
+
+	/* free the information */
+	pmixp_info_free();
 	return SLURM_SUCCESS;
 }
 

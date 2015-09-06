@@ -282,8 +282,14 @@ static int _env_set(char ***env)
 	 * this process environment */
 	p = getenvp(*env, PMIXP_TMPDIR_SRV);
 	if ( NULL != p) {
-		setenv("TMPDIR",p, 1);
+		setenv(PMIXP_OS_TMPDIR_ENV,p, 1);
 	}
+
+	p = getenv(PMIXP_OS_TMPDIR_ENV);
+	if( NULL == p ){
+		p = PMIXP_TMPDIR_DEFAULT;
+	}
+	_pmixp_job_info.lib_tmpdir = xstrdup_printf("%s/pmix.%d.%d/", p, pmixp_info_jobid(), pmixp_info_stepid());
 
 	/* save client temp directory if requested */
 	// TODO: We want to get TmpFS value as well if exists.

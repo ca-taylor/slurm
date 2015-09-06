@@ -45,6 +45,8 @@
 #include "pmixp_server.h"
 #include "pmixp_dmdx.h"
 
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <pmix_server.h>
 
 static int
@@ -135,6 +137,16 @@ int pmixp_libpmix_init()
 {
 	int rc;
 
+	/* TODO:
+	 * - check what is the proper rights
+	 * - what if the directory already exists?
+	 */
+	if( 0 != mkdir(pmixp_info_tmpdir_lib(),0766) ){
+		PMIXP_ERROR_STD("Cannot create directory \"%s\"", pmixp_info_tmpdir_lib());
+		return errno;
+	}
+	setenv(PMIXP_PMIXLIB_TMPDIR,pmixp_info_tmpdir_lib(), 1);
+
 	/* setup the server library */
 	if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb))) {
 		PMIXP_ERROR_STD("PMIx_server_init failed with error %d\n", rc);
@@ -149,10 +161,17 @@ int pmixp_libpmix_init()
 
 int pmixp_libpmix_finalize()
 {
+	int rc = SLURM_SUCCESS, rc1;
 	if( PMIX_SUCCESS != PMIx_server_finalize() ){
-		return SLURM_ERROR;
+		rc = SLURM_ERROR;
 	}
-	return SLURM_SUCCESS;
+
+	rc1 = pmixp_rmdir_recursively(pmixp_info_tmpdir_lib());
+	if( 0 == rc ){
+		/* return only one error :) */
+		rc = rc1;
+	}
+	return rc;
 }
 
 static void errhandler(pmix_status_t status,

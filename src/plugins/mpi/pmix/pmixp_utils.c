@@ -43,6 +43,9 @@
 #include <errno.h>
 #include <poll.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <dirent.h>
 
 #include "pmixp_common.h"
 #include "pmixp_utils.h"
@@ -304,3 +307,57 @@ int pmixp_stepd_send(char *nodelist, const char *address, char *data, uint32_t l
 	return rc;
 }
 
+static int _is_dir(char *path)
+{
+	struct stat stat_buf;
+	int rc;
+	if( 0 > (rc = stat(path, &stat_buf)) ) {
+		PMIXP_ERROR_STD("Cannot stat() path=\"%s\"", path);
+		return rc;
+	} else if (!S_ISDIR(stat_buf.st_mode)) {
+		return 0;
+	}
+	return 1;
+}
+
+int pmixp_rmdir_recursively(char *path)
+{
+	char nested_path[PATH_MAX];
+	DIR *dp;
+	struct dirent *ent;
+
+	int rc;
+
+	/*
+	 * Make sure that "directory" exists and is a directory.
+	 */
+	if( 1 != (rc = _is_dir(path) ) ){
+		PMIXP_ERROR("path=\"%s\" is not a directory", path);
+		return (rc == 0 ) ? -1 : rc;
+	}
+
+	if ((dp = opendir(path)) == NULL) {
+		PMIXP_ERROR_STD("cannot open path=\"%s\"", path);
+		return -1;
+	}
+
+	while ((ent = readdir(dp)) != NULL) {
+		if( 0 == strcmp(ent->d_name, "." ) ||
+				0 == strcmp(ent->d_name, ".." ) ){
+			/* skip special dir's */
+			continue;
+		}
+		snprintf(nested_path, sizeof(nested_path),
+			 "%s/%s", path, ent->d_name);
+		if( _is_dir(nested_path) ){
+			pmixp_rmdir_recursively(nested_path);
+		} else {
+			unlink(nested_path);
+		}
+	}
+	closedir(dp);
+	if( (rc = rmdir(path)) ){
+		PMIXP_ERROR_STD("Cannot remove path=\"%s\"", path);
+	}
+	return rc;
+}

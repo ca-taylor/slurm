@@ -94,6 +94,13 @@ int pmixp_dmdx_init()
 	return SLURM_SUCCESS;
 }
 
+int pmixp_dmdx_finalize()
+{
+	list_destroy(_dmdx_requests);
+	return 0;
+}
+
+
 static void _setup_header(Buf buf, dmdx_type_t t,
 			  const char *nspace, int rank, int status)
 {

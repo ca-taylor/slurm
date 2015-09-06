@@ -79,6 +79,7 @@ typedef struct {
 } pmixp_db_t;
 
 int pmixp_nspaces_init();
+int pmixp_nspaces_finalize();
 pmixp_namespace_t *pmixp_nspaces_find(const char *name);
 pmixp_namespace_t *pmixp_nspaces_local();
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,

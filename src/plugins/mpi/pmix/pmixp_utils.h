@@ -49,5 +49,6 @@ bool pmixp_fd_read_ready(int fd, int *shutdown);
 bool pmixp_fd_write_ready(int fd, int *shutdown);
 int pmixp_srun_send(slurm_addr_t *addr, uint32_t len, char *data);
 int pmixp_stepd_send(char *nodelist, const char *address, char *data, uint32_t len);
+int pmixp_rmdir_recursively(char *path);
 
 #endif // PMIXP_UTILS_H
