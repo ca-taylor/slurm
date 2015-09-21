@@ -55,7 +55,12 @@ static int _agent_is_running = 0;
 static int _timer_is_running = 0;
 static eio_handle_t *_io_handle = NULL;
 
+static int _agent_spawned = 0, _timer_spawned = 0;
+static pthread_t _agent_tid = 0;
+static pthread_t _timer_tid = 0;
+
 struct timer_data_t {
+	int initialized;
 	int work_in, work_out;
 	int stop_in, stop_out;
 };
@@ -161,7 +166,7 @@ static void _shutdown_timeout_fds();
 	fd_set_close_on_exec(fds[0]);	\
 	fd_set_nonblocking(fds[1]);	\
 	fd_set_close_on_exec(fds[1]);	\
-}
+	}
 
 static int _setup_timeout_fds()
 {
@@ -184,6 +189,8 @@ static int _setup_timeout_fds()
 	SETUP_FDS(fds);
 	timer_data.stop_in = fds[0];
 	timer_data.stop_out = fds[1];
+
+	timer_data.initialized = 1;
 
 	return SLURM_SUCCESS;
 }
@@ -216,6 +223,10 @@ static void *_agent_thread(void * unused)
 {
 	PMIXP_DEBUG("Start agent thread");
 	eio_obj_t *obj;
+	int preval;
+
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &preval);
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &preval);
 
 	_io_handle = eio_handle_create(0);
 
@@ -241,6 +252,10 @@ static void *_agent_thread(void * unused)
 static void *_pmix_timer_thread(void * unused)
 {
 	struct pollfd pfds[1];
+	int preval;
+
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &preval);
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &preval);
 
 	PMIXP_DEBUG("Start timer thread");
 
@@ -275,7 +290,6 @@ static void *_pmix_timer_thread(void * unused)
 int pmixp_agent_start(void)
 {
 	int retries = 0;
-	pthread_t tid = 0;
 	pthread_attr_t attr;
 
 	_setup_timeout_fds();
@@ -284,7 +298,7 @@ int pmixp_agent_start(void)
 
 	/* start agent thread */
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&tid, &attr, _agent_thread, NULL))) {
+	while ((errno = pthread_create(&_agent_tid, &attr, _agent_thread, NULL))) {
 		if (++retries > MAX_RETRIES) {
 			PMIXP_ERROR_STD("pthread_create error");
 			slurm_attr_destroy(&attr);
@@ -292,15 +306,18 @@ int pmixp_agent_start(void)
 		}
 		sleep(1);
 	}
+	_agent_spawned = 1;
 
 	/* wait for the agent thread to initialize */
 	while( !_agent_is_running ){
 		sched_yield();
 	}
 
+	PMIXP_DEBUG("agent thread started: tid = %lu", (unsigned long) _agent_tid );
+
 
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&tid, &attr, _pmix_timer_thread, NULL))) {
+	while ((errno = pthread_create(&_timer_tid, &attr, _pmix_timer_thread, NULL))) {
 		if (++retries > MAX_RETRIES) {
 			PMIXP_ERROR_STD("pthread_create error");
 			slurm_attr_destroy(&attr);
@@ -308,6 +325,7 @@ int pmixp_agent_start(void)
 		}
 		sleep(1);
 	}
+	_timer_spawned = 1;
 
 	/* wait for the agent thread to initialize */
 	while( !_timer_is_running ){
@@ -317,7 +335,7 @@ int pmixp_agent_start(void)
 	slurm_attr_destroy(&attr);
 
 
-	PMIXP_DEBUG("started agent thread (%lu)", (unsigned long) tid);
+	PMIXP_DEBUG("timer thread started: tid = %lu", (unsigned long) _timer_tid );
 
 	return SLURM_SUCCESS;
 }
@@ -325,17 +343,29 @@ int pmixp_agent_start(void)
 int pmixp_agent_stop(void)
 {
 	char c = 1;
-	eio_signal_shutdown(_io_handle);
-	/* wait for the agent thread to stop */
-	while( _agent_is_running ){
-		sched_yield();
+	if( _agent_is_running ){
+		eio_signal_shutdown(_io_handle);
+		/* wait for the agent thread to stop */
+		while( _agent_is_running ){
+			sched_yield();
+		}
 	}
-	/* cancel timer */
-	write(timer_data.stop_out,&c,1);
-	while( _timer_is_running ){
-		sched_yield();
+	if( _agent_spawned ){
+		pthread_cancel(_agent_tid);
 	}
-	/* close timer fds */
-	_shutdown_timeout_fds();
-	return 0;
+
+	if( timer_data.initialized ){
+		/* cancel timer */
+		write(timer_data.stop_out,&c,1);
+		while( _timer_is_running ){
+			sched_yield();
+		}
+		/* close timer fds */
+		_shutdown_timeout_fds();
+	}
+
+	if( _timer_spawned ){
+		pthread_cancel(_timer_tid);
+	}
+	return SLURM_SUCCESS;
 }

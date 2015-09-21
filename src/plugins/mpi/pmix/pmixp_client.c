@@ -421,6 +421,11 @@ static int _set_mapsinfo(List lresp)
 	regexp = NULL;
 	list_append(lresp, kvp);
 
+	PMIXP_ALLOC_KEY(kvp, PMIX_ANL_MAP);
+	PMIX_VAL_SET(&kvp->value, string, pmixp_info_task_map());
+	regexp = NULL;
+	list_append(lresp, kvp);
+
 	return SLURM_SUCCESS;
 }
 

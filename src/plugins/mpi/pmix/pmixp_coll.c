@@ -108,7 +108,10 @@ static void _reset_coll(pmixp_coll_t *coll)
 		break;
 	case PMIXP_COLL_FAN_IN:
 	case PMIXP_COLL_FAN_OUT:
-		set_buf_offset(coll->buf, 0);
+		set_buf_offset(coll->buf, coll->serv_offs);
+		if( SLURM_SUCCESS != _pack_ranges(coll) ){
+			PMIXP_ERROR("Cannot pack ranges to coll message header!");
+		}
 		coll->state = PMIXP_COLL_SYNC;
 		memset(coll->ch_contribs, 0, sizeof(int) * coll->children_cnt);
 		coll->seq++; /* move to the next collective */
@@ -480,26 +483,31 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 		hostlist = xstrdup(coll->parent_host);
 		type = PMIXP_MSG_FAN_IN;
 	} else {
-		hostlist = hostlist_ranged_string_xmalloc(coll->all_children);
-		type = PMIXP_MSG_FAN_OUT;
-		pmixp_debug_hang(0);
+		if( 0 < hostlist_count(coll->all_children) ){
+			hostlist = hostlist_ranged_string_xmalloc(coll->all_children);
+			type = PMIXP_MSG_FAN_OUT;
+			pmixp_debug_hang(0);
+		}
 	}
 
 	PMIXP_DEBUG("%s:%d: send data to %s",
 		    pmixp_info_namespace(), pmixp_info_nodeid(),
 		    hostlist);
 
-	rc = pmixp_server_send(hostlist, type, coll->seq, addr,
-			       get_buf_data(coll->buf), get_buf_offset(coll->buf));
+	/* Check for the singletone case */
+	if( NULL != hostlist ){
+		rc = pmixp_server_send(hostlist, type, coll->seq, addr,
+				       get_buf_data(coll->buf), get_buf_offset(coll->buf));
 
-	if( SLURM_SUCCESS != rc ){
-		PMIXP_ERROR("Cannot send data (size = %lu), to hostlist:\n%s",
-			    (uint64_t)get_buf_offset(coll->buf), hostlist);
-		/* return error indication to PMIx. Nodes that haven't received data
-		 * will exit by a timeout.
-		 * FIXME: do we need to do something with successfuly finished nodes?
-		 */
-		goto unlock;
+		if( SLURM_SUCCESS != rc ){
+			PMIXP_ERROR("Cannot send data (size = %lu), to hostlist:\n%s",
+				    (uint64_t)get_buf_offset(coll->buf), hostlist);
+			/* return error indication to PMIx. Nodes that haven't received data
+	 * will exit by a timeout.
+	 * FIXME: do we need to do something with successfuly finished nodes?
+	 */
+			goto unlock;
+		}
 	}
 
 	/* transit to the next state */
