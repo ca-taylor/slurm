@@ -81,13 +81,13 @@ int pmixp_nspaces_finalize()
 }
 
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
-		      uint32_t ntasks, uint32_t *task_cnts,
+		      uint32_t ntasks, uint32_t * task_cnts,
 		      char *task_map_packed, hostlist_t hl)
 {
 	pmixp_namespace_t *nsptr = xmalloc(sizeof(pmixp_namespace_t));
 	int i;
 
-	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC );
+	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC);
 
 	/* fill up informational part */
 	nsptr->magic = PMIXP_NSPACE_MAGIC;
@@ -95,15 +95,16 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 	nsptr->nnodes = nnodes;
 	nsptr->node_id = node_id;
 	nsptr->ntasks = ntasks;
-	nsptr->task_cnts = xmalloc( sizeof(uint32_t) * nnodes );
+	nsptr->task_cnts = xmalloc(sizeof(uint32_t) * nnodes);
 	// Cannot use memcpy here because of different types
-	for(i=0; i<nnodes; i++){
+	for (i = 0; i < nnodes; i++) {
 		nsptr->task_cnts[i] = task_cnts[i];
 	}
 	nsptr->task_map_packed = xstrdup(task_map_packed);
-	nsptr->task_map = unpack_process_mapping_flat(task_map_packed, nnodes,
-						      ntasks, NULL);
-	if(nsptr->task_map == NULL ){
+	nsptr->task_map =
+	    unpack_process_mapping_flat(task_map_packed, nnodes, ntasks,
+					NULL);
+	if (nsptr->task_map == NULL) {
 		xfree(nsptr->task_cnts);
 		xfree(nsptr->task_map_packed);
 		return SLURM_ERROR;
@@ -115,37 +116,36 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 
 pmixp_namespace_t *pmixp_nspaces_local()
 {
-	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC );
+	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC);
 	return _pmixp_nspaces.local;
 }
 
 
-pmixp_namespace_t *
-pmixp_nspaces_find(const char *name)
+pmixp_namespace_t *pmixp_nspaces_find(const char *name)
 {
-	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC );
+	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC);
 
 	ListIterator it = list_iterator_create(_pmixp_nspaces.nspaces);
 	pmixp_namespace_t *nsptr = NULL;
-	while( NULL != (nsptr = list_next(it))){
-		xassert(nsptr->magic == PMIXP_NSPACE_MAGIC );
-		if( 0 == strcmp(nsptr->name, name) ){
+	while (NULL != (nsptr = list_next(it))) {
+		xassert(nsptr->magic == PMIXP_NSPACE_MAGIC);
+		if (0 == strcmp(nsptr->name, name)) {
 			goto exit;
 		}
 	}
 	// Didn't found one!
 	nsptr = NULL;
-exit:
+      exit:
 	return nsptr;
 }
 
 hostlist_t
-pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
+pmixp_nspace_rankhosts(pmixp_namespace_t * nsptr,
 		       const int *ranks, size_t nranks)
 {
 	hostlist_t hl = hostlist_create("");
 	int i;
-	for(i=0; i<nranks; i++){
+	for (i = 0; i < nranks; i++) {
 		int rank = ranks[i];
 		int node = nsptr->task_map[rank];
 		char *node_s = hostlist_nth(nsptr->hl, node);
@@ -160,20 +160,20 @@ char *pmixp_nspace_resolve(const char *name, int rank)
 {
 	pmixp_namespace_t *nsptr;
 
-	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC );
+	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC);
 
 	ListIterator it = list_iterator_create(_pmixp_nspaces.nspaces);
-	while( NULL != (nsptr = list_next(it)) ){
-		xassert( nsptr->magic == PMIXP_NSPACE_MAGIC );
-		if( 0 == strcmp(nsptr->name, name) ){
+	while (NULL != (nsptr = list_next(it))) {
+		xassert(nsptr->magic == PMIXP_NSPACE_MAGIC);
+		if (0 == strcmp(nsptr->name, name)) {
 			break;
 		}
 	}
 
-	if( NULL == nsptr ){
+	if (NULL == nsptr) {
 		return NULL;
 	}
-	xassert( rank < nsptr->ntasks );
+	xassert(rank < nsptr->ntasks);
 
 	return hostlist_nth(nsptr->hl, nsptr->task_map[rank]);
 }
@@ -184,15 +184,14 @@ size_t pmixp_nspace_mdx_lsize(List l)
 	pmix_modex_data_t *data;
 	size_t ret = 0;
 
-	while( NULL != (data = list_next(it) ) ){
+	while (NULL != (data = list_next(it))) {
 		// we need to save:
 		// - rank (uint32_t)
 		// - scope (uint32_t)
 		// - size of the blob (uint32_t)
 		// - blob data (data->size)
-		ret += data->size + 3*sizeof(int);
+		ret += data->size + 3 * sizeof(int);
 	}
 	list_iterator_destroy(it);
 	return ret;
 }
-

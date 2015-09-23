@@ -47,7 +47,7 @@ pmixp_state_t _pmixp_state;
 
 void _xfree_coll(void *x)
 {
-	pmixp_coll_t *coll = (pmixp_coll_t *)x;
+	pmixp_coll_t *coll = (pmixp_coll_t *) x;
 	pmixp_coll_free(coll);
 	xfree(coll);
 }
@@ -75,86 +75,88 @@ void pmixp_state_finalize()
 }
 
 static bool
-_compare_ranges(const pmix_proc_t *r1, const pmix_proc_t *r2,
+_compare_ranges(const pmix_proc_t * r1, const pmix_proc_t * r2,
 		size_t nprocs)
 {
 	int i;
-	for( i=0; i < nprocs; i++){
-		if( 0 != strcmp(r1[i].nspace, r2[i].nspace) ){
+	for (i = 0; i < nprocs; i++) {
+		if (0 != strcmp(r1[i].nspace, r2[i].nspace)) {
 			return false;
 		}
-		if( r1[i].rank != r2[i].rank ){
+		if (r1[i].rank != r2[i].rank) {
 			return false;
 		}
 	}
 	return true;
 }
 
-static pmixp_coll_t *
-_find_collective(pmixp_coll_type_t type, const pmix_proc_t *procs,
-		 size_t nprocs)
+static pmixp_coll_t *_find_collective(pmixp_coll_type_t type,
+				      const pmix_proc_t * procs,
+				      size_t nprocs)
 {
 	pmixp_coll_t *coll = NULL, *ret = NULL;
 	ListIterator it;
 
 	/* Walk through the list looking for the collective descriptor */
 	it = list_iterator_create(_pmixp_state.coll);
-	while( NULL != ( coll = list_next(it))){
-		if( coll->nprocs != nprocs ){
+	while (NULL != (coll = list_next(it))) {
+		if (coll->nprocs != nprocs) {
 			continue;
 		}
-		if( coll->type != type ){
+		if (coll->type != type) {
 			continue;
 		}
-		if( 0 == coll->nprocs ){
+		if (0 == coll->nprocs) {
 			ret = coll;
 			goto exit;
-		} if( _compare_ranges(coll->procs, procs, nprocs) ){
+		}
+		if (_compare_ranges(coll->procs, procs, nprocs)) {
 			ret = coll;
 			goto exit;
 		}
 	}
-exit:
+      exit:
 	list_iterator_destroy(it);
 	return ret;
 }
 
-pmixp_coll_t *
-pmixp_state_coll_get(pmixp_coll_type_t type, const pmix_proc_t *procs,
-		     size_t nprocs)
+pmixp_coll_t *pmixp_state_coll_get(pmixp_coll_type_t type,
+				   const pmix_proc_t * procs,
+				   size_t nprocs)
 {
 	pmixp_coll_t *ret = NULL;
 
 	/* Collectives are created once for each type and process set
-     * and resides till the end of jobstep lifetime.
-     * So in most cases we will find that collective is already
-     * exists.
-     * First we try to find collective in the list without locking. */
+	 * and resides till the end of jobstep lifetime.
+	 * So in most cases we will find that collective is already
+	 * exists.
+	 * First we try to find collective in the list without locking. */
 
-	if( NULL != (ret = _find_collective(type, procs, nprocs))){
+	if (NULL != (ret = _find_collective(type, procs, nprocs))) {
 		return ret;
 	}
 
 	/* if we failed to find the collective we most probably need
-     * to create a new structure. To do so we need to lo lock the
-     * whole state and try to search again to exclude situation where
-     * concurent thread already created it while we were doing the
-     * first search */
+	 * to create a new structure. To do so we need to lo lock the
+	 * whole state and try to search again to exclude situation where
+	 * concurent thread already created it while we were doing the
+	 * first search */
 
-	if( 0 != pmixp_coll_belong_chk(type, procs, nprocs)){
+	if (0 != pmixp_coll_belong_chk(type, procs, nprocs)) {
 		return NULL;
 	}
 
 	pthread_mutex_lock(&_pmixp_state.lock);
 
-	if( NULL == (ret = _find_collective(type, procs, nprocs))){
+	if (NULL == (ret = _find_collective(type, procs, nprocs))) {
 		/* 1. Create and insert unitialized but locked coll
-	 * structure into the list. We can release the state
-	 * structure right after that */
-		ret = xmalloc( sizeof(*ret) );
+		 * structure into the list. We can release the state
+		 * structure right after that */
+		ret = xmalloc(sizeof(*ret));
 		/* initialize with unlocked list but locked element */
-		if( PMIX_SUCCESS != pmixp_coll_init(ret, procs, nprocs, type) ){
-			if( NULL != ret->procs ){
+		if (PMIX_SUCCESS !=
+		    pmixp_coll_init(ret, procs, nprocs, type)) {
+			if (NULL != ret->procs) {
 				xfree(ret->procs);
 			}
 			xfree(ret);
@@ -176,7 +178,7 @@ void pmixp_state_coll_cleanup()
 
 	/* Walk through the list looking for the collective descriptor */
 	it = list_iterator_create(_pmixp_state.coll);
-	while( NULL != ( coll = list_next(it))){
+	while (NULL != (coll = list_next(it))) {
 		pmixp_coll_reset_if_to(coll, ts);
 	}
 	list_iterator_destroy(it);

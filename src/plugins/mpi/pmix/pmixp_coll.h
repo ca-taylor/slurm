@@ -54,8 +54,8 @@ typedef enum {
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIXP_COLL_STATE_MAGIC 0xCA11CAFE
-	int  magic;
+#define PMIXP_COLL_STATE_MAGIC 0xCA11CAFE
+	int magic;
 #endif
 	/* element-wise lock */
 	pthread_mutex_t lock;
@@ -86,7 +86,7 @@ typedef struct {
 	Buf buf;
 	size_t serv_offs;
 
-	/* libpmix callback data*/
+	/* libpmix callback data */
 	pmix_modex_cbfunc_t cbfunc;
 	void *cbdata;
 
@@ -94,21 +94,23 @@ typedef struct {
 	time_t ts;
 } pmixp_coll_t;
 
-inline static void pmixp_coll_sanity_check(pmixp_coll_t *coll)
+inline static void pmixp_coll_sanity_check(pmixp_coll_t * coll)
 {
-	xassert( coll->magic == PMIXP_COLL_STATE_MAGIC );
+	xassert(coll->magic == PMIXP_COLL_STATE_MAGIC);
 }
 
-int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs, size_t nprocs,
-		    pmixp_coll_type_t type);
-void pmixp_coll_free(pmixp_coll_t *coll);
+int pmixp_coll_init(pmixp_coll_t * coll, const pmix_proc_t * procs,
+		    size_t nprocs, pmixp_coll_type_t type);
+void pmixp_coll_free(pmixp_coll_t * coll);
 
-inline static void pmixp_coll_set_callback(pmixp_coll_t *coll,
-					   pmix_modex_cbfunc_t cbfunc, void *cbdata){
+inline static void pmixp_coll_set_callback(pmixp_coll_t * coll,
+					   pmix_modex_cbfunc_t cbfunc,
+					   void *cbdata)
+{
 	/* no need to protect coll since:
-     * - only libpmix thread may touch this data during fan-in stage
-     * - only slurm thread may touch this data during fan-out stage
-     */
+	 * - only libpmix thread may touch this data during fan-in stage
+	 * - only slurm thread may touch this data during fan-out stage
+	 */
 	pmixp_coll_sanity_check(coll);
 	coll->cbfunc = cbfunc;
 	coll->cbdata = cbdata;
@@ -155,13 +157,13 @@ inline static void pmixp_coll_set_callback(pmixp_coll_t *coll,
  *    (d) we won't be able to switch to SYNC since root will be busy dealing with
  *        previous DB broadcast.
  */
-inline static int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
+inline static int pmixp_coll_check_seq(pmixp_coll_t * coll, uint32_t seq,
 				       char *nodename)
 {
-	if( coll->seq == seq ){
+	if (coll->seq == seq) {
 		/* accept this message */
 		return SLURM_SUCCESS;
-	} else if( (coll->seq - 1) == seq ){
+	} else if ((coll->seq - 1) == seq) {
 		/* his may be our child OR root of the tree that
 		 * had false negatives from SLURM protocol.
 		 * It's normal situation, return error because we
@@ -171,20 +173,21 @@ inline static int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
 	PMIXP_ERROR("Bad collective seq. #%d from %s, current is %d",
 		    seq, nodename, coll->seq);
 	/* maybe need more sophisticated handling in presence of
-			 * several steps. However maybe it's enough to just ignore */
+	 * several steps. However maybe it's enough to just ignore */
 	// slurm_kill_job_step(pmixp_info_jobid(), pmixp_info_stepid(), SIGKILL);
 	return SLURM_ERROR;
 }
 
-int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t ndata);
-int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf);
-void pmixp_coll_bcast(pmixp_coll_t *coll, Buf buf);
-bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
+int pmixp_coll_contrib_local(pmixp_coll_t * coll, char *data,
+			     size_t ndata);
+int pmixp_coll_contrib_node(pmixp_coll_t * coll, char *nodename, Buf buf);
+void pmixp_coll_bcast(pmixp_coll_t * coll, Buf buf);
+bool pmixp_coll_progress(pmixp_coll_t * coll, char *fwd_node,
 			 void **data, uint64_t size);
-int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
-			     pmix_proc_t **ranges, size_t *nranges);
-int pmixp_coll_belong_chk(pmixp_coll_type_t type, const pmix_proc_t *procs,
-			  size_t nprocs);
-void pmixp_coll_reset_if_to(pmixp_coll_t *coll, time_t ts);
+int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t * type,
+			     pmix_proc_t ** ranges, size_t * nranges);
+int pmixp_coll_belong_chk(pmixp_coll_type_t type,
+			  const pmix_proc_t * procs, size_t nprocs);
+void pmixp_coll_reset_if_to(pmixp_coll_t * coll, time_t ts);
 
-#endif // PMIXP_COLL_H
+#endif				// PMIXP_COLL_H

@@ -60,7 +60,7 @@ void pmixp_xfree_xmalloced(void *x)
 
 void pmixp_free_Buf(void *x)
 {
-	Buf buf = (Buf)x;
+	Buf buf = (Buf) x;
 	free_buf(buf);
 }
 
@@ -69,15 +69,16 @@ int pmixp_usock_create_srv(char *path)
 	static struct sockaddr_un sa;
 	int ret = 0;
 
-	if( strlen(path) >= sizeof(sa.sun_path) ){
-		PMIXP_ERROR_STD("UNIX socket path is too long: %lu, max %lu",
-			    (unsigned long)strlen(path),
-			    (unsigned long)sizeof(sa.sun_path)-1);
+	if (strlen(path) >= sizeof(sa.sun_path)) {
+		PMIXP_ERROR_STD
+		    ("UNIX socket path is too long: %lu, max %lu",
+		     (unsigned long) strlen(path),
+		     (unsigned long) sizeof(sa.sun_path) - 1);
 		return SLURM_ERROR;
 	}
 
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if( fd < 0 ){
+	if (fd < 0) {
 		PMIXP_ERROR_STD("Cannot create UNIX socket");
 		return SLURM_ERROR;
 	}
@@ -85,90 +86,92 @@ int pmixp_usock_create_srv(char *path)
 	memset(&sa, 0, sizeof(sa));
 	sa.sun_family = AF_UNIX;
 	strcpy(sa.sun_path, path);
-	if( ret = bind(fd, (struct sockaddr*)&sa, SUN_LEN(&sa)) ){
+	if (ret = bind(fd, (struct sockaddr *) &sa, SUN_LEN(&sa))) {
 		PMIXP_ERROR_STD("Cannot bind() UNIX socket %s", path);
 		goto err_fd;
 	}
 
-	if( (ret = listen(fd, 64)) ){
+	if ((ret = listen(fd, 64))) {
 		PMIXP_ERROR_STD("Cannot listen(%d, 64) UNIX socket %s",
-			    fd, path);
+				fd, path);
 		goto err_bind;
 
 	}
 	return fd;
 
-err_bind:
+      err_bind:
 	unlink(path);
-err_fd:
+      err_fd:
 	close(fd);
 	return ret;
 }
 
-size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown, bool blocking)
+size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown,
+		      bool blocking)
 {
 	ssize_t ret, offs = 0;
 
 	*shutdown = 0;
 
-	if( !blocking && !pmixp_fd_read_ready(sd, shutdown) ){
+	if (!blocking && !pmixp_fd_read_ready(sd, shutdown)) {
 		return 0;
 	}
 
-	if( blocking ){
+	if (blocking) {
 		fd_set_blocking(sd);
 	}
 
-	while( count - offs > 0 ) {
-		ret = read(sd, (char*)buf + offs, count - offs);
-		if( ret > 0 ){
+	while (count - offs > 0) {
+		ret = read(sd, (char *) buf + offs, count - offs);
+		if (ret > 0) {
 			offs += ret;
 			continue;
-		} else if( ret == 0 ){
+		} else if (ret == 0) {
 			// connection closed.
 			*shutdown = 1;
 			return offs;
 		}
-		switch( errno ){
+		switch (errno) {
 		case EINTR:
 			continue;
 		case EWOULDBLOCK:
 			// we can get here in non-blocking mode only
 			return offs;
 		default:
-			PMIXP_ERROR_STD("blocking=%d",blocking);
+			PMIXP_ERROR_STD("blocking=%d", blocking);
 			*shutdown = -errno;
 			return offs;
 		}
 	}
 
-	if( blocking ){
+	if (blocking) {
 		fd_set_nonblocking(sd);
 	}
 	return offs;
 }
 
-size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown, bool blocking)
+size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown,
+		       bool blocking)
 {
 	ssize_t ret, offs = 0;
 
 	*shutdown = 0;
 
-	if( !blocking && !pmixp_fd_write_ready(sd, shutdown) ){
+	if (!blocking && !pmixp_fd_write_ready(sd, shutdown)) {
 		return 0;
 	}
 
-	if( blocking ){
+	if (blocking) {
 		fd_set_blocking(sd);
 	}
 
-	while( count - offs > 0 ) {
-		ret = write(sd, (char*)buf + offs, count - offs);
-		if( ret > 0 ){
+	while (count - offs > 0) {
+		ret = write(sd, (char *) buf + offs, count - offs);
+		if (ret > 0) {
 			offs += ret;
 			continue;
 		}
-		switch( errno ){
+		switch (errno) {
 		case EINTR:
 			continue;
 		case EWOULDBLOCK:
@@ -179,7 +182,7 @@ size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown, bool bloc
 		}
 	}
 
-	if( blocking ){
+	if (blocking) {
 		fd_set_nonblocking(sd);
 	}
 
@@ -189,21 +192,21 @@ size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown, bool bloc
 bool pmixp_fd_read_ready(int fd, int *shutdown)
 {
 	struct pollfd pfd[1];
-	int    rc;
-	pfd[0].fd     = fd;
+	int rc;
+	pfd[0].fd = fd;
 	pfd[0].events = POLLIN;
 
 	// Drop shutdown before the check
 	*shutdown = 0;
 
 	rc = poll(pfd, 1, 10);
-	if( rc < 0 ){
+	if (rc < 0) {
 		*shutdown = -errno;
 		return false;
 	}
 	bool ret = ((rc == 1) && (pfd[0].revents & POLLIN));
-	if( !ret && (pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL))){
-		if( pfd[0].revents & ( POLLERR | POLLNVAL) ){
+	if (!ret && (pfd[0].revents & (POLLERR | POLLHUP | POLLNVAL))) {
+		if (pfd[0].revents & (POLLERR | POLLNVAL)) {
 			*shutdown = -EBADF;
 		} else {
 			// POLLHUP - normal connection close
@@ -217,16 +220,16 @@ bool pmixp_fd_read_ready(int fd, int *shutdown)
 bool pmixp_fd_write_ready(int fd, int *shutdown)
 {
 	struct pollfd pfd[1];
-	int    rc;
-	pfd[0].fd     = fd;
+	int rc;
+	pfd[0].fd = fd;
 	pfd[0].events = POLLOUT;
 	rc = poll(pfd, 1, 10);
-	if( rc < 0 ){
+	if (rc < 0) {
 		*shutdown = -errno;
 		return false;
 	}
-	if( pfd[0].revents & ( POLLERR | POLLHUP | POLLNVAL) ){
-		if( pfd[0].revents & ( POLLERR | POLLNVAL) ){
+	if (pfd[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+		if (pfd[0].revents & (POLLERR | POLLNVAL)) {
 			*shutdown = -EBADF;
 		} else {
 			// POLLHUP - normal connection close
@@ -258,13 +261,15 @@ _send_to_stepds(hostlist_t hl, const char *addr, uint32_t len, char *data)
 
 	if ((ret_list = slurm_send_recv_msgs(nodelist, msg, 0, false))) {
 		while ((ret_data_info = list_pop(ret_list))) {
-			temp_rc = slurm_get_return_code(ret_data_info->type,
-							ret_data_info->data);
-			if (temp_rc){
+			temp_rc =
+			    slurm_get_return_code(ret_data_info->type,
+						  ret_data_info->data);
+			if (temp_rc) {
 				rc = temp_rc;
 			} else {
 				hostlist_delete_host(hl,
-							ret_data_info->node_name);
+						     ret_data_info->
+						     node_name);
 			}
 		}
 	} else {
@@ -278,11 +283,12 @@ _send_to_stepds(hostlist_t hl, const char *addr, uint32_t len, char *data)
 	return rc;
 }
 
-int pmixp_stepd_send(char *nodelist, const char *address, char *data, uint32_t len)
+int pmixp_stepd_send(char *nodelist, const char *address, char *data,
+		     uint32_t len)
 {
 
 	int retry = 0, rc;
-	unsigned int delay = 100; /* in milliseconds */
+	unsigned int delay = 100;	/* in milliseconds */
 	hostlist_t hl;
 
 	hl = hostlist_create(nodelist);
@@ -296,10 +302,11 @@ int pmixp_stepd_send(char *nodelist, const char *address, char *data, uint32_t l
 		if (rc == SLURM_SUCCESS)
 			break;
 		retry++;
-		if (retry >= PMIXP_MAX_RETRY )
+		if (retry >= PMIXP_MAX_RETRY)
 			break;
 		/* wait with constantly increasing delay */
-		struct timespec ts = { (delay/1000), ((delay % 1000) * 1000000) };
+		struct timespec ts =
+		    { (delay / 1000), ((delay % 1000) * 1000000) };
 		nanosleep(&ts, NULL);
 		delay *= 2;
 	}
@@ -311,7 +318,7 @@ static int _is_dir(char *path)
 {
 	struct stat stat_buf;
 	int rc;
-	if( 0 > (rc = stat(path, &stat_buf)) ) {
+	if (0 > (rc = stat(path, &stat_buf))) {
 		PMIXP_ERROR_STD("Cannot stat() path=\"%s\"", path);
 		return rc;
 	} else if (!S_ISDIR(stat_buf.st_mode)) {
@@ -331,9 +338,9 @@ int pmixp_rmdir_recursively(char *path)
 	/*
 	 * Make sure that "directory" exists and is a directory.
 	 */
-	if( 1 != (rc = _is_dir(path) ) ){
+	if (1 != (rc = _is_dir(path))) {
 		PMIXP_ERROR("path=\"%s\" is not a directory", path);
-		return (rc == 0 ) ? -1 : rc;
+		return (rc == 0) ? -1 : rc;
 	}
 
 	if ((dp = opendir(path)) == NULL) {
@@ -342,21 +349,21 @@ int pmixp_rmdir_recursively(char *path)
 	}
 
 	while ((ent = readdir(dp)) != NULL) {
-		if( 0 == strcmp(ent->d_name, "." ) ||
-				0 == strcmp(ent->d_name, ".." ) ){
+		if (0 == strcmp(ent->d_name, ".") ||
+		    0 == strcmp(ent->d_name, "..")) {
 			/* skip special dir's */
 			continue;
 		}
 		snprintf(nested_path, sizeof(nested_path),
 			 "%s/%s", path, ent->d_name);
-		if( _is_dir(nested_path) ){
+		if (_is_dir(nested_path)) {
 			pmixp_rmdir_recursively(nested_path);
 		} else {
 			unlink(nested_path);
 		}
 	}
 	closedir(dp);
-	if( (rc = rmdir(path)) ){
+	if ((rc = rmdir(path))) {
 		PMIXP_ERROR_STD("Cannot remove path=\"%s\"", path);
 	}
 	return rc;

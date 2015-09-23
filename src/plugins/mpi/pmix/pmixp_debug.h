@@ -111,4 +111,4 @@ inline static void _pmixp_debug_hang(int delay)
 #define pmixp_debug_hang(x) _pmixp_debug_hang(x)
 
 #endif
-#endif	// PMIXP_DEBUG_H
+#endif				// PMIXP_DEBUG_H

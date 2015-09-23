@@ -50,8 +50,8 @@
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIX_STATE_MAGIC 0xFEEDCAFE
-	int  magic;
+#define PMIX_STATE_MAGIC 0xFEEDCAFE
+	int magic;
 #endif
 	List coll;
 	eio_handle_t *srv_handle;
@@ -69,20 +69,20 @@ void pmixp_state_finalize();
 
 inline static void pmixp_state_sanity_check()
 {
-	xassert( _pmixp_state.magic == PMIX_STATE_MAGIC );
+	xassert(_pmixp_state.magic == PMIX_STATE_MAGIC);
 }
 
 /*
  * Collective state
  */
 
-pmixp_coll_t *
-pmixp_state_coll_get(pmixp_coll_type_t type, const pmix_proc_t *ranges,
-		     size_t nranges);
-pmixp_coll_t *
-pmixp_state_coll_new(pmixp_coll_type_t type, const pmix_proc_t *ranges,
-		     size_t nranges);
+pmixp_coll_t *pmixp_state_coll_get(pmixp_coll_type_t type,
+				   const pmix_proc_t * ranges,
+				   size_t nranges);
+pmixp_coll_t *pmixp_state_coll_new(pmixp_coll_type_t type,
+				   const pmix_proc_t * ranges,
+				   size_t nranges);
 
 void pmixp_state_coll_cleanup();
 
-#endif // PMIXP_STATE_H
+#endif				// PMIXP_STATE_H

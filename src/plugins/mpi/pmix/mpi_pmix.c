@@ -36,7 +36,7 @@
 \*****************************************************************************/
 
 #if     HAVE_CONFIG_H
-#  include "config.h"
+#include "config.h"
 #endif
 
 #include <fcntl.h>
@@ -79,32 +79,33 @@
  * as 100 or 1000.  Various SLURM versions will likely require a certain
  * minimum version for their plugins as this API matures.
  */
-const char plugin_name[]        = "PMIx plugin";
-const char plugin_type[]        = "mpi/pmix";
-const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
+const char plugin_name[] = "PMIx plugin";
+const char plugin_type[] = "mpi/pmix";
+const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
-int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
+int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t * job,
+				  char ***env)
 {
 	int ret;
 	pmixp_debug_hang(0);
 	PMIXP_DEBUG("start");
 
-	if( SLURM_SUCCESS != (ret = pmixp_stepd_init(job, env)) ){
+	if (SLURM_SUCCESS != (ret = pmixp_stepd_init(job, env))) {
 		PMIXP_ERROR("pmixp_stepd_init() failed");
 		goto err_ext;
 	}
-	if( SLURM_SUCCESS != (ret = pmixp_agent_start()) ){
+	if (SLURM_SUCCESS != (ret = pmixp_agent_start())) {
 		PMIXP_ERROR("pmixp_agent_start() failed");
 		goto err_ext;
 	}
 	return SLURM_SUCCESS;
-err_ext:
+      err_ext:
 	/* Abort the whole job if error! */
 	slurm_kill_job_step(job->jobid, job->stepid, SIGKILL);
 	return ret;
 }
 
-int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
+int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t * job,
 			       char ***env)
 {
 	pmix_proc_t proc;
@@ -115,14 +116,15 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 	proc.rank = job->gtaskid;
 	strncpy(proc.nspace, pmixp_info_namespace(), PMIX_MAX_NSLEN);
 	PMIx_server_setup_fork(&proc, &tmp_env);
-	if( NULL != tmp_env ){
+	if (NULL != tmp_env) {
 		int i;
-		for(i=0; NULL != tmp_env[i]; i++){
-			char *value = strchr(tmp_env[i],'=');
-			if( NULL != value ){
+		for (i = 0; NULL != tmp_env[i]; i++) {
+			char *value = strchr(tmp_env[i], '=');
+			if (NULL != value) {
 				*value = '\0';
 				value++;
-				env_array_overwrite(env, (const char *)tmp_env[i], value);
+				env_array_overwrite(env, (const char *)tmp_env[i],
+						    value);
 			}
 			free(tmp_env[i]);
 		}
@@ -132,8 +134,9 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 	return SLURM_SUCCESS;
 }
 
-mpi_plugin_client_state_t *
-p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
+mpi_plugin_client_state_t *p_mpi_hook_client_prelaunch(const
+						       mpi_plugin_client_info_t
+						       * job, char ***env)
 {
 	char *mapping = NULL;
 	PMIXP_DEBUG("setup process mapping in srun");
@@ -142,7 +145,7 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 	uint16_t *task_cnt = job->step_layout->tasks;
 	uint32_t **tids = job->step_layout->tids;
 	mapping = pack_process_mapping(nnodes, ntasks, task_cnt, tids);
-	if( NULL == mapping ){
+	if (NULL == mapping) {
 		PMIXP_ERROR("Cannot create process mapping");
 		return NULL;
 	}
@@ -150,7 +153,7 @@ p_mpi_hook_client_prelaunch(const mpi_plugin_client_info_t *job, char ***env)
 	xfree(mapping);
 
 	/* only return NULL on error */
-	return (void *)0xdeadbeef;
+	return (void *) 0xdeadbeef;
 }
 
 int p_mpi_hook_client_single_task_per_node(void)

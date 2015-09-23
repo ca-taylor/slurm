@@ -50,4 +50,4 @@ void pmix_libpmix_task_set(int rank, char ***env);
 
 void pmix_client_new_conn(int fd);
 
-#endif // PMIXP_CLIENT_H
+#endif				// PMIXP_CLIENT_H

@@ -56,23 +56,23 @@ typedef struct {
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIXP_NSPACE_MAGIC 0xCAFED00D
-	int  magic;
+#define PMIXP_NSPACE_MAGIC 0xCAFED00D
+	int magic;
 #endif
 	char name[PMIX_MAX_NSLEN];
-	uint32_t nnodes;      /* number of nodes in this namespace              */
-	int node_id;          /* relative position of this node in this step	*/
-	uint32_t ntasks;      /* total number of tasks in this namespace        */
-	uint32_t *task_cnts;  /* Number of tasks on each node in this namespace */
-	char *task_map_packed;  /* string represents packed task mapping information */
+	uint32_t nnodes;	/* number of nodes in this namespace              */
+	int node_id;		/* relative position of this node in this step    */
+	uint32_t ntasks;	/* total number of tasks in this namespace        */
+	uint32_t *task_cnts;	/* Number of tasks on each node in this namespace */
+	char *task_map_packed;	/* string represents packed task mapping information */
 	uint32_t *task_map;	/* i'th task is located on task_map[i] node     */
 	hostlist_t hl;
 } pmixp_namespace_t;
 
 typedef struct {
 #ifndef NDEBUG
-#       define PMIXP_NSPACE_DB_MAGIC 0xCAFEBABE
-	int  magic;
+#define PMIXP_NSPACE_DB_MAGIC 0xCAFEBABE
+	int magic;
 #endif
 	List nspaces;
 	pmixp_namespace_t *local;
@@ -83,20 +83,21 @@ int pmixp_nspaces_finalize();
 pmixp_namespace_t *pmixp_nspaces_find(const char *name);
 pmixp_namespace_t *pmixp_nspaces_local();
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
-		      uint32_t ntasks, uint32_t *task_cnts,
+		      uint32_t ntasks, uint32_t * task_cnts,
 		      char *task_map_packed, hostlist_t hl);
 
 /* operations on the specific namespace */
-inline static hostlist_t pmixp_nspace_hostlist(pmixp_namespace_t *nsptr)
+inline static hostlist_t pmixp_nspace_hostlist(pmixp_namespace_t * nsptr)
 {
 	hostlist_t hl = hostlist_copy(nsptr->hl);
 	return hl;
 }
-hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr,
+
+hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t * nsptr,
 				  const int *ranks, size_t nranks);
 char *pmixp_nspace_resolve(const char *name, int rank);
 
 size_t pmixp_nspace_mdx_lsize(List l);
 int pmixp_nspaces_push(Buf buf, int cnt);
 
-#endif // PMIXP_NSPACES_H
+#endif				// PMIXP_NSPACES_H

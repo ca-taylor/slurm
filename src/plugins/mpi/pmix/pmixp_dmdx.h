@@ -44,8 +44,8 @@
 int pmixp_dmdx_init();
 int pmixp_dmdx_finalize();
 int pmixp_dmdx_get(const char *nspace, int rank,
-	   pmix_modex_cbfunc_t cbfunc, void *cbdata);
+		   pmix_modex_cbfunc_t cbfunc, void *cbdata);
 void pmixp_dmdx_process(Buf buf, char *host, uint32_t seq);
 void pmixp_dmdx_timeout_cleanup();
 
-#endif // PMIXP_DMDX_H
+#endif				// PMIXP_DMDX_H

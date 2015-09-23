@@ -43,4 +43,4 @@
 int pmixp_agent_start(void);
 int pmixp_agent_stop(void);
 
-#endif // PMIXP_AGENT_H
+#endif				// PMIXP_AGENT_H
