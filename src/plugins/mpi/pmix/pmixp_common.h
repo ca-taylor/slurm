@@ -52,7 +52,7 @@
 
 // Other useful includes
 #include "slurm/slurm_errno.h"
-#include "src/common/mpi.h"
+#include "src/common/slurm_mpi.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xassert.h"
