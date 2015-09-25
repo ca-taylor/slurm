@@ -55,6 +55,20 @@ static int client_connected(const pmix_proc_t * proc, void *server_object)
 	return PMIX_SUCCESS;
 }
 
+static void op_callbk(pmix_status_t status,
+                      void *cbdata)
+{
+	PMIXP_DEBUG("OP CALLBACK CALLED WITH STATUS %d", status);
+}
+
+static void errhandler_reg_callbk (pmix_status_t status,
+                                   int errhandler_ref,
+                                   void *cbdata)
+{
+	PMIXP_DEBUG("ERRHANDLER REGISTRATION CALLBACK CALLED WITH STATUS %d, ref=%d",
+                status, errhandler_ref);
+}
+
 static pmix_status_t
 client_finalized(const pmix_proc_t * proc, void *server_object,
 		 pmix_op_cbfunc_t cbfunc, void *cbdata)
@@ -155,7 +169,7 @@ int pmixp_libpmix_init()
 	}
 
 	/* register the errhandler */
-	PMIx_Register_errhandler(NULL, 0, errhandler);
+	PMIx_Register_errhandler(NULL, 0, errhandler, errhandler_reg_callbk, NULL);
 
 	return 0;
 }
@@ -163,6 +177,10 @@ int pmixp_libpmix_init()
 int pmixp_libpmix_finalize()
 {
 	int rc = SLURM_SUCCESS, rc1;
+
+	/* deregister the errhandler */
+	PMIx_Deregister_errhandler(0, op_callbk, NULL);
+
 	if (PMIX_SUCCESS != PMIx_server_finalize()) {
 		rc = SLURM_ERROR;
 	}
