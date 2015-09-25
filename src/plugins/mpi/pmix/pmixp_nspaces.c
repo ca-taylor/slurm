@@ -90,7 +90,9 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC);
 
 	/* fill up informational part */
+#ifndef NDEBUG
 	nsptr->magic = PMIXP_NSPACE_MAGIC;
+#endif
 	strcpy(nsptr->name, name);
 	nsptr->nnodes = nnodes;
 	nsptr->node_id = node_id;
