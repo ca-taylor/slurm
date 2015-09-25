@@ -451,6 +451,7 @@ void pmixp_dmdx_timeout_cleanup()
 	/* run through all requests and discard stale one's */
 	while (NULL != (req = list_next(it))) {
 		if (ts - req->ts > pmixp_info_timeout()) {
+#ifndef NDEBUG
 			/* respond with the timeout to libpmix */
 			char *host =
 			    pmixp_nspace_resolve(req->nspace, req->rank);
@@ -462,6 +463,7 @@ void pmixp_dmdx_timeout_cleanup()
 			if (NULL != host) {
 				free(host);
 			}
+#endif
 			req->cbfunc(PMIX_ERR_TIMEOUT, NULL, 0, req->cbdata,
 				    NULL, NULL);
 			/* release tracker & list iterator */
