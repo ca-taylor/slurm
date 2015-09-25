@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #ifndef PMIXP_IO_H
 #define PMIXP_IO_H
@@ -42,11 +42,11 @@
 #include "pmixp_common.h"
 #include "pmixp_utils.h"
 
-// Message management
+/* Message management */
 
-typedef uint32_t(*pmix_io_engine_hsize_cb_t) (void *hdr);
-typedef int (*pmix_io_engine_hpack_cb_t) (void *hdr_host, void *hdr_net);
-typedef int (*pmix_io_engine_hunpack_cb_t) (void *hdr_net, void *hdr_host);
+typedef uint32_t (*pmix_io_engine_hsize_cb_t)(void *hdr);
+typedef int (*pmix_io_engine_hpack_cb_t)(void *hdr_host, void *hdr_net);
+typedef int (*pmix_io_engine_hunpack_cb_t)(void *hdr_net, void *hdr_host);
 typedef struct {
 	uint32_t host_size, net_size;
 	pmix_io_engine_hpack_cb_t pack_hdr_cb;
@@ -59,12 +59,12 @@ typedef struct {
 #define PMIX_MSGSTATE_MAGIC 0xC0FFEEEE
 	int magic;
 #endif
-	// User supplied information
+	/* User supplied information */
 	int sd;
 	int error;
 	pmixp_io_engine_header_t header;
 	bool operating;
-	// receiver
+	/* receiver */
 	uint32_t rcvd_hdr_offs;
 	void *rcvd_hdr;
 	void *rcvd_hdr_host;
@@ -73,7 +73,7 @@ typedef struct {
 	void *rcvd_payload;
 	uint32_t rcvd_padding;
 	uint32_t rcvd_pad_recvd;
-	// sender
+	/* sender */
 	void *send_current;
 	void *send_hdr_net;
 	uint32_t send_hdr_offs;
@@ -84,45 +84,43 @@ typedef struct {
 	List send_queue;
 } pmixp_io_engine_t;
 
-inline static void pmix_io_rcvd_padding(pmixp_io_engine_t * eng,
-					uint32_t padsize)
+static inline void pmix_io_rcvd_padding(pmixp_io_engine_t *eng,
+		uint32_t padsize)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
 	eng->rcvd_padding = padsize;
 }
 
-inline static bool pmix_io_rcvd_ready(pmixp_io_engine_t * eng)
+static inline bool pmix_io_rcvd_ready(pmixp_io_engine_t *eng)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
 	return (eng->rcvd_hdr_offs == eng->header.net_size)
-	    && (eng->rcvd_pay_size == eng->rcvd_pay_offs);
+			&& (eng->rcvd_pay_size == eng->rcvd_pay_offs);
 }
 
-inline static bool pmix_io_finalized(pmixp_io_engine_t * eng)
+static inline bool pmix_io_finalized(pmixp_io_engine_t *eng)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
 	return !(eng->operating);
 }
 
-inline static int pmix_io_error(pmixp_io_engine_t * eng)
+static inline int pmix_io_error(pmixp_io_engine_t *eng)
 {
 	xassert(eng->magic == PMIX_MSGSTATE_MAGIC);
 	return eng->error;
 }
 
-void pmix_io_init(pmixp_io_engine_t * eng, int fd,
-		  pmixp_io_engine_header_t header);
-void pmix_io_finalize(pmixp_io_engine_t * eng, int error);
+void pmix_io_init(pmixp_io_engine_t *eng, int fd,
+		pmixp_io_engine_header_t header);
+void pmix_io_finalize(pmixp_io_engine_t *eng, int error);
 
-// Receiver
-int pmix_io_first_header(int fd, void *buf, uint32_t * _offs,
-			 uint32_t len);
-void pmix_io_rcvd(pmixp_io_engine_t * eng);
-void *pmix_io_rcvd_extract(pmixp_io_engine_t * eng, void *header);
-// Transmitter
-void pmix_io_send_enqueue(pmixp_io_engine_t * eng, void *msg);
-void pmix_io_send_progress(pmixp_io_engine_t * eng);
-bool pmix_io_send_pending(pmixp_io_engine_t * eng);
+/* Receiver */
+int pmix_io_first_header(int fd, void *buf, uint32_t *_offs, uint32_t len);
+void pmix_io_rcvd(pmixp_io_engine_t *eng);
+void *pmix_io_rcvd_extract(pmixp_io_engine_t *eng, void *header);
+/* Transmitter */
+void pmix_io_send_enqueue(pmixp_io_engine_t *eng, void *msg);
+void pmix_io_send_progress(pmixp_io_engine_t *eng);
+bool pmix_io_send_pending(pmixp_io_engine_t *eng);
 
-
-#endif				// PMIXP_IO_H
+#endif /* PMIXP_IO_H */

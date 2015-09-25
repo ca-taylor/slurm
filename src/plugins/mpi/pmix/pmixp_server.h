@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #ifndef PMIXP_SERVER_H
 #define PMIXP_SERVER_H
@@ -46,14 +46,13 @@ typedef enum {
 	PMIXP_MSG_DMDX
 } pmixp_srv_cmd_t;
 
-
-int pmixp_stepd_init(const stepd_step_rec_t * job, char ***env);
-int pmixp_stepd_finalize();
-int pmix_srun_init(const mpi_plugin_client_info_t * job, char ***env);
+int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env);
+int pmixp_stepd_finalize(void);
+int pmix_srun_init(const mpi_plugin_client_info_t *job, char ***env);
 void pmix_server_new_conn(int fd);
 int pmixp_server_send(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
-		      const char *addr, void *data, size_t size);
+		const char *addr, void *data, size_t size);
 
-Buf pmixp_server_new_buf();
+Buf pmixp_server_new_buf(void);
 
-#endif				// PMIXP_SERVER_H
+#endif /* PMIXP_SERVER_H */

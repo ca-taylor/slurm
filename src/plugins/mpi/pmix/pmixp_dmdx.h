@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #ifndef PMIXP_DMDX_H
 #define PMIXP_DMDX_H
@@ -41,11 +41,11 @@
 #include "pmixp_common.h"
 #include "pmixp_nspaces.h"
 
-int pmixp_dmdx_init();
-int pmixp_dmdx_finalize();
+int pmixp_dmdx_init(void);
+int pmixp_dmdx_finalize(void);
 int pmixp_dmdx_get(const char *nspace, int rank,
 		   pmix_modex_cbfunc_t cbfunc, void *cbdata);
 void pmixp_dmdx_process(Buf buf, char *host, uint32_t seq);
-void pmixp_dmdx_timeout_cleanup();
+void pmixp_dmdx_timeout_cleanup(void);
 
-#endif				// PMIXP_DMDX_H
+#endif /* PMIXP_DMDX_H */

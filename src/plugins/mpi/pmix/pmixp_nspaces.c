@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #include "pmixp_common.h"
 #include "pmixp_nspaces.h"
@@ -49,7 +49,7 @@ static void _xfree_nspace(void *n)
 	xfree(nsptr);
 }
 
-int pmixp_nspaces_init()
+int pmixp_nspaces_init(void)
 {
 	char *mynspace, *task_map;
 	uint32_t nnodes, ntasks, *task_cnts;
@@ -67,21 +67,21 @@ int pmixp_nspaces_init()
 	task_cnts = pmixp_info_tasks_cnts();
 	task_map = pmixp_info_task_map();
 	hl = pmixp_info_step_hostlist();
-	// Initialize local namespace
-	rc = pmixp_nspaces_add(mynspace, nnodes, nodeid, ntasks,
-			       task_cnts, task_map, hostlist_copy(hl));
+	/* Initialize local namespace */
+	rc = pmixp_nspaces_add(mynspace, nnodes, nodeid, ntasks, task_cnts,
+			task_map, hostlist_copy(hl));
 	_pmixp_nspaces.local = pmixp_nspaces_find(mynspace);
 	return rc;
 }
 
-int pmixp_nspaces_finalize()
+int pmixp_nspaces_finalize(void)
 {
 	list_destroy(_pmixp_nspaces.nspaces);
 	return 0;
 }
 
 int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
-		      uint32_t ntasks, uint32_t * task_cnts,
+		      uint32_t ntasks, uint32_t *task_cnts,
 		      char *task_map_packed, hostlist_t hl)
 {
 	pmixp_namespace_t *nsptr = xmalloc(sizeof(pmixp_namespace_t));
@@ -98,14 +98,13 @@ int pmixp_nspaces_add(char *name, uint32_t nnodes, int node_id,
 	nsptr->node_id = node_id;
 	nsptr->ntasks = ntasks;
 	nsptr->task_cnts = xmalloc(sizeof(uint32_t) * nnodes);
-	// Cannot use memcpy here because of different types
+	/* Cannot use memcpy here because of different types */
 	for (i = 0; i < nnodes; i++) {
 		nsptr->task_cnts[i] = task_cnts[i];
 	}
 	nsptr->task_map_packed = xstrdup(task_map_packed);
-	nsptr->task_map =
-	    unpack_process_mapping_flat(task_map_packed, nnodes, ntasks,
-					NULL);
+	nsptr->task_map = unpack_process_mapping_flat(task_map_packed, nnodes,
+			ntasks, NULL);
 	if (nsptr->task_map == NULL) {
 		xfree(nsptr->task_cnts);
 		xfree(nsptr->task_map_packed);
@@ -122,7 +121,6 @@ pmixp_namespace_t *pmixp_nspaces_local()
 	return _pmixp_nspaces.local;
 }
 
-
 pmixp_namespace_t *pmixp_nspaces_find(const char *name)
 {
 	xassert(_pmixp_nspaces.magic == PMIXP_NSPACE_DB_MAGIC);
@@ -135,15 +133,14 @@ pmixp_namespace_t *pmixp_nspaces_find(const char *name)
 			goto exit;
 		}
 	}
-	// Didn't found one!
+	/* Didn't found one! */
 	nsptr = NULL;
       exit:
 	return nsptr;
 }
 
-hostlist_t
-pmixp_nspace_rankhosts(pmixp_namespace_t * nsptr,
-		       const int *ranks, size_t nranks)
+hostlist_t pmixp_nspace_rankhosts(pmixp_namespace_t *nsptr, const int *ranks,
+		size_t nranks)
 {
 	hostlist_t hl = hostlist_create("");
 	int i;
@@ -187,11 +184,12 @@ size_t pmixp_nspace_mdx_lsize(List l)
 	size_t ret = 0;
 
 	while (NULL != (data = list_next(it))) {
-		// we need to save:
-		// - rank (uint32_t)
-		// - scope (uint32_t)
-		// - size of the blob (uint32_t)
-		// - blob data (data->size)
+		/* we need to save:
+		 * - rank (uint32_t)
+		 * - scope (uint32_t)
+		 * - size of the blob (uint32_t)
+		 * - blob data (data->size)
+		 */
 		ret += data->size + 3 * sizeof(int);
 	}
 	list_iterator_destroy(it);

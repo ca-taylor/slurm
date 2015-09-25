@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #include "pmixp_common.h"
 #include "pmixp_debug.h"
@@ -44,15 +44,14 @@
 
 pmixp_state_t _pmixp_state;
 
-
 void _xfree_coll(void *x)
 {
-	pmixp_coll_t *coll = (pmixp_coll_t *) x;
+	pmixp_coll_t *coll = (pmixp_coll_t *)x;
 	pmixp_coll_free(coll);
 	xfree(coll);
 }
 
-int pmixp_state_init()
+int pmixp_state_init(void)
 {
 #ifndef NDEBUG
 	_pmixp_state.magic = PMIX_STATE_MAGIC;
@@ -66,7 +65,7 @@ int pmixp_state_init()
 	return SLURM_SUCCESS;
 }
 
-void pmixp_state_finalize()
+void pmixp_state_finalize(void)
 {
 #ifndef NDEBUG
 	_pmixp_state.magic = 0;
@@ -74,8 +73,7 @@ void pmixp_state_finalize()
 	list_destroy(_pmixp_state.coll);
 }
 
-static bool
-_compare_ranges(const pmix_proc_t * r1, const pmix_proc_t * r2,
+static bool _compare_ranges(const pmix_proc_t *r1, const pmix_proc_t *r2,
 		size_t nprocs)
 {
 	int i;
@@ -91,7 +89,7 @@ _compare_ranges(const pmix_proc_t * r1, const pmix_proc_t * r2,
 }
 
 static pmixp_coll_t *_find_collective(pmixp_coll_type_t type,
-				      const pmix_proc_t * procs,
+				      const pmix_proc_t *procs,
 				      size_t nprocs)
 {
 	pmixp_coll_t *coll = NULL, *ret = NULL;
@@ -121,7 +119,7 @@ static pmixp_coll_t *_find_collective(pmixp_coll_type_t type,
 }
 
 pmixp_coll_t *pmixp_state_coll_get(pmixp_coll_type_t type,
-				   const pmix_proc_t * procs,
+				   const pmix_proc_t *procs,
 				   size_t nprocs)
 {
 	pmixp_coll_t *ret = NULL;
@@ -154,8 +152,7 @@ pmixp_coll_t *pmixp_state_coll_get(pmixp_coll_type_t type,
 		 * structure right after that */
 		ret = xmalloc(sizeof(*ret));
 		/* initialize with unlocked list but locked element */
-		if (PMIX_SUCCESS !=
-		    pmixp_coll_init(ret, procs, nprocs, type)) {
+		if (PMIX_SUCCESS != pmixp_coll_init(ret, procs, nprocs, type)) {
 			if (NULL != ret->procs) {
 				xfree(ret->procs);
 			}
@@ -170,7 +167,7 @@ pmixp_coll_t *pmixp_state_coll_get(pmixp_coll_type_t type,
 	return ret;
 }
 
-void pmixp_state_coll_cleanup()
+void pmixp_state_coll_cleanup(void)
 {
 	pmixp_coll_t *coll = NULL;
 	ListIterator it;

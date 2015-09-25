@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #if     HAVE_CONFIG_H
 #include "config.h"
@@ -83,8 +83,7 @@ const char plugin_name[] = "PMIx plugin";
 const char plugin_type[] = "mpi/pmix";
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
-int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t * job,
-				  char ***env)
+int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
 	int ret;
 	pmixp_debug_hang(0);
@@ -99,14 +98,13 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t * job,
 		goto err_ext;
 	}
 	return SLURM_SUCCESS;
-      err_ext:
+	err_ext:
 	/* Abort the whole job if error! */
 	slurm_kill_job_step(job->jobid, job->stepid, SIGKILL);
 	return ret;
 }
 
-int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t * job,
-			       char ***env)
+int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 {
 	pmix_proc_t proc;
 	char **tmp_env = NULL;
@@ -123,8 +121,9 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t * job,
 			if (NULL != value) {
 				*value = '\0';
 				value++;
-				env_array_overwrite(env, (const char *)tmp_env[i],
-						    value);
+				env_array_overwrite(env,
+						(const char *)tmp_env[i],
+						value);
 			}
 			free(tmp_env[i]);
 		}
@@ -134,9 +133,8 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t * job,
 	return SLURM_SUCCESS;
 }
 
-mpi_plugin_client_state_t *p_mpi_hook_client_prelaunch(const
-						       mpi_plugin_client_info_t
-						       * job, char ***env)
+mpi_plugin_client_state_t *p_mpi_hook_client_prelaunch(
+		const mpi_plugin_client_info_t *job, char ***env)
 {
 	char *mapping = NULL;
 	PMIXP_DEBUG("setup process mapping in srun");
@@ -153,7 +151,7 @@ mpi_plugin_client_state_t *p_mpi_hook_client_prelaunch(const
 	xfree(mapping);
 
 	/* only return NULL on error */
-	return (void *) 0xdeadbeef;
+	return (void *)0xdeadbeef;
 }
 
 int p_mpi_hook_client_single_task_per_node(void)
@@ -161,12 +159,12 @@ int p_mpi_hook_client_single_task_per_node(void)
 	return false;
 }
 
-int p_mpi_hook_client_fini()
+int p_mpi_hook_client_fini(void)
 {
 	return SLURM_SUCCESS;
 }
 
-int fini()
+int fini(void)
 {
 	PMIXP_DEBUG("%s: call fini()", pmixp_info_hostname());
 	pmixp_agent_stop();

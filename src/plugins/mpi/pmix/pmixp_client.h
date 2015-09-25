@@ -33,8 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
-
+ \*****************************************************************************/
 
 #ifndef PMIXP_CLIENT_H
 #define PMIXP_CLIENT_H
@@ -43,11 +42,11 @@
 
 extern pmix_server_module_t _slurm_pmix_callbacks;
 
-int pmixp_libpmix_init();
-int pmixp_libpmix_finalize();
-int pmixp_libpmix_job_set();
+int pmixp_libpmix_init(void);
+int pmixp_libpmix_finalize(void);
+int pmixp_libpmix_job_set(void);
 void pmix_libpmix_task_set(int rank, char ***env);
 
 void pmix_client_new_conn(int fd);
 
-#endif				// PMIXP_CLIENT_H
+#endif /* PMIXP_CLIENT_H */

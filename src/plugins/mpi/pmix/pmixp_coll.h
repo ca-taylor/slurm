@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #ifndef PMIXP_COLL_H
 #define PMIXP_COLL_H
@@ -94,16 +94,16 @@ typedef struct {
 	time_t ts;
 } pmixp_coll_t;
 
-inline static void pmixp_coll_sanity_check(pmixp_coll_t * coll)
+static inline void pmixp_coll_sanity_check(pmixp_coll_t *coll)
 {
 	xassert(coll->magic == PMIXP_COLL_STATE_MAGIC);
 }
 
-int pmixp_coll_init(pmixp_coll_t * coll, const pmix_proc_t * procs,
-		    size_t nprocs, pmixp_coll_type_t type);
-void pmixp_coll_free(pmixp_coll_t * coll);
+int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs,
+		size_t nprocs, pmixp_coll_type_t type);
+void pmixp_coll_free(pmixp_coll_t *coll);
 
-inline static void pmixp_coll_set_callback(pmixp_coll_t * coll,
+static inline void pmixp_coll_set_callback(pmixp_coll_t *coll,
 					   pmix_modex_cbfunc_t cbfunc,
 					   void *cbdata)
 {
@@ -157,8 +157,8 @@ inline static void pmixp_coll_set_callback(pmixp_coll_t * coll,
  *    (d) we won't be able to switch to SYNC since root will be busy dealing with
  *        previous DB broadcast.
  */
-inline static int pmixp_coll_check_seq(pmixp_coll_t * coll, uint32_t seq,
-				       char *nodename)
+static inline int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq,
+		char *nodename)
 {
 	if (coll->seq == seq) {
 		/* accept this message */
@@ -170,24 +170,24 @@ inline static int pmixp_coll_check_seq(pmixp_coll_t * coll, uint32_t seq,
 		 * want to discard this message */
 		return SLURM_ERROR;
 	}
-	PMIXP_ERROR("Bad collective seq. #%d from %s, current is %d",
-		    seq, nodename, coll->seq);
+	PMIXP_ERROR("Bad collective seq. #%d from %s, current is %d", seq,
+			nodename, coll->seq);
 	/* maybe need more sophisticated handling in presence of
 	 * several steps. However maybe it's enough to just ignore */
-	// slurm_kill_job_step(pmixp_info_jobid(), pmixp_info_stepid(), SIGKILL);
+	/* slurm_kill_job_step(pmixp_info_jobid(), pmixp_info_stepid(), SIGKILL); */
 	return SLURM_ERROR;
 }
 
-int pmixp_coll_contrib_local(pmixp_coll_t * coll, char *data,
+int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data,
 			     size_t ndata);
-int pmixp_coll_contrib_node(pmixp_coll_t * coll, char *nodename, Buf buf);
-void pmixp_coll_bcast(pmixp_coll_t * coll, Buf buf);
-bool pmixp_coll_progress(pmixp_coll_t * coll, char *fwd_node,
+int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf);
+void pmixp_coll_bcast(pmixp_coll_t *coll, Buf buf);
+bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
 			 void **data, uint64_t size);
-int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t * type,
-			     pmix_proc_t ** ranges, size_t * nranges);
+int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
+		pmix_proc_t **ranges, size_t *nranges);
 int pmixp_coll_belong_chk(pmixp_coll_type_t type,
-			  const pmix_proc_t * procs, size_t nprocs);
-void pmixp_coll_reset_if_to(pmixp_coll_t * coll, time_t ts);
+			  const pmix_proc_t *procs, size_t nprocs);
+void pmixp_coll_reset_if_to(pmixp_coll_t *coll, time_t ts);
 
-#endif				// PMIXP_COLL_H
+#endif /* PMIXP_COLL_H */

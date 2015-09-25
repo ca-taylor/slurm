@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #ifndef PMIXP_AGENT_H
 #define PMIXP_AGENT_H
@@ -43,4 +43,4 @@
 int pmixp_agent_start(void);
 int pmixp_agent_stop(void);
 
-#endif				// PMIXP_AGENT_H
+#endif /* PMIXP_AGENT_H */

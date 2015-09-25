@@ -15,10 +15,10 @@ extern int errno;
 
 #include "fileops.h"
 
-// SLURM portability
+/* SLURM portability */
 #define SLURM_SUCCESS 0
 #define SLURM_ERROR 1
-// TODO: fix
+/* TODO: fix */
 #define FILENAME_PREFIX "pmix_addr"
 
 typedef struct {
@@ -41,7 +41,7 @@ int run_discovery(int jobid, int stepid, int *is_leader);
 int main(int argc, char **argv)
 {
     int is_leader;
-    if( argc < 3 ){
+    if (argc < 3) {
         fprintf(stderr,"Not enough arguments\n");
         exit(0);
     }
@@ -51,7 +51,7 @@ int main(int argc, char **argv)
     sprintf(usockname,"%s.%d", linkname, my_stepid);
     sprintf(lockname, "%s.lock",usockname);
 
-    if( 0 > ( lockfd = pmix_create_locked(lockname) ) ){
+    if (0 > (lockfd = pmix_create_locked(lockname))) {
         fprintf(stderr,"Can't create lock file %s\n", lockname);
         exit(0);
     }
@@ -59,9 +59,9 @@ int main(int argc, char **argv)
     sfd = prepare_srv_socket(usockname);
 
     int i = 0;
-    while( 1 ) {
+    while(1) {
         int fd = run_discovery(my_jobid, my_stepid, &is_leader);
-        if( is_leader ){
+        if (is_leader) {
             fprintf("Iteration %d. I am the leader\n", i);
             service_requests(fd);
         } else {
@@ -77,9 +77,9 @@ int run_discovery(int jobid, int my_stepid, int *is_leader)
     char lname[FILENAME_MAX], fname[FILENAME_MAX], fname1[FILENAME_MAX];
 
     *is_leader = 0;
-    if( !pmix_leader_is_alive(linkname) ){
+    if (!pmix_leader_is_alive(linkname)) {
         pmix_remove_leader_symlink(linkname);
-        if( !symlink(usockname, linkname) ){
+        if (!symlink(usockname, linkname)) {
             *is_leader = 1;
             return sfd;
         }
@@ -93,10 +93,10 @@ int prepare_srv_socket(char *path)
     static struct sockaddr_un sa;
     int ret = 0;
 
-    // Make sure that socket file doesn't exists
-    if( 0 == access(path, F_OK) ){
-        // remove old file
-        if( 0 != unlink(path) ){
+    /* Make sure that socket file doesn't exists */
+    if (0 == access(path, F_OK)) {
+        /* remove old file */
+        if (0 != unlink(path)) {
             /*PMIXP_ERROR_STD*/
             printf("Cannot delete outdated socket fine: %s",
                     path);
@@ -104,7 +104,7 @@ int prepare_srv_socket(char *path)
         }
     }
 
-    if( strlen(path) >= sizeof(sa.sun_path) ){
+    if (strlen(path) >= sizeof(sa.sun_path)) {
         /*PMIXP_ERROR_STD*/
         printf("UNIX socket path is too long: %lu, max %lu",
                 (unsigned long)strlen(path),
@@ -113,7 +113,7 @@ int prepare_srv_socket(char *path)
     }
 
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if( fd < 0 ){
+    if (fd < 0) {
         /*PMIXP_ERROR_STD*/
         printf("Cannot create UNIX socket");
         return SLURM_ERROR;
@@ -122,13 +122,13 @@ int prepare_srv_socket(char *path)
     memset(&sa, 0, sizeof(sa));
     sa.sun_family = AF_UNIX;
     strcpy(sa.sun_path, path);
-    if( ret = bind(fd, (struct sockaddr*)&sa, SUN_LEN(&sa)) ){
+    if (ret = bind(fd, (struct sockaddr*)&sa, SUN_LEN(&sa))) {
         /*PMIXP_ERROR_STD*/
         printf("Cannot bind() UNIX socket %s", path);
         goto err_fd;
     }
 
-    if( (ret = listen(fd, 64)) ){
+    if ((ret = listen(fd, 64))) {
         /*PMIXP_ERROR_STD*/
         printf("Cannot listen(%d, 64) UNIX socket %s", fd, path);
         goto err_bind;
@@ -150,12 +150,12 @@ int connect_to_server(char *path)
     strcpy(sa.sun_path, path);
 
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if( fd < 0 ){
+    if (fd < 0) {
         fprintf(stderr,"Cannot create UNIX socket");
         return -1;
     }
 
-    if( connect(fd, &sa, SUN_LEN(&sa)) ){
+    if (connect(fd, &sa, SUN_LEN(&sa))) {
         close(fd);
         return -1;
     }
@@ -163,7 +163,7 @@ int connect_to_server(char *path)
     rec.jobid = my_jobid;
     rec.stepid = my_stepid;
     int ret = write(fd, &rec, sizeof(rec));
-    if( sizeof(rec) != ret ){
+    if (sizeof(rec) != ret) {
         close(fd);
         return -1;
     }
@@ -172,12 +172,12 @@ int connect_to_server(char *path)
 
 void service_requests(int fd)
 {
-    while( 1 ){
+    while(1) {
         int cfd;
-        if( 0 < (cfd = accept(fd, NULL, 0)) ){
+        if (0 < (cfd = accept(fd, NULL, 0))) {
             local_records_t rec;
-            int ret = read(cfd, &rec, sizeof(rec) );
-            if( ret != sizeof(rec) ){
+            int ret = read(cfd, &rec, sizeof(rec));
+            if (ret != sizeof(rec)) {
                 fprintf("%s:%d: read mismatch: %d vs %d\n",
                         __FILE__, __LINE__, ret, sizeof(rec));
                 exit(0);
@@ -194,14 +194,14 @@ void monitor_leader(int fd)
     fds.fd = fd;
     fds.events = 0;
 
-    // Drop shutdown before the check
+    /* Drop shutdown before the check */
 
     int rc = poll(&fds, 1, -1);
-    if( rc < 0 ){
+    if (rc < 0) {
         fprintf(stderr,"Get poll error %d: %s", errno, strerror(errno));
         exit(1);
     }
-    if( fds.revents != POLLHUP ){
+    if (fds.revents != POLLHUP) {
         fprintf(stderr,"revents = %x", fds.revents);
     }
 }

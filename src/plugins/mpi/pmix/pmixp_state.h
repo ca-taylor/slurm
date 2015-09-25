@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #ifndef PMIXP_STATE_H
 #define PMIXP_STATE_H
@@ -64,10 +64,10 @@ extern pmixp_state_t _pmixp_state;
  * General PMIx plugin state manipulation functions
  */
 
-int pmixp_state_init();
-void pmixp_state_finalize();
+int pmixp_state_init(void);
+void pmixp_state_finalize(void);
 
-inline static void pmixp_state_sanity_check()
+static inline void pmixp_state_sanity_check(void)
 {
 	xassert(_pmixp_state.magic == PMIX_STATE_MAGIC);
 }
@@ -77,12 +77,10 @@ inline static void pmixp_state_sanity_check()
  */
 
 pmixp_coll_t *pmixp_state_coll_get(pmixp_coll_type_t type,
-				   const pmix_proc_t * ranges,
-				   size_t nranges);
+		const pmix_proc_t *ranges, size_t nranges);
 pmixp_coll_t *pmixp_state_coll_new(pmixp_coll_type_t type,
-				   const pmix_proc_t * ranges,
-				   size_t nranges);
+		const pmix_proc_t *ranges, size_t nranges);
 
-void pmixp_state_coll_cleanup();
+void pmixp_state_coll_cleanup(void);
 
-#endif				// PMIXP_STATE_H
+#endif /* PMIXP_STATE_H */

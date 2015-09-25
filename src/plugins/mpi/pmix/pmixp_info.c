@@ -33,44 +33,44 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 
 #include <string.h>
 #include "pmixp_common.h"
 #include "pmixp_debug.h"
 #include "pmixp_info.h"
 
-// Server communication
+/* Server communication */
 static char *_server_addr = NULL;
 static int _server_fd = -1;
 
-pmix_jobinfo_t _pmixp_job_info = { 0 };
+pmix_jobinfo_t _pmixp_job_info = {0};
 
 static int _resources_set(char ***env);
 static int _env_set(char ***env);
 
-// stepd global contact information
+/* stepd global contact information */
 void pmixp_info_srv_contacts(char *path, int fd)
 {
 	_server_addr = xstrdup(path);
 	_server_fd = fd;
 }
 
-const char *pmixp_info_srv_addr()
+const char *pmixp_info_srv_addr(void)
 {
-	// Check that Server address was initialized
+	/* Check that Server address was initialized */
 	xassert(_server_addr != NULL);
 	return _server_addr;
 }
 
-int pmixp_info_srv_fd()
+int pmixp_info_srv_fd(void)
 {
-	// Check that Server fd was created
+	/* Check that Server fd was created */
 	xassert(_server_fd >= 0);
 	return _server_fd;
 }
 
-int pmixp_info_set(const stepd_step_rec_t * job, char ***env)
+int pmixp_info_set(const stepd_step_rec_t *job, char ***env)
 {
 	int i, rc;
 	memset(&_pmixp_job_info, 0, sizeof(_pmixp_job_info));
@@ -78,29 +78,29 @@ int pmixp_info_set(const stepd_step_rec_t * job, char ***env)
 	_pmixp_job_info.magic = PMIX_INFO_MAGIC;
 #endif
 
-	// This node info
+	/* This node info */
 	_pmixp_job_info.jobid = job->jobid;
 	_pmixp_job_info.stepid = job->stepid;
 	_pmixp_job_info.node_id = job->nodeid;
 	_pmixp_job_info.node_tasks = job->node_tasks;
 
-	// Global info
+	/* Global info */
 	_pmixp_job_info.ntasks = job->ntasks;
 	_pmixp_job_info.nnodes = job->nnodes;
-	_pmixp_job_info.task_cnts =
-	    xmalloc(sizeof(*_pmixp_job_info.task_cnts) *
-		    _pmixp_job_info.nnodes);
+	_pmixp_job_info.task_cnts = xmalloc(
+			sizeof(*_pmixp_job_info.task_cnts)
+					* _pmixp_job_info.nnodes);
 	for (i = 0; i < _pmixp_job_info.nnodes; i++) {
 		_pmixp_job_info.task_cnts[i] = job->task_cnts[i];
 	}
 
-	_pmixp_job_info.gtids =
-	    xmalloc(_pmixp_job_info.node_tasks * sizeof(uint32_t));
+	_pmixp_job_info.gtids = xmalloc(
+			_pmixp_job_info.node_tasks * sizeof(uint32_t));
 	for (i = 0; i < job->node_tasks; i++) {
 		_pmixp_job_info.gtids[i] = job->task[i]->gtid;
 	}
 
-	// Setup hostnames and job-wide info
+	/* Setup hostnames and job-wide info */
 	if ((rc = _resources_set(env))) {
 		return rc;
 	}
@@ -109,14 +109,13 @@ int pmixp_info_set(const stepd_step_rec_t * job, char ***env)
 		return rc;
 	}
 
-	snprintf(_pmixp_job_info.nspace, PMIX_MAX_NSLEN,
-		 "slurm.pmix.%d.%d", pmixp_info_jobid(),
-		 pmixp_info_stepid());
+	snprintf(_pmixp_job_info.nspace, PMIX_MAX_NSLEN, "slurm.pmix.%d.%d",
+			pmixp_info_jobid(), pmixp_info_stepid());
 
 	return SLURM_SUCCESS;
 }
 
-int pmixp_info_free()
+int pmixp_info_free(void)
 {
 	if (NULL != _pmixp_job_info.task_cnts) {
 		xfree(_pmixp_job_info.task_cnts);
@@ -139,7 +138,7 @@ int pmixp_info_free()
 
 static eio_handle_t *_io_handle = NULL;
 
-void pmixp_info_io_set(eio_handle_t * h)
+void pmixp_info_io_set(eio_handle_t *h)
 {
 	_io_handle = h;
 }
@@ -161,112 +160,108 @@ eio_handle_t *pmixp_info_io()
  * FIXME: original _get_task_count has some additinal ckeck
  * for opt.ntasks_per_node & opt.cpus_set
  * Should we care here?
-    *//*
-      static int _get_task_count(char ***env, uint32_t *tasks, uint32_t *cpus)
-      {
-      pmixp_debug_hang(1);
-      char *cpus_per_node = NULL, *cpus_per_task_env = NULL, *end_ptr = NULL;
-      int cpus_per_task = 1, cpu_count, node_count, task_count;
-      int total_tasks = 0, total_cpus = 0;
+ static int _get_task_count(char ***env, uint32_t *tasks, uint32_t *cpus)
+ {
+ pmixp_debug_hang(1);
+ char *cpus_per_node = NULL, *cpus_per_task_env = NULL, *end_ptr = NULL;
+ int cpus_per_task = 1, cpu_count, node_count, task_count;
+ int total_tasks = 0, total_cpus = 0;
 
-      cpus_per_node = getenvp(*env, PMIX_CPUS_PER_NODE_ENV);
-      if( cpus_per_node == NULL ){
-      PMIXP_ERROR_NO(0,"Cannot find %s environment variable", PMIX_CPUS_PER_NODE_ENV);
-      return SLURM_ERROR;
-      }
-      cpus_per_task_env = getenvp(*env, PMIX_CPUS_PER_TASK);
-      if( cpus_per_task_env != NULL ){
-      cpus_per_task = strtol(cpus_per_task_env, &end_ptr, 10);
-      }
+ cpus_per_node = getenvp(*env, PMIX_CPUS_PER_NODE_ENV);
+ if (cpus_per_node == NULL) {
+ PMIXP_ERROR_NO(0,"Cannot find %s environment variable", PMIX_CPUS_PER_NODE_ENV);
+ return SLURM_ERROR;
+ }
+ cpus_per_task_env = getenvp(*env, PMIX_CPUS_PER_TASK);
+ if (cpus_per_task_env != NULL) {
+ cpus_per_task = strtol(cpus_per_task_env, &end_ptr, 10);
+ }
 
-      cpu_count = strtol(cpus_per_node, &end_ptr, 10);
-      task_count = cpu_count / cpus_per_task;
-      while (1) {
-      if ((end_ptr[0] == '(') && (end_ptr[1] == 'x')) {
-      end_ptr += 2;
-      node_count = strtol(end_ptr, &end_ptr, 10);
-      task_count *= node_count;
-      total_tasks += task_count;
-      cpu_count *= node_count;
-      total_cpus += cpu_count;
-      if (end_ptr[0] == ')')
-      end_ptr++;
-      } else if ((end_ptr[0] == ',') || (end_ptr[0] == 0))
-      total_tasks += task_count;
-      else {
-      PMIXP_ERROR_NO(0,"Invalid value for environment variable %s (%s)",
-      PMIX_CPUS_PER_NODE_ENV, cpus_per_node);
-      return SLURM_ERROR;
-      }
-      if (end_ptr[0] == ',')
-      end_ptr++;
-      if (end_ptr[0] == 0)
-      break;
-      }
-      *tasks = total_tasks;
-      *cpus = total_cpus;
-      return 0;
-      }
-    */
+ cpu_count = strtol(cpus_per_node, &end_ptr, 10);
+ task_count = cpu_count / cpus_per_task;
+ while (1) {
+ if ((end_ptr[0] == '(') && (end_ptr[1] == 'x')) {
+ end_ptr += 2;
+ node_count = strtol(end_ptr, &end_ptr, 10);
+ task_count *= node_count;
+ total_tasks += task_count;
+ cpu_count *= node_count;
+ total_cpus += cpu_count;
+ if (end_ptr[0] == ')')
+ end_ptr++;
+ } else if ((end_ptr[0] == ',') || (end_ptr[0] == 0))
+ total_tasks += task_count;
+ else {
+ PMIXP_ERROR_NO(0,"Invalid value for environment variable %s (%s)",
+ PMIX_CPUS_PER_NODE_ENV, cpus_per_node);
+ return SLURM_ERROR;
+ }
+ if (end_ptr[0] == ',')
+ end_ptr++;
+ if (end_ptr[0] == 0)
+ break;
+ }
+ *tasks = total_tasks;
+ *cpus = total_cpus;
+ return 0;
+ }
+ */
 
 static int _resources_set(char ***env)
 {
 	char *p = NULL;
 
-	// Initialize all memory pointers that would be allocated to NULL
-	// So in case of error exit we will know what to xfree
+	/* Initialize all memory pointers that would be allocated to NULL
+	 * So in case of error exit we will know what to xfree
+	 */
 	_pmixp_job_info.job_hl = hostlist_create("");
 	_pmixp_job_info.step_hl = hostlist_create("");
 	_pmixp_job_info.hostname = NULL;
 
-	// Save step host list
+	/* Save step host list */
 	p = getenvp(*env, PMIXP_STEP_NODES_ENV);
 	if (!p) {
 		PMIXP_ERROR_NO(ENOENT, "Environment variable %s not found",
-			       PMIXP_STEP_NODES_ENV);
+				PMIXP_STEP_NODES_ENV);
 		goto err_exit;
 	}
 	hostlist_push(_pmixp_job_info.step_hl, p);
 
-	// Extract our node name
+	/* Extract our node name */
 	p = hostlist_nth(_pmixp_job_info.step_hl, _pmixp_job_info.node_id);
 	_pmixp_job_info.hostname = xstrdup(p);
 	free(p);
 
-	// Determine job-wide node id and job-wide node count
+	/* Determine job-wide node id and job-wide node count */
 	p = getenvp(*env, PMIXP_JOB_NODES_ENV);
 	if (p == NULL) {
-		// shouldn't happen if we are under SLURM!
+		/* shouldn't happen if we are under SLURM! */
 		PMIXP_ERROR_NO(ENOENT, "No %s environment variable found!",
-			       PMIXP_JOB_NODES_ENV);
+				PMIXP_JOB_NODES_ENV);
 		goto err_exit;
 	}
 	hostlist_push(_pmixp_job_info.job_hl, p);
-	_pmixp_job_info.nnodes_job =
-	    hostlist_count(_pmixp_job_info.job_hl);
-	_pmixp_job_info.node_id_job =
-	    hostlist_find(_pmixp_job_info.job_hl,
-			  _pmixp_job_info.hostname);
+	_pmixp_job_info.nnodes_job = hostlist_count(_pmixp_job_info.job_hl);
+	_pmixp_job_info.node_id_job = hostlist_find(_pmixp_job_info.job_hl,
+			_pmixp_job_info.hostname);
 
-	// FIXME!! -------------------------------------------------------------
+	/* FIXME!! ------------------------------------------------------------- */
 	/* TODO: _get_task_count not always works well.
-	   if( _get_task_count(env, &_pmixp_job_info.ntasks_job, &_pmixp_job_info.ncpus_job ) < 0 ){
-	   _pmixp_job_info.ntasks_job  = _pmixp_job_info.ntasks;
-	   _pmixp_job_info.ncpus_job  = _pmixp_job_info.ntasks;
-	   }
-	   xassert( _pmixp_job_info.ntasks <= _pmixp_job_info.ntasks_job );
+	 if (_get_task_count(env, &_pmixp_job_info.ntasks_job, &_pmixp_job_info.ncpus_job) < 0) {
+	 _pmixp_job_info.ntasks_job  = _pmixp_job_info.ntasks;
+	 _pmixp_job_info.ncpus_job  = _pmixp_job_info.ntasks;
+	 }
+	 xassert(_pmixp_job_info.ntasks <= _pmixp_job_info.ntasks_job);
 	 */
 	_pmixp_job_info.ntasks_job = _pmixp_job_info.ntasks;
 	_pmixp_job_info.ncpus_job = _pmixp_job_info.ntasks;
 
-	//---------------------------------------------------------------------
-
-	// Save task-to-node mapping
+	/* Save task-to-node mapping */
 	p = getenvp(*env, PMIXP_SLURM_MAPPING_ENV);
 	if (p == NULL) {
-		// Direct modex won't work
+		/* Direct modex won't work */
 		PMIXP_ERROR_NO(ENOENT, "No %s environment variable found!",
-			       PMIXP_SLURM_MAPPING_ENV);
+				PMIXP_SLURM_MAPPING_ENV);
 		goto err_exit;
 	}
 
@@ -298,13 +293,13 @@ static int _env_set(char ***env)
 	if (NULL == p) {
 		p = PMIXP_TMPDIR_DEFAULT;
 	}
-	_pmixp_job_info.lib_tmpdir =
-	    xstrdup_printf("%s/pmix.%d.%d/", p, pmixp_info_jobid(),
-			   pmixp_info_stepid());
+	_pmixp_job_info.lib_tmpdir = xstrdup_printf("%s/pmix.%d.%d/", p,
+			pmixp_info_jobid(), pmixp_info_stepid());
 
-	/* save client temp directory if requested */
-	// TODO: We want to get TmpFS value as well if exists.
-	// Need to sync with SLURM developers.
+	/* save client temp directory if requested
+	 * TODO: We want to get TmpFS value as well if exists.
+	 * Need to sync with SLURM developers.
+	 */
 	p = getenvp(*env, PMIXP_TMPDIR_CLI);
 	if (NULL != p) {
 		_pmixp_job_info.cli_tmpdir = xstrdup(p);
@@ -316,7 +311,7 @@ static int _env_set(char ***env)
 	}
 
 	/* ----------- Timeout setting ------------- */
-	// TODO: also would be nice to have a cluster-wide setting in SLURM
+	/* TODO: also would be nice to have a cluster-wide setting in SLURM */
 	_pmixp_job_info.timeout = PMIXP_TIMEOUT_DEFAULT;
 	p = getenvp(*env, PMIXP_TIMEOUT);
 	if (NULL != p) {

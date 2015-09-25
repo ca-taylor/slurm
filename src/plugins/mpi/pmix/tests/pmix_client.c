@@ -61,7 +61,7 @@ int get_local_peers(int **_peers)
 		exit(0);
 	}
 
-	if (val->type != PMIX_UINT32  ) {
+	if (val->type != PMIX_UINT32 ) {
 		TEST_ERROR(("rank %d: local peer # attribute value type mismatch,"
 			    " want %d get %d(%d)",
 			    rank, PMIX_UINT32, val->type));
@@ -80,7 +80,7 @@ int get_local_peers(int **_peers)
 		exit(0);
 	}
 
-	if (val->type != PMIX_STRING  ) {
+	if (val->type != PMIX_STRING ) {
 		TEST_ERROR(("rank %d: local peers attribute value type mismatch,"
 			    " want %d get %d(%d)",
 			    rank, PMIX_UINT32, val->type));
@@ -91,24 +91,24 @@ int get_local_peers(int **_peers)
 	sptr = NULL;
 	str = val->data.string;
 	do{
-		if( count > npeers ){
+		if (count > npeers) {
 			TEST_ERROR(("rank %d: Bad peer ranks number: should be %d, actual %d (%s)",
 			    rank, npeers, count, val->data.string));
 			exit(0);
 		}
 		token = strtok_r(str, ",", &sptr);
 		str = NULL;
-		if( NULL != token ){
+		if (NULL != token) {
 			peers[count++] = strtol(token,&eptr,10);
-			if( *eptr != '\0' ){
+			if (*eptr != '\0') {
 				TEST_ERROR(("rank %d: Bad peer ranks string", rank));
 				exit(0);
 			}
 		}
 
-	} while( NULL != token );
+	} while(NULL != token);
 
-	if( count != npeers ){
+	if (count != npeers) {
 		TEST_ERROR(("rank %d: Bad peer ranks number: should be %d, actual %d (%s)",
 			    rank, npeers, count, val->data.string));
 		exit(0);
@@ -150,7 +150,7 @@ int main(int argc, char **argv)
 			collect = true;
 		} else if (0 == strcmp(argv[i], "nb")) {
 			nonblocking = true;
-		} else if ( (0 == strcmp(argv[i], "-v") ) || (0 == strcmp(argv[i], "--verbose") ) ) {
+		} else if ((0 == strcmp(argv[i], "-v")) || (0 == strcmp(argv[i], "--verbose"))) {
 			TEST_VERBOSE_ON();
 		}else {
 			fprintf(stderr, "unrecognized option: %s\n", argv[i]);
@@ -162,7 +162,7 @@ int main(int argc, char **argv)
 
 	{
 		int delay = 0;
-		while( delay ){
+		while(delay) {
 			sleep(1);
 		}
 	}
@@ -184,7 +184,7 @@ int main(int argc, char **argv)
 		exit(0);
 	}
 	/* TODO: Guess number of processes from the SLURM environment! */
-	if (val->type != PMIX_UINT32 || val->data.uint32 != nprocs ) {
+	if (val->type != PMIX_UINT32 || val->data.uint32 != nprocs) {
 		TEST_ERROR(("rank %d: Universe size value or type mismatch,"
 			    " want %d(%d) get %d(%d)",
 			    rank, nprocs, PMIX_UINT32,
@@ -194,7 +194,7 @@ int main(int argc, char **argv)
 	TEST_OUTPUT(("rank %d: Universe size check: PASSED", rank));
 
 	/* Guess the namespace from SLURM environment
-    if( 0 != strcmp(nspace, TEST_NAMESPACE) ) {
+    if (0 != strcmp(nspace, TEST_NAMESPACE)) {
 	TEST_ERROR(("rank %d: Bad nspace!", rank));
 	exit(0);
     }
@@ -232,20 +232,20 @@ int main(int argc, char **argv)
 	}
 
 	/* Perform a fence if was requested */
-	if( !nonblocking ){
+	if (!nonblocking) {
 		if (PMIX_SUCCESS != (rc = PMIx_Fence(NULL, 0, 1))) {
 			TEST_ERROR(("rank %d: PMIx_Fence failed: %d", rank, rc));
 			exit(0);
 		}
 	} else {
 		int in_progress = 1, count;
-		if ( PMIX_SUCCESS != (rc = PMIx_Fence_nb(NULL, 0, collect, release_cb, &in_progress))) {
+		if (PMIX_SUCCESS != (rc = PMIx_Fence_nb(NULL, 0, collect, release_cb, &in_progress))) {
 			TEST_ERROR(("rank %d: PMIx_Fence failed: %d", rank, rc));
 			exit(0);
 		}
 
 		count = 0;
-		while( in_progress ){
+		while(in_progress) {
 			struct timespec ts;
 			ts.tv_sec = 0;
 			ts.tv_nsec = 100;
@@ -261,7 +261,7 @@ int main(int argc, char **argv)
 
 //{
 //    int delay = 1;
-//    while( delay ){
+//    while(delay) {
 //	sleep(1);
 //    }
 //}
@@ -270,13 +270,13 @@ int main(int argc, char **argv)
 
 		for (j=0; j < 3; j++) {
 			int local = 0, k;
-			for(k=0; k<npeers; k++){
-				if( peers[k] == i){
+			for(k=0; k<npeers; k++) {
+				if (peers[k] == i) {
 					local = 1;
 				}
 			}
 
-			if( local ){
+			if (local) {
 				sprintf(key,"local-key-%d",j);
 				if (PMIX_SUCCESS != (rc = PMIx_Get(nspace, i, key, &val))) {
 					TEST_ERROR(("rank %d: PMIx_Get failed: %d", rank, rc));
@@ -352,7 +352,7 @@ error_out:
 	/*
     {
 	int delay = 1;
-	while( delay ){
+	while(delay) {
 	    sleep(1);
 	}
     }

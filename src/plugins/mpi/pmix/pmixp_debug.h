@@ -33,7 +33,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
-\*****************************************************************************/
+ \*****************************************************************************/
 #ifndef PMIXP_DEBUG_H
 #define PMIXP_DEBUG_H
 
@@ -45,7 +45,7 @@
 #define PMIXP_DEBUG(format, args...) {				\
 	char file[] = __FILE__;					\
 	char *file_base = strrchr(file, '/');			\
-	if( file_base == NULL ){				\
+	if (file_base == NULL) {				\
 		file_base = file;				\
 	}							\
 	debug("%s [%d] %s:%d [%s] mpi/pmix: " format "",	\
@@ -57,7 +57,7 @@
 #define PMIXP_ERROR_STD(format, args...) {			\
 	char file[] = __FILE__;					\
 	char *file_base = strrchr(file, '/');			\
-	if( file_base == NULL ){				\
+	if (file_base == NULL) {				\
 	file_base = file;					\
 	}							\
 	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)",	\
@@ -69,7 +69,7 @@
 #define PMIXP_ERROR(format, args...) {				\
 	char file[] = __FILE__;					\
 	char *file_base = strrchr(file, '/');			\
-	if( file_base == NULL ){				\
+	if (file_base == NULL) {				\
 		file_base = file;				\
 	}							\
 	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format,	\
@@ -89,7 +89,7 @@
 #define PMIXP_ERROR_NO(err, format, args...) {			\
 	char file[] = __FILE__;					\
 	char *file_base = strrchr(file, '/');			\
-	if( file_base == NULL ){				\
+	if (file_base == NULL) {				\
 		file_base = file;				\
 	}							\
 	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format ": %s (%d)", \
@@ -101,7 +101,7 @@
 #ifdef NDEBUG
 #define pmixp_debug_hang(x)
 #else
-inline static void _pmixp_debug_hang(int delay)
+static inline void _pmixp_debug_hang(int delay)
 {
 	while (delay) {
 		sleep(1);
@@ -111,4 +111,4 @@ inline static void _pmixp_debug_hang(int delay)
 #define pmixp_debug_hang(x) _pmixp_debug_hang(x)
 
 #endif
-#endif				// PMIXP_DEBUG_H
+#endif /* PMIXP_DEBUG_H */
