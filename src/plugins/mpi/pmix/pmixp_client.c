@@ -221,10 +221,12 @@ static void _general_proc_info(List lresp)
 	 *      TODO: what should we provide for credentials?
 	 *      #define PMIX_CREDENTIAL            "pmix.cred"
 	 *      TODO: Once spawn will be implemented we'll need to check here
-	 * PMIXP_ALLOC_KEY(kvp, PMIX_SPAWNED);
-	 * PMIX_VAL_SET(&kvp->value, flag, 0);
-	 * list_append(lresp, kvp);
+	 */
+	 PMIXP_ALLOC_KEY(kvp, PMIX_SPAWNED);
+	 PMIX_VAL_SET(&kvp->value, flag, 0);
+	 list_append(lresp, kvp);
 
+	 /*
 	 *       TODO: what is the portable way to get arch string?
 	 *       #define PMIX_ARCH                  "pmix.arch"
 	 */
