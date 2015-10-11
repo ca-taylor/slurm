@@ -79,11 +79,7 @@
 
 PROGRAM=libtool
 PACKAGE=libtool
-<<<<<<< HEAD
 VERSION="2.4.2 Debian-2.4.2-1.11"
-=======
-VERSION=2.4
->>>>>>> 49cc4c2... Run autogen for the PMIX plugin.
 TIMESTAMP=""
 package_revision=1.3293
 
