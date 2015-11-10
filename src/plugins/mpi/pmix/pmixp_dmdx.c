@@ -418,7 +418,7 @@ static void _dmdx_resp(Buf buf, char *sender_host, uint32_t seq_num)
 	req = NULL;
 	list_delete_item(it);
 	list_iterator_destroy(it);
-      exit:
+exit:
 	if (SLURM_SUCCESS != rc) {
 		/* we are not expect libpmix to call the callback
 		 * to cleanup this buffer */
