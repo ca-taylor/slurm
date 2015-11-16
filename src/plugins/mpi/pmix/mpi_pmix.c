@@ -124,13 +124,6 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 	end = tv.tv_sec + 1E-6*tv.tv_usec;
 	time_to_agent = end - start;
 
-	if( pmixp_info_nodeid() == 1 ){
-		int delay = 1;
-		while(delay){
-			sleep(1);
-		}
-	}
-
 	return SLURM_SUCCESS;
 err_ext:
 	/* Abort the whole job if error! */
