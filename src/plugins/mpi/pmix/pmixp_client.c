@@ -155,11 +155,22 @@ pmix_server_module_t _slurm_pmix_cb = {
 static void errhandler(pmix_status_t status, pmix_proc_t proc[], size_t nproc,
 		pmix_info_t info[], size_t ninfo);
 
+
+extern double libpmix_server_init, libpmix_errh, libpmix_srvinit_fini, libpmix_srvinit_fini_full, libpmix_env;
+extern double libpmix_dir_1, libpmix_dir_2, libpmix_dir_3;
+
+
 int pmixp_libpmix_init(void)
 {
 	int rc;
 	mode_t rights = (S_IRUSR | S_IWUSR | S_IXUSR) | (S_IRGRP | S_IWGRP | S_IXGRP);
 	pmix_info_t *kvp;
+
+	struct timeval tv;
+	double start, end;
+	
+	gettimeofday(&tv, NULL);
+	start = tv.tv_sec + 1E-6*tv.tv_usec;
 
 	/* NOTE: we need user who owns the job to access PMIx usock
 	 * file. According to 'man 7 unix':
@@ -176,6 +187,12 @@ int pmixp_libpmix_init(void)
 		return errno;
 	}
 
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	libpmix_dir_1 = end - start;
+	start = end;
+
+
 	/* There might be umask that will drop essential rights. Fix it explicitly.
 	 * TODO: is there more elegant solution? */
 	if (chmod(pmixp_info_tmpdir_lib(), rights) < 0) {
@@ -183,33 +200,84 @@ int pmixp_libpmix_init(void)
 		return errno;
 	}
 
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	libpmix_dir_2 = end - start;
+	start = end;
+
 	if (chown(pmixp_info_tmpdir_lib(), (uid_t) pmixp_info_jobuid(), (gid_t) -1) < 0) {
 		error("chown(%s): %m", pmixp_info_tmpdir_lib());
 		return errno;
 	}
-	
+
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	libpmix_dir_3 = end - start;
+	start = end;
+
+
 	setenv(PMIXP_PMIXLIB_TMPDIR, pmixp_info_tmpdir_lib(), 1);
 
 	PMIXP_ALLOC_KEY(kvp, PMIX_USERID);
 	PMIX_VAL_SET(&kvp->value, uint32_t, pmixp_info_jobuid());
 
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	libpmix_env = end - start;
+
+
 	/* setup the server library */
+	{
+		char value[256];
+		double call_time;
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		call_time = tv.tv_sec + tv.tv_usec*1E-6;
+		sprintf(value,"%lf", call_time);
+		setenv("PMIXP_DBG_SERVER_INIT_CALL", value, 1);
+		setenv("PMIXP_DBG_HOSTNAME", pmixp_info_hostname(), 1);
+	}
+
+	gettimeofday(&tv, NULL);
+	start = tv.tv_sec + 1E-6*tv.tv_usec;
+
+
 	if (PMIX_SUCCESS != (rc = PMIx_server_init(&_slurm_pmix_cb, kvp, 1))) {
 		PMIXP_ERROR_STD("PMIx_server_init failed with error %d\n", rc);
 		return SLURM_ERROR;
 	}
 
+        char *return_time_str = getenv("PMIXP_DBG_SERVER_INIT_FINI");
+        sscanf(return_time_str,"%lf",&libpmix_srvinit_fini);
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	libpmix_srvinit_fini_full = libpmix_srvinit_fini - start;
+	libpmix_srvinit_fini = end - libpmix_srvinit_fini;
+
 	PMIXP_FREE_KEY(kvp);
-	
+
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	libpmix_server_init = end - start;
+
+
 	/*
 	if( pmixp_fixrights(pmixp_info_tmpdir_lib(),
 		(uid_t) pmixp_info_jobuid(), rights) ){
 	}
 	*/
 
+	gettimeofday(&tv, NULL);
+	start = tv.tv_sec + 1E-6*tv.tv_usec;
+
+
 	/* register the errhandler */
 	PMIx_Register_errhandler(NULL, 0, errhandler, errhandler_reg_callbk,
 			NULL);
+
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	libpmix_errh = end - start;
 
 	return 0;
 }
@@ -534,8 +602,9 @@ int pmixp_libpmix_job_set(void)
 	int i, rc;
 	uid_t uid = pmixp_info_jobuid();
 	gid_t gid = pmixp_info_jobgid();
-	_register_caddy_t register_caddy;
+	_register_caddy_t *register_caddy;
 
+	register_caddy = xmalloc(sizeof(_register_caddy_t)*(pmixp_info_tasks_loc()+1));
 	pmixp_debug_hang(0);
 
 	/* Use list to safely expand/reduce key-value pairs. */
@@ -567,19 +636,10 @@ int pmixp_libpmix_job_set(void)
 	}
 	list_destroy(lresp);
 
-	register_caddy.active = 1;
+	register_caddy[0].active = 1;
 	rc = PMIx_server_register_nspace(pmixp_info_namespace(),
 			pmixp_info_tasks_loc(), info, ninfo, _release_cb,
-			&register_caddy);
-	if (PMIX_SUCCESS == rc) {
-		while (register_caddy.active) {
-			struct timespec ts;
-			ts.tv_sec = 0;
-			ts.tv_nsec = 100;
-			nanosleep(&ts, NULL);
-		}
-	}
-	PMIX_INFO_FREE(info, ninfo);
+			&register_caddy[0]);
 
 	if (PMIX_SUCCESS != rc) {
 		PMIXP_ERROR(
@@ -592,27 +652,39 @@ int pmixp_libpmix_job_set(void)
 	PMIXP_DEBUG("task initialization");
 	for (i = 0; i < pmixp_info_tasks_loc(); i++) {
 		pmix_proc_t proc;
-		register_caddy.active = 1;
+		register_caddy[i+1].active = 1;
 		strncpy(proc.nspace, pmixp_info_namespace(), PMIX_MAX_NSLEN);
 		proc.rank = pmixp_info_taskid(i);
 		rc = PMIx_server_register_client(&proc, uid, gid, NULL,
-				_release_cb, &register_caddy);
-		if (PMIX_SUCCESS == rc) {
-			while (register_caddy.active) {
-				struct timespec ts;
-				ts.tv_sec = 0;
-				ts.tv_nsec = 100;
-				nanosleep(&ts, NULL);
-			}
-		}
+				_release_cb, &register_caddy[i + 1]);
 		if (PMIX_SUCCESS != rc) {
-			PMIXP_ERROR(
-					"Cannot register client %d(%d) in namespace %s",
+			PMIXP_ERROR("Cannot register client %d(%d) in namespace %s",
 					pmixp_info_taskid(i), i,
 					pmixp_info_namespace());
 			return SLURM_ERROR;
 		}
 	}
+
+	/* wait for all registration actions to finish */
+	while( 1 ){
+		int exit_flag = 1;
+		struct timespec ts;
+		ts.tv_sec = 0;
+		ts.tv_nsec = 100;
+
+		for(i=0; i <  pmixp_info_tasks_loc() + 1; i++){
+			if( register_caddy[i].active ){
+				exit_flag = 0;
+			}
+		}
+		if( exit_flag ){
+			break;
+		}
+		nanosleep(&ts, NULL);
+	}
+	PMIX_INFO_FREE(info, ninfo);
+	xfree(register_caddy);
+
 	return SLURM_SUCCESS;
 }
 

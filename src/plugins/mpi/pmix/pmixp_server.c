@@ -98,15 +98,29 @@ pmixp_io_engine_header_t srv_rcvd_header = {
 
 static volatile int _was_initialized = 0;
 
+extern double pmixp_timing_info, pmixp_timing_usock, pmixp_timing_pmixp_int, 
+	pmixp_timing_libpmix_init, pmixp_timing_libpmix_job;
+
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 {
 	char *path;
 	int fd, rc;
+	
+	struct timeval tv;
+	double start, end;
+
+	gettimeofday(&tv, NULL);
+	start = tv.tv_sec + 1E-6*tv.tv_usec;
 
 	if (SLURM_SUCCESS != (rc = pmixp_info_set(job, env))) {
 		PMIXP_ERROR("pmixp_info_set(job, env) failed");
 		return rc;
 	}
+
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	pmixp_timing_info = end - start;
+	start = end;
 
 	/* Create UNIX socket for slurmd communication */
 	path = pmixp_info_nspace_usock(pmixp_info_namespace());
@@ -121,6 +135,11 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 	}
 	fd_set_close_on_exec(fd);
 	pmixp_info_srv_contacts(path, fd);
+
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	pmixp_timing_usock = end - start;
+	start = end;
 
 	if (SLURM_SUCCESS != (rc = pmixp_nspaces_init())) {
 		PMIXP_ERROR("pmixp_nspaces_init() failed");
@@ -137,15 +156,32 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 		goto err_dmdx;
 	}
 
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	pmixp_timing_pmixp_int = end - start;
+	start = end;
+
 	if (SLURM_SUCCESS != (rc = pmixp_libpmix_init())) {
 		PMIXP_ERROR("pmixp_libpmix_init() failed");
 		goto err_lib;
 	}
 
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	pmixp_timing_libpmix_init = end - start;
+	start = end;
+
+
 	if (SLURM_SUCCESS != (rc = pmixp_libpmix_job_set())) {
 		PMIXP_ERROR("pmixp_libpmix_job_set() failed");
 		goto err_job;
 	}
+	
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	pmixp_timing_libpmix_job = end - start;
+	start = end;
+
 
 	xfree(path);
 	_was_initialized = 1;

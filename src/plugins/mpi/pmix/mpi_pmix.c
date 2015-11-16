@@ -83,22 +83,56 @@ const char plugin_name[] = "PMIx plugin";
 const char plugin_type[] = "mpi/pmix";
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
+double boot_time = 0, time_to_init = 0, time_to_agent = 0;
+static double time_to_nth_child;
+static double time_till_nth_child;
+
+double pmixp_timing_info, pmixp_timing_usock, pmixp_timing_pmixp_int,
+	pmixp_timing_libpmix_init, pmixp_timing_libpmix_job;
+
+double libpmix_server_init, libpmix_errh, libpmix_srvinit_fini, libpmix_srvinit_fini_full, libpmix_env;
+double libpmix_dir_1, libpmix_dir_2, libpmix_dir_3;
+
+
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
 	int ret;
 	pmixp_debug_hang(0);
 	PMIXP_DEBUG("start");
+	struct timeval tv;
+	double start, end;
+
+	gettimeofday(&tv, NULL);
+	boot_time = start = tv.tv_sec + 1E-6*tv.tv_usec;
 
 	if (SLURM_SUCCESS != (ret = pmixp_stepd_init(job, env))) {
 		PMIXP_ERROR("pmixp_stepd_init() failed");
 		goto err_ext;
 	}
+
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	time_to_init = end - start;
+	start = end;
+
 	if (SLURM_SUCCESS != (ret = pmixp_agent_start())) {
 		PMIXP_ERROR("pmixp_agent_start() failed");
 		goto err_ext;
 	}
+
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	time_to_agent = end - start;
+
+	if( pmixp_info_nodeid() == 1 ){
+		int delay = 1;
+		while(delay){
+			sleep(1);
+		}
+	}
+
 	return SLURM_SUCCESS;
-	err_ext:
+err_ext:
 	/* Abort the whole job if error! */
 	slurm_kill_job_step(job->jobid, job->stepid, SIGKILL);
 	return ret;
@@ -110,6 +144,12 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 	char **tmp_env = NULL;
 	pmixp_debug_hang(0);
 
+	struct timeval tv;
+	double start, end;
+
+	gettimeofday(&tv, NULL);
+	start = tv.tv_sec + 1E-6*tv.tv_usec;
+	
 	PMIXP_DEBUG("Patch environment for task %d", job->gtaskid);
 	proc.rank = job->gtaskid;
 	strncpy(proc.nspace, pmixp_info_namespace(), PMIX_MAX_NSLEN);
@@ -129,6 +169,53 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 		}
 		free(tmp_env);
 		tmp_env = NULL;
+	}
+	
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	time_to_nth_child = end - start;
+	time_till_nth_child = end - boot_time;
+
+	{
+
+		char fname[1024];
+		FILE *fp;
+		sprintf(fname, "/labhome/artemp/mtl_scrap/PMIx/jobs/pmix_cli/%s.%d.log",
+			pmixp_info_hostname(), job->ltaskid);
+		fp = fopen(fname, "w");
+		if( 0 == job->ltaskid ){
+			char *p;
+			fprintf(fp,"time_to_init: %lf\n", time_to_init);
+			fprintf(fp,"\tinfo: %lf\n", pmixp_timing_info);
+			fprintf(fp,"\tusock: %lf\n", pmixp_timing_usock);
+			fprintf(fp,"\tpmixp_int: %lf\n", pmixp_timing_pmixp_int);
+			fprintf(fp,"\tlib_init: %lf\n", pmixp_timing_libpmix_init);
+			fprintf(fp,"\t\tlibpmix_dir_1=%lf\n", libpmix_dir_1);
+			fprintf(fp,"\t\tlibpmix_dir_2=%lf\n", libpmix_dir_2);
+			fprintf(fp,"\t\tlibpmix_dir_3=%lf\n", libpmix_dir_3);
+			fprintf(fp,"\t\tlibpmix_server_init=%lf\n", libpmix_server_init);
+			{
+				char *p;
+				p = getenv("PMIX_DEBUG_INIT_CALL_TIME");
+				fprintf(fp,"\t\t\tinit_call_cost=%s\n", p);
+				p = getenv("PMIX_DEBUG_INIT_BASE_TIME");
+				fprintf(fp,"\t\t\tinit_base_cost=%s\n", p);
+				p = getenv("PMIX_DEBUG_INIT_PTHR_TIME");
+				fprintf(fp,"\t\t\tinit_pthr_cost=%s\n", p);
+				p = getenv("PMIX_DEBUG_INIT_LISTEN_TIME");
+				fprintf(fp,"\t\t\tinit_listen_cost=%s\n", p);
+				p = getenv("PMIX_DEBUG_INIT_INFO_TIME");
+				fprintf(fp,"\t\t\tinit_info_cost=%s\n", p);
+				fprintf(fp,"\t\t\tinit_fini=%lf\n", libpmix_srvinit_fini);
+				fprintf(fp,"\t\t\tinit_fini_full=%lf\n", libpmix_srvinit_fini_full);
+			}
+			fprintf(fp,"\t\tlibpmix_errh=%lf\n", libpmix_errh);
+			fprintf(fp,"\tlib_job: %lf\n", pmixp_timing_libpmix_job);
+			fprintf(fp,"time_to_agent: %lf\n", time_to_agent);
+		}
+		fprintf(fp,"child #%d: process = %lf, abs_time = %lf\n",
+			job->ltaskid, time_to_nth_child, time_till_nth_child);
+		fclose(fp);
 	}
 	return SLURM_SUCCESS;
 }
