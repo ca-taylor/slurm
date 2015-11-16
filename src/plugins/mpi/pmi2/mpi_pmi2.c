@@ -79,17 +79,26 @@
  * (major.minor.micro combined into a single number).
  */
 const char plugin_name[]        = "mpi PMI2 plugin";
-const char plugin_type[]        = "mpi/pmi2";
+const char plugin_type[]        = "mpi/pmi2_eval";
 const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 /*
  * The following is executed in slurmstepd.
  */
 
+static double boot_time = 0;
+static double time_to_nth_child;
+static double time_till_nth_child;
+
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job,
 				  char ***env)
 {
 	int rc;
+	
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	boot_time = tv.tv_sec + 1E-6*tv.tv_usec;
+
 
 	debug("using mpi/pmi2");
 
@@ -112,6 +121,13 @@ int p_mpi_hook_slurmstepd_task (const mpi_plugin_task_info_t *job,
 				char ***env)
 {
 	int i;
+	
+	struct timeval tv;
+	double start, end;
+
+	gettimeofday(&tv, NULL);
+	start = tv.tv_sec + 1E-6*tv.tv_usec;
+
 
 	env_array_overwrite_fmt(env, "PMI_FD", "%u",
 				TASK_PMI_SOCK(job->ltaskid));
@@ -134,6 +150,24 @@ int p_mpi_hook_slurmstepd_task (const mpi_plugin_task_info_t *job,
 			TASK_PMI_SOCK(i) = 0;
 		}
 	}
+	
+	
+	gettimeofday(&tv, NULL);
+	end = tv.tv_sec + 1E-6*tv.tv_usec;
+	time_to_nth_child = end - start;
+	time_till_nth_child = end - boot_time;
+
+	{
+		char fname[1024];
+		FILE *fp;
+		sprintf(fname, "/labhome/artemp/mtl_scrap/PMIx/jobs/pmi2_eval/%s.%d.log",
+			tree_info.this_node, job->ltaskid);
+		fp = fopen(fname, "w");
+		fprintf(fp,"child #%d: process = %lf, abs_time = %lf\n",
+			job->ltaskid, time_to_nth_child, time_till_nth_child);
+		fclose(fp);
+	}
+
 	return SLURM_SUCCESS;
 }
 
