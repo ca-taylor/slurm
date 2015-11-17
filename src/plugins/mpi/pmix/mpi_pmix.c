@@ -104,6 +104,9 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 
 	gettimeofday(&tv, NULL);
 	boot_time = start = tv.tv_sec + 1E-6*tv.tv_usec;
+	char val[256];
+	sprintf(val,"%lf",boot_time);
+	setenv("SLURM_PMIXP_BOOT_TIME", val, 1);
 
 	if (SLURM_SUCCESS != (ret = pmixp_stepd_init(job, env))) {
 		PMIXP_ERROR("pmixp_stepd_init() failed");
@@ -170,11 +173,11 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 	time_till_nth_child = end - boot_time;
 
 	{
-
 		char fname[1024];
 		FILE *fp;
-		sprintf(fname, "/labhome/artemp/mtl_scrap/PMIx/jobs/pmix_cli/%s.%d.log",
+		sprintf(fname, "/hpc/home/USERS/artemp/pmix_logs/%s.%d.log",
 			pmixp_info_hostname(), job->ltaskid);
+		
 		fp = fopen(fname, "w");
 		if( 0 == job->ltaskid ){
 			char *p;
@@ -206,8 +209,83 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 			fprintf(fp,"\tlib_job: %lf\n", pmixp_timing_libpmix_job);
 			fprintf(fp,"time_to_agent: %lf\n", time_to_agent);
 		}
-		fprintf(fp,"child #%d: process = %lf, abs_time = %lf\n",
-			job->ltaskid, time_to_nth_child, time_till_nth_child);
+		double time_to_nth_fork;
+		{
+		    double start, end;
+		    char *p;
+		    p = getenv("SLURM_PMIXP_DEBUG_FORK_START");
+		    if( NULL == p ){
+			error("No SLURM_PMIXP_DEBUG_FORK_START");
+			exit(0);
+		    }
+		    sscanf(p,"%lf",&start);
+		    p = getenv("SLURM_PMIXP_DEBUG_FORK_END");
+		    if( NULL == p ){
+			error("No SLURM_PMIXP_DEBUG_FORK_END");
+			exit(0);
+		    }
+		    sscanf(p,"%lf",&end);
+		    time_to_nth_fork = end - start;
+		}
+
+
+
+
+		fprintf(fp,"child #%d: process = %lf, abs_time = %lf, fork = %lf\n",
+			job->ltaskid, time_to_nth_child, time_till_nth_child, time_to_nth_fork);
+			
+		{
+		    char *p, *p_abs;
+
+		    p = getenv("SLURM_PMIXP_DEBUG_PROP_PRIO");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_PROP_PRIO_ABS");
+		    fprintf(fp,"\tmgr_prop_prio=%s, abs=%s\n", p, p_abs);
+
+		    p = getenv("SLURM_PMIXP_DEBUG_TASK_PRIVS");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_TASK_PRIVS_ABS");
+		    fprintf(fp,"\tmgr_task_privs=%s, abs=%s\n", p, p_abs);
+
+		    p = getenv("SLURM_PMIXP_DEBUG_BECOME_USR");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_BECOME_USR_ABS");
+		    fprintf(fp,"\tmgr_become_usr=%s, abs=%s\n", p, p_abs);
+		    
+		    p = getenv("SLURM_PMIXP_DEBUG_UNBLK_SIGS");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_UNBLK_SIGS_ABS");
+		    fprintf(fp,"\tmgr_unblk_sigs=%s, abs=%s\n", p, p_abs);
+		    
+		    p = getenv("SLURM_PMIXP_DEBUG_PREP_STDIO");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_PREP_STDIO_ABS");
+		    fprintf(fp,"\tmgr_prep_stdio=%s, abs=%s\n", p, p_abs);
+		    
+		    p = getenv("SLURM_PMIXP_DEBUG_GATHER_PROF");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_GATHER_PROF_ABS");
+		    fprintf(fp,"\tmgr_gather_prof=%s, abs=%s\n", p, p_abs);
+
+		    p = getenv("SLURM_PMIXP_DEBUG_PARENT_WAIT");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_PARENT_WAIT_ABS");
+		    fprintf(fp,"\tmgr_prep_stdio=%s, abs=%s\n", p, p_abs);
+
+		    p = getenv("SLURM_PMIXP_DEBUG_MAKE_TMPDIR");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_MAKE_TMPDIR_ABS");
+		    fprintf(fp,"\texec_mkdir=%s, abs=%s\n", p, p_abs);
+		    
+		    p = getenv("SLURM_PMIXP_DEBUG_SETUP_GTIDS");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_SETUP_GTIDS_ABS");
+		    fprintf(fp,"\texec_gtids=%s, abs=%s\n", p, p_abs);
+
+		    p = getenv("SLURM_PMIXP_DEBUG_SETUP_JOBINFO");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_SETUP_JOBINFO_ABS");
+		    fprintf(fp,"\texec_jobinfo=%s, abs=%s\n", p, p_abs);
+
+		    p = getenv("SLURM_PMIXP_DEBUG_BUILD_PATH");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_BUILD_PATH_ABS");
+		    fprintf(fp,"\texec_build_path=%s, abs=%s\n", p, p_abs);
+
+		    p = getenv("SLURM_PMIXP_DEBUG_JOB_ATTACH");
+		    p_abs = getenv("SLURM_PMIXP_DEBUG_JOB_ATTACH_ABS");
+		    fprintf(fp,"\texec_job_attach=%s, abs=%s\n", p, p_abs);
+		}
+		
 		fclose(fp);
 	}
 	return SLURM_SUCCESS;

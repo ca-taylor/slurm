@@ -1053,6 +1053,14 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 	return SLURM_SUCCESS;
 }
 
+double time_to_fork_all, time_to_set_oom, time_to_set_uid, time_to_pam_setup, 
+    time_to_io_setup, time_to_log_setup, time_to_drop_privs, time_to_chdir, 
+    time_to_path_esc, time_to_spank_setup, time_to_exec_list;
+
+double time_to_fork_all_abs, time_to_set_oom_abs, time_to_set_uid_abs, time_to_pam_setup_abs, 
+    time_to_io_setup_abs, time_to_log_setup_abs, time_to_drop_privs_abs, time_to_chdir_abs, 
+    time_to_path_esc_abs, time_to_spank_setup_abs, time_to_exec_list_abs;
+
 /*
  * Executes the functions of the slurmd job manager process,
  * which runs as root and performs shared memory and interconnect
@@ -1067,6 +1075,10 @@ job_manager(stepd_step_rec_t *job)
 	int  rc = SLURM_SUCCESS;
 	bool io_initialized = false;
 	char *ckpt_type = slurm_get_checkpoint_type();
+
+	double start, end, boot_time;
+
+
 
 	debug3("Entered job_manager for %u.%u pid=%d",
 	       job->jobid, job->stepid, job->jmgr_pid);
@@ -1180,6 +1192,16 @@ job_manager(stepd_step_rec_t *job)
 		goto fail2;
 	}
 
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    start = tv.tv_sec + 1E-6*tv.tv_usec;
+    char *p = getenv("SLURM_PMIXP_BOOT_TIME");
+    if( NULL != p )
+	sscanf(p,"%lf",&boot_time);
+}
+    
+
 	if (!job->batch && job->accel_bind_type && (job->node_tasks <= 1))
 		job->accel_bind_type = 0;
 	if (!job->batch && job->accel_bind_type && (job->node_tasks > 1)) {
@@ -1196,6 +1218,14 @@ job_manager(stepd_step_rec_t *job)
 		if (job->accel_bind_type == ACCEL_BIND_VERBOSE)
 			job->accel_bind_type = 0;
 	}
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_fork_all = end - start;
+    time_to_fork_all_abs = end - boot_time;
+}
 
 	/* Calls pam_setup() and requires pam_finish() if
 	 * successful.  Only check for < 0 here since other slurm
@@ -1534,14 +1564,45 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 	char *oom_value;
 	List exec_wait_list = NULL;
 	char *esc;
+	double start, end, boot_time = 0;
+	char *p = getenv("SLURM_PMIXP_BOOT_TIME");
+	if( NULL != p )
+		sscanf(p,"%lf",&boot_time);
+
 
 	xassert(job != NULL);
 
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    start = tv.tv_sec + 1E-6*tv.tv_usec;
+}
 	set_oom_adj(0);	/* the tasks may be killed by OOM */
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_set_oom = end - start;
+    time_to_set_oom_abs = end - boot_time;
+    start = end;
+}
+
+
 	if (task_g_pre_setuid(job)) {
 		error("Failed to invoke task plugins: one of task_p_pre_setuid functions returned error");
 		return SLURM_ERROR;
 	}
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_set_uid = end - start;
+    time_to_set_uid_abs = end - boot_time;
+    start = end;
+}
+
 
 	/* Temporarily drop effective privileges, except for the euid.
 	 * We need to wait until after pam_setup() to drop euid.
@@ -1562,11 +1623,32 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 	if (rc)
 		goto fail1; /* pam_setup error */
 
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_pam_setup = end - start;
+    time_to_pam_setup_abs = end - boot_time;
+    start = end;
+}
+
+
 	set_umask(job);		/* set umask for stdout/err files */
 	if (job->user_managed_io)
 		rc = _setup_user_managed_io(job);
 	else
 		rc = _setup_normal_io(job);
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_io_setup = end - start;
+    time_to_io_setup_abs = end - boot_time;
+    start = end;
+}
+
+
 	/*
 	 * Initialize log facility to copy errors back to srun
 	 */
@@ -1584,6 +1666,16 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		*io_initialized = true;
 	}
 
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_log_setup = end - start;
+    time_to_log_setup_abs = end - boot_time;
+    start = end;
+}
+
+
 	/*
 	 * Temporarily drop effective privileges
 	 */
@@ -1593,6 +1685,16 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		goto fail2;
 	}
 
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_drop_privs = end - start;
+    time_to_drop_privs_abs = end - boot_time;
+    start = end;
+}
+
+
 	/* If there is an \ in the path
 	 * remove it.
 	 */
@@ -1601,6 +1703,15 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		xfree(job->cwd);
 		job->cwd = esc;
 	}
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_path_esc = end - start;
+    time_to_path_esc_abs = end - boot_time;
+    start = end;
+}
 
 	if (chdir(job->cwd) < 0) {
 		error("couldn't chdir to `%s': %m: going to /tmp instead",
@@ -1612,11 +1723,31 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		}
 	}
 
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_chdir = end - start;
+    time_to_chdir_abs = end - boot_time;
+    start = end;
+}
+
+
 	if (spank_user (job) < 0) {
 		error("spank_user failed.");
 		rc = SLURM_ERROR;
 		goto fail4;
 	}
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    time_to_spank_setup = end - start;
+    time_to_spank_setup_abs = end - boot_time;
+    start = end;
+}
+
 
 	exec_wait_list = list_create ((ListDelF) _exec_wait_info_destroy);
 	if (!exec_wait_list) {
@@ -1624,6 +1755,18 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		rc = SLURM_ERROR;
 		goto fail4;
 	}
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    char val[256];
+    sprintf(val,"%lf",end);
+    setenv("SLURM_PMIXP_DEBUG_FORK_START", val, 1);
+    time_to_exec_list = end - start;
+    time_to_exec_list_abs = end - boot_time;
+    start = end;
+}
 
 	/*
 	 * Fork all of the task processes.
@@ -1647,6 +1790,20 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			 *   can be discarded.
 			 */
 			FREE_NULL_LIST (exec_wait_list);
+			
+			
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    double tmp = tv.tv_sec + 1E-6*tv.tv_usec;
+    char val[256];
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_FORK_END", val, 1);
+    start = tmp;
+}
+
+
 
 #ifdef HAVE_AIX
 			(void) mkcrid(0);
@@ -1657,6 +1814,25 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			if (conf->propagate_prio)
 				_set_prio_process(job);
 
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_PROP_PRIO", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_PROP_PRIO_ABS", val, 1);
+
+    start = end;
+}
+
+
 			/*
 			 *  Reclaim privileges and call any plugin hooks
 			 *  that may require elevated privs
@@ -1666,15 +1842,72 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			if (_pre_task_privileged(job, i, &sprivs) < 0)
 				exit(1);
 
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_TASK_PRIVS", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_TASK_PRIVS_ABS", val, 1);
+
+    start = end;
+}
+
+
  			if (_become_user(job, &sprivs) < 0) {
  				error("_become_user failed: %m");
 				/* child process, should not return */
 				exit(1);
  			}
 
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_BECOME_USR", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_BECOME_USR_ABS", val, 1);
+
+    start = end;
+}
+
+
 			/* log_fini(); */ /* note: moved into exec_task() */
 
 			_unblock_signals();
+
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_UNBLK_SIGS", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_UNBLK_SIGS_ABS", val, 1);
+
+    start = end;
+}
+
 
 			/*
 			 *  Need to setup stdio before setpgid() is called
@@ -1684,8 +1917,45 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			 */
 			prepare_stdio (job, job->task[i]);
 
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_PREP_STDIO", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_PREP_STDIO_ABS", val, 1);
+
+    start = end;
+}
+
+
 			/* Close profiling file descriptors */
 			acct_gather_profile_g_child_forked();
+
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_GATHER_PROF", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_GATHER_PROF_ABS", val, 1);
+
+    start = end;
+}
 
 			/*
 			 *  Block until parent notifies us that it is ok to
@@ -1696,7 +1966,27 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			if (_exec_wait_child_wait_for_parent (ei) < 0)
 				exit (1);
 
-			exec_task(job, i);
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_PARENT_WAIT", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_PARENT_WAIT_ABS", val, 1);
+
+    start = end;
+}
+
+
+			exec_task(job, i, boot_time);
+
 		}
 
 		/*
@@ -1713,6 +2003,24 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 		job->task[i]->pid = pid;
 		if (i == 0)
 			job->pgid = pid;
+	}
+	
+	{
+	    char fname[256];
+	    sprintf(fname,"/hpc/home/USERS/artemp/slurmstepd_logs/slurmstepd.%d", job->nodeid);
+	    FILE *fp = fopen(fname,"w");
+	    fprintf(fp,"time_to_fork_all=%lf, abs=%lf\n",time_to_fork_all, time_to_fork_all_abs);
+	    fprintf(fp,"time_to_set_oom=%lf, abs=%lf\n", time_to_set_oom , time_to_set_oom_abs);
+	    fprintf(fp,"time_to_set_uid=%lf, abs=%lf\n", time_to_set_uid, time_to_set_uid_abs);
+	    fprintf(fp,"time_to_pam_setup=%lf, abs=%lf\n", time_to_pam_setup, time_to_pam_setup_abs);
+	    fprintf(fp,"time_to_io_setup=%lf, abs=%lf\n", time_to_io_setup, time_to_io_setup_abs);
+	    fprintf(fp, "time_to_log_setup=%lf, abs=%lf\n",time_to_log_setup,time_to_log_setup_abs);
+	    fprintf(fp,"time_to_drop_privs=%lf, abs=%lf\n",time_to_drop_privs,time_to_drop_privs_abs);
+	    fprintf(fp,"time_to_path_esc=%lf, abs=%lf\n",time_to_path_esc,time_to_path_esc_abs);
+	    fprintf(fp,"time_to_chdir=%lf, abs=%lf\n",time_to_chdir,time_to_chdir_abs);
+	    fprintf(fp,"time_to_spank_setup=%lf, abs=%lf\n", time_to_spank_setup, time_to_spank_setup_abs);
+	    fprintf(fp,"time_to_exec_list=%lf, abs=%lf\n",time_to_exec_list,time_to_exec_list_abs);
+	    fclose(fp);
 	}
 
 	/*

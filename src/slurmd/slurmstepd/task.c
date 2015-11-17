@@ -361,7 +361,7 @@ extern void block_daemon(void);
  *  Current process is running as the user when this is called.
  */
 void
-exec_task(stepd_step_rec_t *job, int i)
+exec_task(stepd_step_rec_t *job, int i, double boot_time)
 {
 	uint32_t *gtids;		/* pointer to arrary of ranks */
 	int fd, j;
@@ -369,14 +369,65 @@ exec_task(stepd_step_rec_t *job, int i)
 	char **tmp_env;
 	int saved_errno;
 
+	double start, end;
+	double make_tmpdir, make_tmpdir_abs;
+	double setup_gtids, setup_gtids_abs;
+	double setup_jobinfo, setup_jobinfo_abs;
+	double build_path, build_path_abs;
+	double job_attach, job_attach_abs;
+
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    start = tv.tv_sec + 1E-6*tv.tv_usec;
+}
+
+
 	if (i == 0)
 		_make_tmpdir(job);
+
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_MAKE_TMPDIR", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_MAKE_TMPDIR_ABS", val, 1);
+
+    start = end;
+}
+
 
 	gtids = xmalloc(job->node_tasks * sizeof(uint32_t));
 	for (j = 0; j < job->node_tasks; j++)
 		gtids[j] = job->task[j]->gtid;
 	job->envtp->sgtids = _uint32_array_to_str(job->node_tasks, gtids);
 	xfree(gtids);
+
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_SETUP_GTIDS", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_SETUP_GTIDS_ABS", val, 1);
+
+    start = end;
+}
 
 	job->envtp->jobid = job->jobid;
 	job->envtp->stepid = job->stepid;
@@ -410,7 +461,27 @@ exec_task(stepd_step_rec_t *job, int i)
 	env_array_free(tmp_env);
 	job->envtp->env = NULL;
 
+
 	xfree(job->envtp->task_count);
+
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_SETUP_JOBINFO", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_SETUP_JOBINFO_ABS", val, 1);
+
+    start = end;
+}
+
 
 	if (task->argv[0] && *task->argv[0] != '/') {
 		/*
@@ -422,6 +493,25 @@ exec_task(stepd_step_rec_t *job, int i)
 		task->argv[0] = _build_path(task->argv[0], job->env);
 	}
 
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_BUILD_PATH", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_BUILD_PATH_ABS", val, 1);
+
+    start = end;
+}
+
+
 	if (!job->batch) {
 		if (switch_g_job_attach(job->switch_job, &job->env,
 					job->nodeid, (uint32_t) i, job->nnodes,
@@ -430,6 +520,25 @@ exec_task(stepd_step_rec_t *job, int i)
 			log_fini();
 			exit(1);
 		}
+
+{
+    struct timeval tv;
+    char val[256];
+
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec + 1E-6*tv.tv_usec;
+    
+    double tmp = end - start;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_JOB_ATTACH", val, 1);
+
+    tmp = end - boot_time;
+    sprintf(val,"%lf",tmp);
+    setenv("SLURM_PMIXP_DEBUG_JOB_ATTACH_ABS", val, 1);
+
+    start = end;
+}
+
 
 		if (_setup_mpi(job, i) != SLURM_SUCCESS) {
 			error("Unable to configure MPI plugin: %m");
