@@ -166,7 +166,15 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 		free(tmp_env);
 		tmp_env = NULL;
 	}
-	
+
+
+	{
+	    char val[256];
+	    sprintf(val,"%lf", boot_time);
+	    env_array_overwrite(env,
+			"SLURM_PMIXP_BOOT_TIME", val);
+	}
+
 	gettimeofday(&tv, NULL);
 	end = tv.tv_sec + 1E-6*tv.tv_usec;
 	time_to_nth_child = end - start;
