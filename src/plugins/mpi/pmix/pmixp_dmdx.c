@@ -243,12 +243,15 @@ int pmixp_dmdx_get(const char *nspace, int rank,
 	int rc;
 	uint32_t seq;
 
+
 	/* need to send the request */
 	host = pmixp_nspace_resolve(nspace, rank);
 	xassert(NULL != host);
 	if (NULL == host) {
 		return SLURM_ERROR;
 	}
+
+//	error("pmix: Send DMDX request from node.%d to %s:%d!!", pmixp_info_nodeid(), host, rank);
 
 	buf = pmixp_server_new_buf();
 
@@ -258,6 +261,19 @@ int pmixp_dmdx_get(const char *nspace, int rank,
 	addr = pmixp_info_nspace_usock(nspace);
 	/* store cur seq. num and move to the next request */
 	seq = _dmdx_seq_num++;
+
+	/* track this request */
+	req = xmalloc(sizeof(dmdx_req_info_t));
+	req->seq_num = seq;
+	req->cbfunc = cbfunc;
+	req->cbdata = cbdata;
+	req->ts = time(NULL);
+#ifndef NDEBUG
+	strncpy(req->nspace, nspace, PMIX_MAX_NSLEN);
+	req->rank = rank;
+#endif
+	list_append(_dmdx_requests, req);
+
 
 	/* send the request */
 	rc = pmixp_server_send(host, PMIXP_MSG_DMDX, seq, addr,
@@ -274,17 +290,6 @@ int pmixp_dmdx_get(const char *nspace, int rank,
 		return SLURM_ERROR;
 	}
 
-	/* track this request */
-	req = xmalloc(sizeof(dmdx_req_info_t));
-	req->seq_num = seq;
-	req->cbfunc = cbfunc;
-	req->cbdata = cbdata;
-	req->ts = time(NULL);
-#ifndef NDEBUG
-	strncpy(req->nspace, nspace, PMIX_MAX_NSLEN);
-	req->rank = rank;
-#endif
-	list_append(_dmdx_requests, req);
 	return rc;
 }
 
@@ -296,12 +301,9 @@ static void _dmdx_req(Buf buf, char *sender_host, uint32_t seq_num)
 	pmixp_namespace_t *nsptr;
 	dmdx_caddy_t *caddy = NULL;
 
-	if (SLURM_SUCCESS
-			!= (rc = _read_info(buf, &ns, &rank, &sender_ns,
-					&status))) {
+	if (SLURM_SUCCESS != (rc = _read_info(buf, &ns, &rank, &sender_ns, &status))) {
 		/* there is not much we can do here, but data corruption shouldn't happen */
-		PMIXP_ERROR(
-				"Fail to unpack header data in" " request from %s, rc = %d",
+		PMIXP_ERROR("Fail to unpack header data in" " request from %s, rc = %d",
 				sender_host, rc);
 		goto exit;
 	}
