@@ -247,12 +247,16 @@ int pmixp_libpmix_init(void)
 		return SLURM_ERROR;
 	}
 
+	libpmix_srvinit_fini_full = 0;
+	libpmix_srvinit_fini = 0;
         char *return_time_str = getenv("PMIXP_DBG_SERVER_INIT_FINI");
-        sscanf(return_time_str,"%lf",&libpmix_srvinit_fini);
-	gettimeofday(&tv, NULL);
-	end = tv.tv_sec + 1E-6*tv.tv_usec;
-	libpmix_srvinit_fini_full = libpmix_srvinit_fini - start;
-	libpmix_srvinit_fini = end - libpmix_srvinit_fini;
+        if( NULL != return_time_str ){
+		sscanf(return_time_str,"%lf",&libpmix_srvinit_fini);
+		gettimeofday(&tv, NULL);
+		end = tv.tv_sec + 1E-6*tv.tv_usec;
+		libpmix_srvinit_fini_full = libpmix_srvinit_fini - start;
+		libpmix_srvinit_fini = end - libpmix_srvinit_fini;
+	}
 
 	PMIXP_FREE_KEY(kvp);
 
