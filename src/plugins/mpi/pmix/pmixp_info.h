@@ -2,7 +2,7 @@
  **  pmix_info.h - PMIx various environment information
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2016 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
@@ -67,7 +67,7 @@ typedef struct {
 	uint32_t *gtids; /* global ids of tasks located on *this* node */
 	char *task_map_packed; /* string represents packed task mapping information */
 	int timeout;
-	char *cli_tmpdir;
+	char *cli_tmpdir, *cli_tmpdir_base;
 	char *lib_tmpdir;
 	uid_t uid;
 	gid_t gid;
@@ -96,6 +96,11 @@ static inline char *pmixp_info_hostname(void)
 static inline char *pmixp_info_tmpdir_cli(void)
 {
 	return _pmixp_job_info.cli_tmpdir;
+}
+
+static inline char *pmixp_info_tmpdir_cli_base(void)
+{
+	return _pmixp_job_info.cli_tmpdir_base;
 }
 
 /* Cli tempdir */

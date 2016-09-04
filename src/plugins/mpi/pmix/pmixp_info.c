@@ -2,7 +2,7 @@
  **  pmix_info.c - PMIx various environment information
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2016 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
@@ -299,13 +299,17 @@ static int _env_set(char ***env)
 	 */
 	p = getenvp(*env, PMIXP_TMPDIR_CLI);
 	if (NULL != p) {
-		_pmixp_job_info.cli_tmpdir = xstrdup(p);
+		_pmixp_job_info.cli_tmpdir_base = xstrdup(p);
 	} else {
 		p = slurm_get_tmp_fs();
 		if (NULL != p) {
-			_pmixp_job_info.cli_tmpdir = p;
+			_pmixp_job_info.cli_tmpdir_base = p;
 		}
 	}
+	_pmixp_job_info.cli_tmpdir = 
+			xstrdup_printf("%s/spmix_appdir_%d.%d", _pmixp_job_info.cli_tmpdir_base,
+							pmixp_info_jobid(), pmixp_info_stepid());
+
 
 	/* ----------- Timeout setting ------------- */
 	/* TODO: also would be nice to have a cluster-wide setting in SLURM */

@@ -2,7 +2,7 @@
  **	pmix_utils.c - Various PMIx utility functions
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2016 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
@@ -415,5 +415,36 @@ int pmixp_fixrights(char *path, uid_t uid, mode_t mode)
 		}
 	}
 	closedir(dp);
+	return 0;
+}
+
+int pmixp_mkdir(char *path, mode_t rights)
+{
+	/* NOTE: we need user who owns the job to access PMIx usock
+	 * file. According to 'man 7 unix':
+	 * "... In the Linux implementation, sockets which are visible in the file system
+	 * honor the permissions of the directory  they are  in... "
+	 * Our case is the following: slurmstepd is usually running as root, user application will
+	 * be "sudo'ed". To provide both of them with acces to the unix socket we do the following:
+	 * 1. Owner ID is set to the job owner.
+	 * 2. Group ID corresponds to slurmstepd.
+	 * 3. Set 0770 access mode */
+
+	if (0 != mkdir(path, rights) ) {
+		PMIXP_ERROR_STD("Cannot create directory \"%s\"", pmixp_info_tmpdir_lib());
+		return errno;
+	}
+
+	/* There might be umask that will drop essential rights. Fix it explicitly.
+	 * TODO: is there more elegant solution? */
+	if (chmod(path, rights) < 0) {
+		error("chown(%s): %m", path);
+		return errno;
+	}
+
+	if (chown(path, (uid_t) pmixp_info_jobuid(), (gid_t) -1) < 0) {
+		error("chown(%s): %m", pmixp_info_tmpdir_lib());
+		return errno;
+	}
 	return 0;
 }
