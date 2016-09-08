@@ -44,7 +44,8 @@ typedef enum {
 	PMIXP_MSG_HEALTH_CHK,
 	PMIXP_MSG_FAN_IN,
 	PMIXP_MSG_FAN_OUT,
-	PMIXP_MSG_DMDX
+	PMIXP_MSG_DMDX,
+	PMIXP_MSG_PINGPONG
 } pmixp_srv_cmd_t;
 
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env);
@@ -54,7 +55,8 @@ void pmix_server_new_conn(int fd);
 int pmixp_server_send(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
 		      const char *addr, void *data, size_t size);
 int pmixp_server_health_chk(char *hostlist,  const char *addr);
-
+int pmixp_server_pingpong(char *hostlist,  const char *addr, int size);
+int pmixp_server_ppcount();
 
 Buf pmixp_server_new_buf(void);
 
