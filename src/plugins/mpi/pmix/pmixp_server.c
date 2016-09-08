@@ -501,6 +501,46 @@ static int _serv_write(eio_obj_t *obj, List objs)
 	return 0;
 }
 
+static int pingpong_count = 0;
+
+int pmixp_server_ppcount()
+{
+	return pingpong_count;
+}
+
+int pmixp_server_pingpong(char *hostlist,  const char *addr, int size)
+{
+	send_header_t hdr;
+	char nhdr[sizeof(send_header_t)];
+	size_t hsize;
+	Buf buf = pmixp_server_new_buf();
+	char *data = get_buf_data(buf);
+	int rc;
+
+	hdr.magic = PMIX_SERVER_MSG_MAGIC;
+	hdr.type = PMIXP_MSG_PINGPONG;
+	hdr.msgsize = size;
+	hdr.seq = pingpong_count;
+
+	/* Store global nodeid that is
+	 *  independent from exact collective */
+	hdr.nodeid = pmixp_info_nodeid_job();
+	hsize = _send_pack_hdr(&hdr, nhdr);
+	memcpy(data, nhdr, hsize);
+
+	grow_buf(buf, size);
+	set_buf_offset(buf,get_buf_offset(buf) + size);
+
+	data = get_buf_data(buf);
+	rc = pmixp_stepd_send(hostlist, addr, data, get_buf_offset(buf), 4, 14, 1);
+	if (SLURM_SUCCESS != rc) {
+		PMIXP_ERROR("Was unable to wait for the parent %s to become alive on addr %s",
+			    hostlist, addr);
+	}
+
+	return rc;
+}
+
 static void _process_server_request(pmixp_base_hdr_t *hdr, void *payload)
 {
 	char *nodename = pmixp_info_job_host(hdr->nodeid);
@@ -572,6 +612,17 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, void *payload)
 		 * incapsulation - in general `buf` is not a pointer, but opaque type.
 		 */
 		buf = create_buf(NULL, 0);
+		break;
+	}
+	case PMIXP_MSG_PINGPONG: {
+		/* this is just health ping.
+		 * TODO: can we do something more sophisticated?
+		 */
+		if( pmixp_info_nodeid() == 1 ){
+			pmixp_server_pingpong(pmixp_info_job_host(0), 
+						pmixp_info_srv_addr(), hdr->msgsize);
+		}
+		pingpong_count++;
 		break;
 	}
 	default:

@@ -44,7 +44,8 @@ typedef enum {
 	PMIXP_MSG_FAN_IN,
 	PMIXP_MSG_FAN_OUT,
 	PMIXP_MSG_DMDX,
-	PMIXP_MSG_INIT_DIRECT
+	PMIXP_MSG_INIT_DIRECT,
+	PMIXP_MSG_PINGPONG
 } pmixp_srv_cmd_t;
 
 typedef enum {
@@ -92,5 +93,8 @@ pmixp_server_buf_reserve(Buf buf, uint32_t size)
 		grow_buf(buf, to_reserve);
 	}
 }
+int pmixp_server_pingpong(char *hostlist,  const char *addr, int size);
+int pmixp_server_ppcount();
+
 
 #endif /* PMIXP_SERVER_H */
