@@ -49,6 +49,8 @@
 
 #include <pmix_server.h>
 
+
+
 #define PMIX_SERVER_MSG_MAGIC 0xCAFECA11
 typedef struct {
 	uint32_t magic;
@@ -107,6 +109,8 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 		PMIXP_ERROR("pmixp_info_set(job, env) failed");
 		return rc;
 	}
+	
+	PMIXP_TIMESTAMP("start %d", pmixp_info_nodeid());
 
 	/* Create UNIX socket for slurmd communication */
 	path = pmixp_info_nspace_usock(pmixp_info_namespace());
@@ -122,30 +126,43 @@ int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env)
 	fd_set_close_on_exec(fd);
 	pmixp_info_srv_contacts(path, fd);
 
+	PMIXP_TIMESTAMP("usock %d", pmixp_info_nodeid());
+
+
 	if (SLURM_SUCCESS != (rc = pmixp_nspaces_init())) {
 		PMIXP_ERROR("pmixp_nspaces_init() failed");
 		goto err_usock;
 	}
+
+	PMIXP_TIMESTAMP("pmixp_nspaces_init %d", pmixp_info_nodeid());
 
 	if (SLURM_SUCCESS != (rc = pmixp_state_init())) {
 		PMIXP_ERROR("pmixp_state_init() failed");
 		goto err_state;
 	}
 
+	PMIXP_TIMESTAMP("pmixp_nspaces_init %d", pmixp_info_nodeid());
+
 	if (SLURM_SUCCESS != (rc = pmixp_dmdx_init())) {
 		PMIXP_ERROR("pmixp_dmdx_init() failed");
 		goto err_dmdx;
 	}
+
+	PMIXP_TIMESTAMP("pmixp_dmdx_init %d", pmixp_info_nodeid());
 
 	if (SLURM_SUCCESS != (rc = pmixp_libpmix_init())) {
 		PMIXP_ERROR("pmixp_libpmix_init() failed");
 		goto err_lib;
 	}
 
+	PMIXP_TIMESTAMP("pmixp_libpmix_init %d", pmixp_info_nodeid());
+
 	if (SLURM_SUCCESS != (rc = pmixp_libpmix_job_set())) {
 		PMIXP_ERROR("pmixp_libpmix_job_set() failed");
 		goto err_job;
 	}
+
+	PMIXP_TIMESTAMP("pmixp_libpmix_job_set %d", pmixp_info_nodeid());
 
 	xfree(path);
 	_was_initialized = 1;
@@ -165,6 +182,9 @@ err_path:
 	pmixp_info_free();
 	return rc;
 }
+
+//#undef PMIXP_TIMESTAMP
+//#define PMIXP_TIMESTAMP(format, args...)
 
 int pmixp_stepd_finalize(void)
 {
@@ -401,6 +421,10 @@ static void _process_server_request(recv_header_t *_hdr, void *payload)
 		pmix_proc_t *procs = NULL;
 		size_t nprocs = 0;
 		pmixp_coll_type_t type = 0;
+		
+		PMIXP_TIMESTAMP("Receive %s from %s", 
+				(hdr->type == PMIXP_MSG_FAN_IN) ? "fan-in" : "fan-out",
+				nodename);
 
 		rc = pmixp_coll_unpack_ranges(buf, &type, &procs, &nprocs);
 		if (SLURM_SUCCESS != rc) {

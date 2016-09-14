@@ -45,6 +45,9 @@
 static void _progress_fan_in(pmixp_coll_t *coll);
 static void _progres_fan_out(pmixp_coll_t *coll, Buf buf);
 
+//#undef PMIXP_TIMESTAMP
+//#define PMIXP_TIMESTAMP(format, args...)
+
 static int _hostset_from_ranges(const pmix_proc_t *procs, size_t nprocs,
 		hostlist_t *hl_out)
 {
@@ -101,6 +104,7 @@ static int _pack_ranges(pmixp_coll_t *coll)
 
 static void _fan_in_finished(pmixp_coll_t *coll)
 {
+	PMIXP_TIMESTAMP("%d: _fan_in_finished", coll->seq);
 	xassert(PMIXP_COLL_FAN_IN == coll->state);
 	coll->state = PMIXP_COLL_FAN_OUT;
 	memset(coll->ch_contribs, 0, sizeof(int) * coll->children_cnt);
@@ -114,6 +118,8 @@ static void _fan_in_finished(pmixp_coll_t *coll)
 
 static void _fan_out_finished(pmixp_coll_t *coll)
 {
+	PMIXP_TIMESTAMP("%d: _fan_out_finished", coll->seq);
+
 	coll->seq++; /* move to the next collective */
 	switch (coll->state) {
 	case PMIXP_COLL_FAN_OUT:
@@ -347,6 +353,8 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 	PMIXP_DEBUG("%s:%d: get local contribution", pmixp_info_namespace(),
 			pmixp_info_nodeid());
 
+	PMIXP_TIMESTAMP("%d: Get local contrib", coll->seq);
+
 	/* sanity check */
 	pmixp_coll_sanity_check(coll);
 
@@ -390,6 +398,8 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 
 	PMIXP_DEBUG("%s:%d: get contribution from node %s",
 			pmixp_info_namespace(), pmixp_info_nodeid(), nodename);
+
+	PMIXP_TIMESTAMP("%d: Get contrib from %s", coll->seq, nodename);
 
 	/* lock the structure */
 	slurm_mutex_lock(&coll->lock);
@@ -542,6 +552,8 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 		goto unlock;
 	}
 
+	PMIXP_TIMESTAMP("%d: Got all contributions", coll->seq);
+
 	/* The root of the collective will have parent_host == NULL */
 	if (NULL != coll->parent_host) {
 		hostlist = xstrdup(coll->parent_host);
@@ -575,6 +587,7 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 			 */
 			pmixp_server_health_chk(hostlist, addr);
 		}
+		PMIXP_TIMESTAMP("%d: Send data to %s", coll->seq, hostlist);
 		rc = pmixp_server_send(hostlist, type, coll->seq, addr,
 				get_buf_data(coll->buf),
 				get_buf_offset(coll->buf));

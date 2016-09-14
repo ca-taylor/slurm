@@ -92,6 +92,10 @@
 	xfree(kvp);						\
 }
 
+/* TODO: comment out if want timing info */
+#undef PMIXP_TIMESTAMP
+#define PMIXP_TIMESTAMP(format, args...)
+
 #if (HAVE_PMIX_VER == 1)
 static int client_connected(const pmix_proc_t *proc, void *server_object)
 {
@@ -222,17 +226,22 @@ int pmixp_libpmix_init(void)
 	mode_t rights = (S_IRUSR | S_IWUSR | S_IXUSR) | (S_IRGRP | S_IWGRP | S_IXGRP);
 	pmix_info_t *kvp = NULL;
 
+
 	if (0 != (rc = pmixp_mkdir(pmixp_info_tmpdir_lib(), rights))) {
 		PMIXP_ERROR_STD("Cannot create server tmpdir: \"%s\"",
 						pmixp_info_tmpdir_lib());
 		return errno;
 	}
 
+	PMIXP_TIMESTAMP("pmixp_mkdir(pmixp_info_tmpdir_lib()");
+
 	if (0 != (rc = pmixp_mkdir(pmixp_info_tmpdir_cli(), rights))) {
 		PMIXP_ERROR_STD("Cannot create client tmpdir: \"%s\"",
 						pmixp_info_tmpdir_cli());
 		return errno;
 	}
+
+	PMIXP_TIMESTAMP("pmixp_mkdir(pmixp_info_tmpdir_lib()");
 
 
 	/* TODO: must be deleted in future once info-key approach will harden */
@@ -252,6 +261,8 @@ int pmixp_libpmix_init(void)
 		return SLURM_ERROR;
 	}
 
+	PMIXP_TIMESTAMP("PMIx_server_init");
+
 	PMIXP_FREE_KEY(kvp);
 
 	/*
@@ -268,6 +279,8 @@ int pmixp_libpmix_init(void)
 	PMIx_Register_event_handler(NULL, 0, NULL, 0, errhandler,
 			errhandler_reg_callbk, NULL);
 #endif
+
+	PMIXP_TIMESTAMP("PMIx_Register_errhandler");
 
 	return 0;
 }
@@ -665,6 +678,8 @@ int pmixp_libpmix_job_set(void)
 	pmix_info_t *kvp;
 
 	int i, rc;
+
+
 	uid_t uid = pmixp_info_jobuid();
 	gid_t gid = pmixp_info_jobgid();
 	_register_caddy_t *register_caddy;
@@ -672,18 +687,30 @@ int pmixp_libpmix_job_set(void)
 	register_caddy = xmalloc(sizeof(_register_caddy_t)*(pmixp_info_tasks_loc()+1));
 	pmixp_debug_hang(0);
 
+	PMIXP_TIMESTAMP("pmixp_libpmix_job_set_xmalloc");
+
 	/* Use list to safely expand/reduce key-value pairs. */
 	lresp = list_create(pmixp_xfree_xmalloced);
 
 	_general_proc_info(lresp);
 
+	PMIXP_TIMESTAMP("_general_proc_info");
+
 	_set_tmpdirs(lresp);
+
+	PMIXP_TIMESTAMP("_set_tmpdirs");
 
 	_set_procdatas(lresp);
 
+	PMIXP_TIMESTAMP("_set_procdatas");
+
 	_set_sizeinfo(lresp);
 
+	PMIXP_TIMESTAMP("_set_sizeinfo");
+
 	_set_topology(lresp);
+
+	PMIXP_TIMESTAMP("_set_topology");
 
 	if (SLURM_SUCCESS != _set_mapsinfo(lresp)) {
 		list_destroy(lresp);
@@ -691,7 +718,11 @@ int pmixp_libpmix_job_set(void)
 		return SLURM_ERROR;
 	}
 
+	PMIXP_TIMESTAMP("_set_mapsinfo");
+
 	_set_localinfo(lresp);
+
+	PMIXP_TIMESTAMP("_set_localinfo");
 
 	ninfo = list_count(lresp);
 	PMIX_INFO_CREATE(info, ninfo);
@@ -702,6 +733,8 @@ int pmixp_libpmix_job_set(void)
 		i++;
 	}
 	list_destroy(lresp);
+
+	PMIXP_TIMESTAMP("prepare info");
 
 	register_caddy[0].active = 1;
 	rc = PMIx_server_register_nspace(pmixp_info_namespace(),
@@ -714,6 +747,8 @@ int pmixp_libpmix_job_set(void)
 			    pmixp_info_tasks_loc(), ninfo);
 		return SLURM_ERROR;
 	}
+
+	PMIXP_TIMESTAMP("PMIx_server_register_nspace");
 
 	PMIXP_DEBUG("task initialization");
 	for (i = 0; i < pmixp_info_tasks_loc(); i++) {
@@ -748,8 +783,13 @@ int pmixp_libpmix_job_set(void)
 		}
 		nanosleep(&ts, NULL);
 	}
+
+	PMIXP_TIMESTAMP("PMIx_server_register_client");
+
 	PMIX_INFO_FREE(info, ninfo);
 	xfree(register_caddy);
+
+	PMIXP_TIMESTAMP("PMIX_INFO_FREE");
 
 	return SLURM_SUCCESS;
 }
