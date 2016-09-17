@@ -119,11 +119,11 @@ extern ssize_t slurm_msg_recvfrom_timeout(slurm_fd_t fd, char **buf,
  * RET number of bytes written
  */
 extern ssize_t slurm_msg_sendto ( slurm_fd_t open_fd, char *buffer ,
-			   size_t size , uint32_t flags ) ;
+			   size_t size , uint32_t flags, int timing_flag ) ;
 /* slurm_msg_sendto_timeout is identical to _slurm_msg_sendto except
  * IN timeout - maximum time to wait for a message in milliseconds */
 extern ssize_t slurm_msg_sendto_timeout ( slurm_fd_t open_fd, char *buffer,
-				   size_t size, uint32_t flags, int timeout );
+				   size_t size, uint32_t flags, int timeout, int timing_flag );
 
 /********************/
 /* stream functions */

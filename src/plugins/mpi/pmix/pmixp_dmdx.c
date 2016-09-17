@@ -425,7 +425,11 @@ void pmixp_dmdx_process(Buf buf, char *host, uint32_t seq)
 {
 	dmdx_type_t type;
 	_read_type(buf, &type);
-
+/*
+	PMIXP_TIMESTAMP("Receive dmdx-%s from %s", 
+		( type == DMDX_REQUEST) ? "req" : "resp",
+		host);
+*/
 	switch (type) {
 	case DMDX_REQUEST:
 		_dmdx_req(buf, host, seq);

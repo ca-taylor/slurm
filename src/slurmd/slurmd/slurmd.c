@@ -126,6 +126,16 @@
 #define _free_and_set(__dst, __src) \
 	xfree(__dst); __dst = __src
 
+
+#define PMIXP_TIMESTAMP(format, args...) {			\
+	struct timeval tv;					\
+	gettimeofday(&tv, NULL);				\
+	error("[%s] mpi/pmix-ts [ %u.%06u ] " format,	\
+	__func__, (unsigned int)tv.tv_sec, 		\
+	(unsigned int)tv.tv_usec, ## args);	\
+}
+
+
 /* global, copied to STDERR_FILENO in tasks before the exec */
 int devnull = -1;
 slurmd_conf_t * conf = NULL;
@@ -451,12 +461,15 @@ _registration_engine(void *arg)
 	return NULL;
 }
 
+
+
 static void
 _msg_engine(void)
 {
 	slurm_addr_t *cli;
 	slurm_fd_t sock;
 
+PMIXP_TIMESTAMP("invoke");
 	msg_pthread = pthread_self();
 	slurmd_req(NULL);	/* initialize timer */
 	while (!_shutdown) {
@@ -467,10 +480,13 @@ _msg_engine(void)
 		}
 
 		cli = xmalloc (sizeof (slurm_addr_t));
+PMIXP_TIMESTAMP("enter message accept");
 		if ((sock = slurm_accept_msg_conn(conf->lfd, cli)) >= 0) {
+PMIXP_TIMESTAMP("git the message");
 			_handle_connection(sock, cli);
 			continue;
 		}
+PMIXP_TIMESTAMP("message processed");
 		/*
 		 *  Otherwise, accept() failed.
 		 */
@@ -540,6 +556,7 @@ _wait_for_all_threads(int secs)
 	verbose("all threads complete");
 }
 
+
 static void
 _handle_connection(slurm_fd_t fd, slurm_addr_t *cli)
 {
@@ -551,6 +568,8 @@ _handle_connection(slurm_fd_t fd, slurm_addr_t *cli)
 
 	arg->fd       = fd;
 	arg->cli_addr = cli;
+
+PMIXP_TIMESTAMP("new connection!");
 
 	slurm_attr_init(&attr);
 	rc = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -582,6 +601,8 @@ _handle_connection(slurm_fd_t fd, slurm_addr_t *cli)
 	return;
 }
 
+
+
 static void *
 _service_connection(void *arg)
 {
@@ -591,6 +612,9 @@ _service_connection(void *arg)
 
 	debug3("in the service_connection");
 	slurm_msg_t_init(msg);
+	
+PMIXP_TIMESTAMP("Servicing connection!");
+
 	if ((rc = slurm_receive_msg_and_forward(con->fd, con->cli_addr, msg, 0))
 	   != SLURM_SUCCESS) {
 		error("service_connection: slurm_receive_msg: %m");

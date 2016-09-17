@@ -189,7 +189,7 @@ void *_forward_thread(void *arg)
 		if (slurm_msg_sendto(fd,
 				     get_buf_data(buffer),
 				     get_buf_offset(buffer),
-				     SLURM_PROTOCOL_NO_SEND_RECV_FLAGS ) < 0) {
+				     SLURM_PROTOCOL_NO_SEND_RECV_FLAGS, 0 ) < 0) {
 			error("forward_thread: slurm_msg_sendto: %m");
 
 			slurm_mutex_lock(&fwd_struct->forward_mutex);

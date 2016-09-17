@@ -432,7 +432,7 @@ out:
 	pack32((uint32_t) rc, resp_buf);
 	rc = slurm_msg_sendto(fd, get_buf_data(resp_buf),
 			      get_buf_offset(resp_buf),
-			      SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+			      SLURM_PROTOCOL_NO_SEND_RECV_FLAGS,0);
 	free_buf(resp_buf);
 
 	debug3("mpi/pmi2: out _handle_name_publish");
@@ -465,7 +465,7 @@ out:
 	pack32((uint32_t) rc, resp_buf);
 	rc = slurm_msg_sendto(fd, get_buf_data(resp_buf),
 			      get_buf_offset(resp_buf),
-			      SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+			      SLURM_PROTOCOL_NO_SEND_RECV_FLAGS,0);
 	free_buf(resp_buf);
 
 	debug3("mpi/pmi2: out _handle_name_unpublish");
@@ -497,7 +497,7 @@ out:
 	packstr(port, resp_buf);
 	rc2 = slurm_msg_sendto(fd, get_buf_data(resp_buf),
 			       get_buf_offset(resp_buf),
-			       SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+			       SLURM_PROTOCOL_NO_SEND_RECV_FLAGS,0);
 	rc = MAX(rc, rc2);
 	free_buf(resp_buf);
 	xfree(name);
@@ -643,7 +643,7 @@ tree_msg_to_srun(uint32_t len, char *msg)
 	fd = slurm_open_stream(tree_info.srun_addr, true);
 	if (fd < 0)
 		return SLURM_ERROR;
-	rc = slurm_msg_sendto(fd, msg, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+	rc = slurm_msg_sendto(fd, msg, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS,0);
 	if (rc == len) /* all data sent */
 		rc = SLURM_SUCCESS;
 	else
@@ -664,7 +664,7 @@ tree_msg_to_srun_with_resp(uint32_t len, char *msg, Buf *resp_ptr)
 	fd = slurm_open_stream(tree_info.srun_addr, true);
 	if (fd < 0)
 		return SLURM_ERROR;
-	rc = slurm_msg_sendto(fd, msg, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+	rc = slurm_msg_sendto(fd, msg, len, SLURM_PROTOCOL_NO_SEND_RECV_FLAGS,0);
 	if (rc == len) { 	/* all data sent */
 		safe_read(fd, &len, sizeof(len));
 		len = ntohl(len);
@@ -700,7 +700,7 @@ tree_msg_to_spawned_sruns(uint32_t len, char *msg)
 		if (fd < 0)
 			return SLURM_ERROR;
 		sent = slurm_msg_sendto(fd, msg, len,
-					SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
+					SLURM_PROTOCOL_NO_SEND_RECV_FLAGS,0);
 		if (sent != len)
 			rc = SLURM_ERROR;
 		close(fd);

@@ -6238,6 +6238,13 @@ static void _wait_for_job_running_prolog(uint32_t job_id)
 	debug( "Finished wait for job %d's prolog to complete", job_id);
 }
 
+#define PMIXP_TIMESTAMP(format, args...) {			\
+	struct timeval tv;					\
+	gettimeofday(&tv, NULL);				\
+	error("[%s] mpi/pmix-ts [ %u.%06u ] " format,	\
+	__func__, (unsigned int)tv.tv_sec, 		\
+	(unsigned int)tv.tv_usec, ## args);	\
+}
 
 static void
 _rpc_forward_data(slurm_msg_t *msg)
@@ -6250,6 +6257,9 @@ _rpc_forward_data(slurm_msg_t *msg)
 	debug3("Entering _rpc_forward_data, address: %s, len: %u",
 	       req->address, req->len);
 
+	if(NULL !=  strstr(req->address, "slurm.pmix.") ){
+		PMIXP_TIMESTAMP("forward");
+	}
 	/* sanity check */
 	if (strlen(req->address) > sizeof(sa.sun_path) - 1) {
 		slurm_seterrno(EINVAL);

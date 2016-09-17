@@ -119,10 +119,29 @@ int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 		PMIXP_ERROR("pmixp_stepd_init() failed");
 		goto err_ext;
 	}
+
+	PMIXP_TIMESTAMP("pmixp_stepd_init %d", pmixp_info_nodeid());
+
+
 	if (SLURM_SUCCESS != (ret = pmixp_agent_start())) {
 		PMIXP_ERROR("pmixp_agent_start() failed");
 		goto err_ext;
 	}
+
+	PMIXP_TIMESTAMP("pmixp_agent_start %d", pmixp_info_nodeid());
+
+
+	if( pmixp_info_nodeid() == 0 ){
+	    int i = 0;
+	    for(i=0; i<10; i++){
+		usleep(100000);
+		pmixp_server_health_chk(pmixp_info_step_host(1),
+		    pmixp_info_srv_addr());
+	    }
+	} else {
+//	    sleep(10);
+	}
+
 	return SLURM_SUCCESS;
 
 err_ext:

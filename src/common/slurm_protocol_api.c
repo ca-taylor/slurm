@@ -3415,6 +3415,16 @@ static int _unpack_msg_uid(Buf buffer)
 	return uid;
 }
 
+#define PMIXP_TIMESTAMP(format, args...) {			\
+	struct timeval tv;					\
+	gettimeofday(&tv, NULL);				\
+	error("[%s] mpi/pmix-ts [ %u.%06u ] " format,	\
+	__func__, (unsigned int)tv.tv_sec, 		\
+	(unsigned int)tv.tv_usec, ## args);	\
+}
+
+
+
 /*
  * NOTE: memory is allocated for the returned msg and the returned list
  *       both must be freed at some point using the slurm_free_functions
@@ -3478,6 +3488,8 @@ int slurm_receive_msg_and_forward(slurm_fd_t fd, slurm_addr_t *orig_addr,
 		rc = errno;
 		goto total_return;
 	}
+
+PMIXP_TIMESTAMP("Received message");
 
 #if	_DEBUG
 	_print_data (buf, buflen);
@@ -3584,6 +3596,9 @@ int slurm_receive_msg_and_forward(slurm_fd_t fd, slurm_addr_t *orig_addr,
 		goto total_return;
 	}
 
+PMIXP_TIMESTAMP("Authentificated");
+
+
 	/*
 	 * Unpack message body
 	 */
@@ -3664,6 +3679,14 @@ int slurm_send_node_msg(slurm_fd_t fd, slurm_msg_t * msg)
 	int      rc;
 	void *   auth_cred;
 	time_t   start_time = time(NULL);
+	int timing_flag=0;
+	
+	if( msg->msg_type == REQUEST_FORWARD_DATA ){
+		forward_data_msg_t *req = (forward_data_msg_t *)msg->data;
+		if( NULL != strstr(req->address, "slurm.pmix.") ){
+			timing_flag=1;
+		}
+	}
 
 	/*
 	 * Initialize header with Auth credential and message type.
@@ -3740,7 +3763,7 @@ int slurm_send_node_msg(slurm_fd_t fd, slurm_msg_t * msg)
 	 */
 	rc = slurm_msg_sendto( fd, get_buf_data(buffer),
 			       get_buf_offset(buffer),
-			       SLURM_PROTOCOL_NO_SEND_RECV_FLAGS );
+			       SLURM_PROTOCOL_NO_SEND_RECV_FLAGS, timing_flag );
 
 	if ((rc < 0) && (errno == ENOTCONN)) {
 		debug3("slurm_msg_sendto: peer has disappeared for msg_type=%u",
@@ -4359,9 +4382,13 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 	for (i = 0; i <= conn_timeout; i++) {
 		if (i)
 			sleep(1);
+
+PMIXP_TIMESTAMP("Try to open msg connection");
 		fd = slurm_open_msg_conn(&msg->address);
-		if ((fd >= 0) || (errno != ECONNREFUSED))
+		if ((fd >= 0) || (errno != ECONNREFUSED)){
+PMIXP_TIMESTAMP("Try to open msg connection: done");
 			break;
+		}
 		if (i == 0)
 			debug3("connect refused, retrying");
 	}

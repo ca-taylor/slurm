@@ -76,6 +76,15 @@
 		file_base, __LINE__, __func__, ## args);	\
 }
 
+#define PMIXP_TIMESTAMP(format, args...) {			\
+	struct timeval tv;					\
+	gettimeofday(&tv, NULL);				\
+	error("%s [%d] [%s] mpi/pmix-ts [ %u.%06u ] " format,	\
+		pmixp_info_hostname(), pmixp_info_nodeid(),	\
+		__func__, (unsigned int)tv.tv_sec, 		\
+		(unsigned int)tv.tv_usec, ## args);	\
+}
+
 #define PMIXP_ABORT(format, args...) {				\
 	PMIXP_ERROR(format, ##args);                            \
 	error("%s [%d] %s:%d [%s] mpi/pmix: ERROR: " format,	\

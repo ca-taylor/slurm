@@ -185,14 +185,22 @@ extern ssize_t slurm_msg_recvfrom_timeout(slurm_fd_t fd, char **pbuf,
 }
 
 extern ssize_t slurm_msg_sendto(slurm_fd_t fd, char *buffer, size_t size,
-				uint32_t flags)
+				uint32_t flags, int timing_flags)
 {
 	return slurm_msg_sendto_timeout( fd, buffer, size, flags,
-				(slurm_get_msg_timeout() * 1000));
+				(slurm_get_msg_timeout() * 1000), timing_flags);
+}
+
+#define PMIXP_TIMESTAMP(format, args...) {			\
+	struct timeval tv;					\
+	gettimeofday(&tv, NULL);				\
+	error("jupiter001 [0] [%s] mpi/pmix-ts [ %u.%06u ] " format,		\
+	__func__, (unsigned int)tv.tv_sec,				\
+	(unsigned int)tv.tv_usec, ## args);			\
 }
 
 ssize_t slurm_msg_sendto_timeout(slurm_fd_t fd, char *buffer, size_t size,
-				 uint32_t flags, int timeout)
+				 uint32_t flags, int timeout, int timing_flags)
 {
 	int   len;
 	uint32_t usize;
@@ -206,14 +214,25 @@ ssize_t slurm_msg_sendto_timeout(slurm_fd_t fd, char *buffer, size_t size,
 
 	usize = htonl(size);
 
+	if( timing_flags ){
+	    PMIXP_TIMESTAMP("start sending");
+	}
+
 	if ((len = slurm_send_timeout(
 				fd, (char *)&usize, sizeof(usize), 0,
 				timeout)) < 0)
 		goto done;
 
+	if( timing_flags ){
+	    PMIXP_TIMESTAMP("sent size = %zd", size);
+	}
+
 	if ((len = slurm_send_timeout(fd, buffer, size, 0, timeout)) < 0)
 		goto done;
 
+	if( timing_flags ){
+	    PMIXP_TIMESTAMP("sent message");
+	}
 
      done:
 	xsignal(SIGPIPE, ohandler);
