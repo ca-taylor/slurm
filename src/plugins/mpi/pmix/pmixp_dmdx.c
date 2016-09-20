@@ -193,7 +193,7 @@ static void _respond_with_error(int seq_num, char *sender_host,
 	addr = pmixp_info_nspace_usock(sender_ns);
 	/* send response */
 	rc = pmixp_server_send(sender_host, PMIXP_MSG_DMDX, seq_num, addr,
-			get_buf_data(buf), get_buf_offset(buf), 1);
+			get_buf_data(buf), get_buf_offset(buf), 0);
 	if (SLURM_SUCCESS != rc) {
 		PMIXP_ERROR("Cannot send direct modex error" " response to %s",
 				sender_host);
@@ -223,7 +223,7 @@ static void _dmdx_pmix_cb(pmix_status_t status, char *data, size_t sz,
 	/* send the request */
 	rc = pmixp_server_send(caddy->sender_host, PMIXP_MSG_DMDX,
 			caddy->seq_num, addr, get_buf_data(buf),
-			get_buf_offset(buf), 1);
+			get_buf_offset(buf), 0);
 	if (SLURM_SUCCESS != rc) {
 		/* not much we can do here. Caller will react by timeout */
 		PMIXP_ERROR("Cannot send direct modex response to %s",
@@ -273,7 +273,7 @@ int pmixp_dmdx_get(const char *nspace, int rank,
 
 	/* send the request */
 	rc = pmixp_server_send(host, PMIXP_MSG_DMDX, seq, addr,
-			get_buf_data(buf), get_buf_offset(buf), 1);
+			get_buf_data(buf), get_buf_offset(buf), 0);
 
 	/* cleanup the resources */
 	xfree(addr);

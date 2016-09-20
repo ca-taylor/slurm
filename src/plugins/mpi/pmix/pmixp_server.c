@@ -322,7 +322,7 @@ static int _recv_unpack_hdr(void *net, void *host)
 }
 
 int pmixp_server_send(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
-		const char *addr, void *data, size_t size, int p2p)
+		const char *addr, void *data, size_t size, int bcast)
 {
 	send_header_t hdr;
 	char nhdr[sizeof(send_header_t)];
@@ -339,10 +339,10 @@ int pmixp_server_send(char *hostlist, pmixp_srv_cmd_t type, uint32_t seq,
 	hsize = _send_pack_hdr(&hdr, nhdr);
 	memcpy(data, nhdr, hsize);
 
-	if( !p2p ){
-		rc = pmixp_stepd_send(hostlist, addr, data, size, 500, 7, 0);
+	if( bcast ){
+		rc = pmixp_stepd_bcast(hostlist, addr, data, size, 500, 7, 0);
 	} else {
-		rc = pmixp_p2p_send(hostlist, addr, data, size, 500, 7, 0);
+		rc = pmixp_stepd_send(hostlist, addr, data, size, 500, 7, 0);
 	}
 	if (SLURM_SUCCESS != rc) {
 		PMIXP_ERROR("Cannot send message to %s, size = %u, hostlist:\n%s",

@@ -1303,6 +1303,20 @@ extern int slurm_forward_data(
 	char **nodelist, char *address, uint32_t len, const char *data);
 
 /*
+ * slurm_forward_to_node - forward arbitrary data to unix domain sockets of the 
+ * particular node. Bypasses some of the slurm_forward_data steps and sends
+ * directly from the thread that calls this function.
+ *
+ * IN/OUT nodename: Node name to forward data.
+ * IN address: address of unix domain socket
+ * IN len: length of data
+ * IN data: real data
+ * RET: error code
+ */
+extern int slurm_forward_to_node(char *nodename, const char *address, char *data,
+				uint32_t len);
+
+/*
  * slurm_setup_sockaddr - setup a sockaddr_in struct to be used for
  *                        communication. If TopologyParameters has
  *                        NoInAddrAny set it will work of the

@@ -4749,6 +4749,84 @@ extern int slurm_forward_data(
 	return rc;
 }
 
+/*
+ * slurm_forward_to_node - forward arbitrary data to unix domain sockets of the 
+ * particular node. Bypasses some of the slurm_forward_data steps and sends
+ * directly from the thread that calls this function.
+ *
+ * IN/OUT nodename: Node name to forward data.
+ * IN address: address of unix domain socket
+ * IN len: length of data
+ * IN data: real data
+ * RET: error code
+ */
+extern int slurm_forward_to_node(char *nodename, const char *address, char *data,
+				uint32_t len)
+{
+	int rc, timeout;
+	slurm_msg_t msg;
+	forward_data_msg_t req;
+	List ret_list;
+	ret_data_info_t *ret_data_info = NULL;
+
+	slurm_msg_t_init(&msg);
+
+	debug2("slurm_forward_to_node: nodename=%s, address=%s, len=%u",
+			nodename, address, len);
+	req.address = address;
+	req.len = len;
+	req.data = (char *)data;
+
+	msg.msg_type = REQUEST_FORWARD_DATA;
+	msg.data = &req;
+
+	rc = slurm_conf_get_addr(nodename, &msg.address);
+	if (SLURM_ERROR == rc) {
+		error("Can't find address for host "
+			      "%s, check slurm.conf", nodename);
+	}
+
+	timeout = slurm_get_msg_timeout() * 1000;
+	msg.forward.timeout = timeout;
+	msg.forward.cnt = 0;
+	msg.forward.nodelist = NULL;
+	ret_list = slurm_send_addr_recv_msgs(&msg, nodename,
+						timeout);
+	if (ret_list) {
+		int ret_cnt = list_count(ret_list);
+		if(  0 == ret_cnt &&
+			(errno != SLURM_COMMUNICATIONS_CONNECTION_ERROR)) {
+			error("slurm_forward_to_node: failed to send to %s, errno=%d",
+				nodename, errno);
+			return SLURM_ERROR;
+		}
+	} else {
+		/* This should never happen (when this was
+		 * written slurm_send_addr_recv_msgs always
+		 * returned a list */
+		error("slurm_forward_to_node: No return list given from "
+			      "slurm_send_addr_recv_msgs spawned for %s",
+			      nodename);
+		return SLURM_ERROR;
+	}
+	
+	rc = SLURM_SUCCESS;
+	while ((ret_data_info = list_pop(ret_list))) {
+		int temp_rc =0;
+		temp_rc = slurm_get_return_code(ret_data_info->type,
+					ret_data_info->data);
+		if (temp_rc != SLURM_SUCCESS) {
+			rc = temp_rc;
+		}
+		destroy_data_info(ret_data_info);
+	}
+
+	FREE_NULL_LIST(ret_list);
+
+	return rc;
+}
+
+
 extern void slurm_setup_sockaddr(struct sockaddr_in *sin, uint16_t port)
 {
 	static uint32_t s_addr = NO_VAL;
