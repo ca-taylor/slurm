@@ -53,6 +53,9 @@ int pmixp_srun_send(slurm_addr_t *addr, uint32_t len, char *data);
 int pmixp_stepd_send(char *nodelist, const char *address, char *data,
 		     uint32_t len, unsigned int start_delay, unsigned int retry_cnt,
 		     int silent);
+int pmixp_p2p_send(char *nodename, const char *address, char *data,
+		     uint32_t len, unsigned int start_delay,
+		     unsigned int retry_cnt, int silent);
 int pmixp_rmdir_recursively(char *path);
 int pmixp_fixrights(char *path, uid_t uid, mode_t mode);
 
