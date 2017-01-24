@@ -447,13 +447,12 @@ static inline int _send_payload_ok(pmixp_io_engine_t *eng)
 	xassert(NULL != eng->rcvd_hdr_net);
 	xassert(pmixp_io_enqueue_ok(eng));
 	xassert(eng->h.send_on);
-	xassert(NULL != eng->send_current);
 
 	return (eng->send_current != NULL) && _send_header_ok(eng)
 			&& (eng->send_pay_offs == eng->send_pay_size);
 }
 
-void pmixp_io_send_enqueue(pmixp_io_engine_t *eng, void *msg)
+int pmixp_io_send_enqueue(pmixp_io_engine_t *eng, void *msg)
 {
 	xassert(PMIXP_MSGSTATE_MAGIC == eng->magic);
 	xassert(NULL != eng->rcvd_hdr_net);
@@ -464,10 +463,11 @@ void pmixp_io_send_enqueue(pmixp_io_engine_t *eng, void *msg)
 	 * to accept new messages
 	 */
 	if( !pmixp_io_enqueue_ok(eng)){
-		return;
+		PMIXP_ERROR("Trying to enqueue to unprepared engine");
+		return SLURM_ERROR;
 	}
-
 	list_enqueue(eng->send_queue, msg);
+	return SLURM_SUCCESS;
 }
 
 bool pmixp_io_send_pending(pmixp_io_engine_t *eng)

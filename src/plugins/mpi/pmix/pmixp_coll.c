@@ -43,7 +43,7 @@
 #include "pmixp_server.h"
 
 static void _progress_fan_in(pmixp_coll_t *coll);
-static void _progres_fan_out(pmixp_coll_t *coll, Buf buf);
+static void _progres_fan_out(pmixp_coll_t *coll);
 
 static int _hostset_from_ranges(const pmix_proc_t *procs, size_t nprocs,
 		hostlist_t *hl_out)
@@ -474,14 +474,14 @@ proceed:
 	return SLURM_SUCCESS;
 }
 
-void pmixp_coll_bcast(pmixp_coll_t *coll, Buf buf)
+void pmixp_coll_bcast(pmixp_coll_t *coll)
 {
 	PMIXP_DEBUG("%s:%d: start", pmixp_info_namespace(), pmixp_info_nodeid());
 
 	/* lock the structure */
 	slurm_mutex_lock(&coll->lock);
 
-	_progres_fan_out(coll, buf);
+	_progres_fan_out(coll);
 
 	/* unlock the structure */
 	slurm_mutex_unlock(&coll->lock);
@@ -513,13 +513,45 @@ static int _copy_payload(Buf inbuf, size_t offs, Buf *outbuf)
 	return rc;
 }
 
+static void _sent_complete_cb(int rc, void *cb_data)
+{
+	pmixp_coll_t *coll = (pmixp_coll_t *)cb_data;
+
+	/* lock the collective */
+	slurm_mutex_lock(&coll->lock);
+
+	/* We don't want to release buffer */
+	if( SLURM_SUCCESS == rc ){
+		/* transit to the next state */
+		_fan_in_finished(coll);
+
+		/* if we are root - push data to PMIx here.
+		 * Originally there was a homogenuous solution:
+		 * root nodename was in the hostlist. However this
+		 * may lead to the undesired side effects: we are
+		 * blocked here sending data and cannot receive
+		 * (it will be triggered in this thread after we will leave
+		 * this callback), so we have to rely on buffering on the
+		 * SLURM side. Better not to do so. */
+		if (NULL == coll->parent_host) {
+			/* if I am the root - pass the data to PMIx and reset collective here */
+			/* copy payload excluding reserved server header */
+			_progres_fan_out(coll);
+		}
+	} else {
+		coll->cbfunc(PMIX_ERROR, NULL, 0, coll->cbdata, NULL, NULL);
+	}
+
+	/* unlock the collective */
+	slurm_mutex_unlock(&coll->lock);
+}
+
 static void _progress_fan_in(pmixp_coll_t *coll)
 {
 	pmixp_srv_cmd_t type;
 	pmixp_ep_t ep = {0};
 	char *hostlist = NULL;
 	int rc;
-	Buf root_buf;
 
 	ep.type = PMIXP_EP_NONE;
 
@@ -559,7 +591,7 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 			type = PMIXP_MSG_FAN_OUT;
 			pmixp_debug_hang(0);
 		}
-		rc = _copy_payload(coll->buf, coll->serv_offs, &root_buf);
+		rc = _copy_payload(coll->buf, coll->serv_offs, &coll->root_buf);
 		xassert(0 == rc);
 		PMIXP_DEBUG("%s:%d: finish with this collective (I am the root)",
 			    pmixp_info_namespace(), pmixp_info_nodeid());
@@ -568,42 +600,36 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 	PMIXP_DEBUG("%s:%d: send data to %s", pmixp_info_namespace(),
 			pmixp_info_nodeid(), hostlist);
 
+	/* unlock the collective - it will be locked again
+	 * in  _sent_complete_cb
+	 */
+	slurm_mutex_unlock(&coll->lock);
 
 	/* Check for the singletone case */
 	if (PMIXP_EP_NONE != ep.type) {
-		rc = pmixp_server_send(&ep, type, coll->seq, coll->buf);
+		rc = pmixp_server_send_nb(&ep, type, coll->seq, coll->buf,
+					  _sent_complete_cb, coll);
 
 		if (SLURM_SUCCESS != rc) {
-			PMIXP_ERROR(
-					"Cannot send data (size = %lu), to hostlist:\n%s",
-					(uint64_t) get_buf_offset(coll->buf),
-					hostlist);
+			PMIXP_ERROR("Cannot send data (size = %lu), to hostlist:\n%s",
+				    (uint64_t) get_buf_offset(coll->buf),
+				    hostlist);
 			/* return error indication to PMIx. Nodes that haven't received data
 			 * will exit by a timeout.
 			 * FIXME: do we need to do something with successfuly finished nodes?
 			 */
-			goto unlock;
+			slurm_mutex_unlock(&coll->lock);
+			/* Notify local PMIx server about this failure
+			 * TODO: Find better error code
+			 */
+			coll->cbfunc(PMIX_ERROR, NULL, 0, coll->cbdata, NULL, NULL);
+			/* Prepare for the next collective operation */
+			_fan_out_finished(coll);
+
+			/* unlock the collective */
+			slurm_mutex_unlock(&coll->lock);
 		}
 	}
-
-	/* transit to the next state */
-	_fan_in_finished(coll);
-
-	/* if we are root - push data to PMIx here.
-	 * Originally there was a homogenuous solution: root nodename was in the hostlist.
-	 * However this may lead to the undesired side effects: we are blocked here sending
-	 * data and cannot receive (it will be triggered in this thread after we will leave
-	 * this callback), so we have to rely on buffering on the SLURM side.
-	 * Better not to do so. */
-	if (NULL == coll->parent_host) {
-		/* if I am the root - pass the data to PMIx and reset collective here */
-		/* copy payload excluding reserved server header */
-		_progres_fan_out(coll, root_buf);
-	}
-
-unlock:
-	/* unlock the collective */
-	slurm_mutex_unlock(&coll->lock);
 
 	/* release the endpoint */
 	switch( ep.type ){
@@ -618,11 +644,15 @@ unlock:
 	default:
 		break;
 	}
-
+	return;
+unlock:
+	/* unlock the collective incase of error*/
+	slurm_mutex_unlock(&coll->lock);
 }
 
-void _progres_fan_out(pmixp_coll_t *coll, Buf buf)
+void _progres_fan_out(pmixp_coll_t *coll)
 {
+	Buf buf = coll->root_buf;
 	PMIXP_DEBUG("%s:%d: start", pmixp_info_namespace(), pmixp_info_nodeid());
 
 	pmixp_coll_sanity_check(coll);
@@ -636,7 +666,9 @@ void _progres_fan_out(pmixp_coll_t *coll, Buf buf)
 		PMIXP_DEBUG("%s:%d: use the callback", pmixp_info_namespace(),
 				pmixp_info_nodeid());
 		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata,
-				pmixp_free_Buf, (void *)buf);
+				pmixp_free_Buf, (void *)coll->root_buf);
+		/* root buffer will be released by `pmixp_free_Buf()` */
+		coll->root_buf = NULL;
 	}
 	/* Prepare for the next collective operation */
 	_fan_out_finished(coll);

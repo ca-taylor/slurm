@@ -101,7 +101,7 @@ pmixp_conn_new_temp(pmixp_conn_proto_t proto, int fd,
 	pmixp_io_attach(conn->eng, fd);
 	conn->rcv_progress_cb = nmsg_cb;
 	conn->ret_cb = NULL;
-	conn->data = NULL;
+	conn->ret_data = NULL;
 	conn->hdr = NULL;
 	return conn;
 }
@@ -128,7 +128,7 @@ pmixp_conn_new_persist(pmixp_conn_proto_t proto,
 	conn->eng = eng;
 	conn->rcv_progress_cb = nmsg_cb;
 	conn->ret_cb = ret_cb;
-	conn->data = ret_data;
+	conn->ret_data = ret_data;
 	conn->hdr = NULL;
 	return conn;
 }
