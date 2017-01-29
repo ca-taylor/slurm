@@ -110,6 +110,8 @@ static void _fan_in_finished(pmixp_coll_t *coll)
 	if (SLURM_SUCCESS != _pack_ranges(coll)) {
 		PMIXP_ERROR("Cannot pack ranges to coll message header!");
 	}
+
+
 }
 
 static void _fan_out_finished(pmixp_coll_t *coll)
@@ -365,18 +367,19 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 
 	/* save & mark local contribution */
 	coll->contrib_local = true;
-	grow_buf(coll->buf, size);
+	pmixp_server_buf_reserve(coll->buf, size);
 	memcpy(get_buf_data(coll->buf) + get_buf_offset(coll->buf), data, size);
 	set_buf_offset(coll->buf, get_buf_offset(coll->buf) + size);
-
-	/* unlock the structure */
-	slurm_mutex_unlock(&coll->lock);
 
 	/* check if the collective is ready to progress */
 	_progress_fan_in(coll);
 
 	PMIXP_DEBUG("%s:%d: get local contribution: finish",
 			pmixp_info_namespace(), pmixp_info_nodeid());
+
+	/* unlock the structure */
+	slurm_mutex_unlock(&coll->lock);
+
 
 	return SLURM_SUCCESS;
 }
@@ -433,7 +436,7 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 
 	data = get_buf_data(buf) + get_buf_offset(buf);
 	size = remaining_buf(buf);
-	grow_buf(coll->buf, size);
+	pmixp_server_buf_reserve(coll->buf, size);
 	memcpy(get_buf_data(coll->buf) + get_buf_offset(coll->buf), data, size);
 	set_buf_offset(coll->buf, get_buf_offset(coll->buf) + size);
 
@@ -444,8 +447,6 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, char *nodename, Buf buf)
 	coll->contrib_cntr++;
 
 proceed:
-	/* unlock the structure */
-	slurm_mutex_unlock(&coll->lock);
 
 	if( PMIXP_COLL_FAN_IN == coll->state ){
 		/* make a progress if we are in fan-in state */
@@ -471,6 +472,9 @@ proceed:
 		    pmixp_info_namespace(), pmixp_info_nodeid(), nodename,
 		    state);
 
+	/* unlock the structure */
+	slurm_mutex_unlock(&coll->lock);
+
 	return SLURM_SUCCESS;
 }
 
@@ -483,12 +487,12 @@ void pmixp_coll_bcast(pmixp_coll_t *coll)
 
 	_progres_fan_out(coll);
 
-	/* unlock the structure */
-	slurm_mutex_unlock(&coll->lock);
-
 	/* We may already start next collective. Try to progress!
 	 * its OK if we in SYNC - there will be no-op */
 	_progress_fan_in(coll);
+
+	/* unlock the structure */
+	slurm_mutex_unlock(&coll->lock);
 }
 
 static int _copy_payload(Buf inbuf, size_t offs, Buf *outbuf)
@@ -513,16 +517,17 @@ static int _copy_payload(Buf inbuf, size_t offs, Buf *outbuf)
 	return rc;
 }
 
-static void _sent_complete_cb(int rc, void *cb_data)
+static void _sent_complete_cb(int rc, pmixp_srv_cb_context_t ctx, void *cb_data)
 {
 	pmixp_coll_t *coll = (pmixp_coll_t *)cb_data;
 
-	/* lock the collective */
-	slurm_mutex_lock(&coll->lock);
+	if( PMIXP_SRV_CB_REGULAR == ctx ){
+		/* lock the collective */
+		slurm_mutex_lock(&coll->lock);
+	}
 
 	/* We don't want to release buffer */
 	if( SLURM_SUCCESS == rc ){
-		/* transit to the next state */
 		_fan_in_finished(coll);
 
 		/* if we are root - push data to PMIx here.
@@ -542,8 +547,10 @@ static void _sent_complete_cb(int rc, void *cb_data)
 		coll->cbfunc(PMIX_ERROR, NULL, 0, coll->cbdata, NULL, NULL);
 	}
 
-	/* unlock the collective */
-	slurm_mutex_unlock(&coll->lock);
+	if( PMIXP_SRV_CB_REGULAR == ctx ){
+		/* unlock the collective */
+		slurm_mutex_unlock(&coll->lock);
+	}
 }
 
 static void _progress_fan_in(pmixp_coll_t *coll)
@@ -560,20 +567,18 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 			coll->contrib_local, coll->contrib_cntr);
 
 	/* lock the collective */
-	slurm_mutex_lock(&coll->lock);
-
 	pmixp_coll_sanity_check(coll);
 
 	if (PMIXP_COLL_FAN_IN != coll->state) {
 		/* In case of race condition between libpmix and
 		 * slurm threads progress_fan_in can be called
 		 * after we moved to the next step. */
-		goto unlock;
+		return;
 	}
 
 	if (!coll->contrib_local || coll->contrib_cntr != coll->children_cnt) {
 		/* Not yet ready to go to the next step */
-		goto unlock;
+		return;
 	}
 
 	/* The root of the collective will have parent_host == NULL */
@@ -600,11 +605,6 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 	PMIXP_DEBUG("%s:%d: send data to %s", pmixp_info_namespace(),
 			pmixp_info_nodeid(), hostlist);
 
-	/* unlock the collective - it will be locked again
-	 * in  _sent_complete_cb
-	 */
-	slurm_mutex_unlock(&coll->lock);
-
 	/* Check for the singletone case */
 	if (PMIXP_EP_NONE != ep.type) {
 		rc = pmixp_server_send_nb(&ep, type, coll->seq, coll->buf,
@@ -614,20 +614,10 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 			PMIXP_ERROR("Cannot send data (size = %lu), to hostlist:\n%s",
 				    (uint64_t) get_buf_offset(coll->buf),
 				    hostlist);
-			/* return error indication to PMIx. Nodes that haven't received data
-			 * will exit by a timeout.
-			 * FIXME: do we need to do something with successfuly finished nodes?
-			 */
-			slurm_mutex_unlock(&coll->lock);
 			/* Notify local PMIx server about this failure
 			 * TODO: Find better error code
 			 */
 			coll->cbfunc(PMIX_ERROR, NULL, 0, coll->cbdata, NULL, NULL);
-			/* Prepare for the next collective operation */
-			_fan_out_finished(coll);
-
-			/* unlock the collective */
-			slurm_mutex_unlock(&coll->lock);
 		}
 	}
 
@@ -644,10 +634,6 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 	default:
 		break;
 	}
-	return;
-unlock:
-	/* unlock the collective incase of error*/
-	slurm_mutex_unlock(&coll->lock);
 }
 
 void _progres_fan_out(pmixp_coll_t *coll)

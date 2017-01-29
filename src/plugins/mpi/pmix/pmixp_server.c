@@ -406,9 +406,13 @@ static bool _serv_readable(eio_obj_t *obj)
 {
 	/* sanity check */
 	xassert(NULL != obj );
-	/* We should delete connection right when it  was closed or failed */
-	xassert(false == obj->shutdown);
-
+	if( obj->shutdown ){
+		if (obj->fd != -1) {
+			close(obj->fd);
+			obj->fd = -1;
+		}
+		return false;
+	}
 	return true;
 }
 
@@ -437,7 +441,7 @@ static int _serv_read(eio_obj_t *obj, List objs)
 			/* cleanup after this connection */
 			eio_remove_obj(obj, objs);
 			pmixp_conn_return(conn);
-			proceed = 0;git
+			proceed = 0;
 		}
 	}
 	return 0;
@@ -448,7 +452,13 @@ static bool _serv_writable(eio_obj_t *obj)
 	/* sanity check */
 	xassert(NULL != obj );
 	/* We should delete connection right when it  was closed or failed */
-	xassert(false == obj->shutdown);
+	if( obj->shutdown ){
+		if (obj->fd != -1) {
+			close(obj->fd);
+			obj->fd = -1;
+		}
+		return false;
+	}
 
 	/* get I/O engine */
 	pmixp_conn_t *conn = (pmixp_conn_t *)obj->arg;
@@ -576,7 +586,7 @@ exit:
 	}
 }
 
-void pmixp_server_sent_buf_cb(int rc, void *data)
+void pmixp_server_sent_buf_cb(int rc, pmixp_srv_cb_context_t ctx, void *data)
 {
 	Buf buf = (Buf)data;
 	free_buf(buf);
@@ -649,7 +659,7 @@ int pmixp_server_send_nb(pmixp_ep_t *ep, pmixp_srv_cmd_t type,
 	return rc;
 send_slurm:
 	rc = _slurm_send(ep, bhdr, buf);
-	complete_cb(rc, cb_data);
+	complete_cb(rc, PMIXP_SRV_CB_INLINE, cb_data);
 	return SLURM_SUCCESS;
 send_direct:
 	xassert( NULL != dconn );
@@ -734,13 +744,13 @@ static void *_direct_hdr_ptr(void *msg)
 static void *_direct_payload_ptr(void *msg)
 {
 	_direct_proto_message_t *_msg = (_direct_proto_message_t*)msg;
-	return &_msg->payload;
+	return _msg->payload;
 }
 
 static void _direct_msg_free(void *_msg)
 {
 	_direct_proto_message_t *msg = (_direct_proto_message_t*)_msg;
-	msg->sent_cb(SLURM_SUCCESS, msg->cbdata);
+	msg->sent_cb(SLURM_SUCCESS, PMIXP_SRV_CB_REGULAR, msg->cbdata);
 	xfree(msg);
 }
 
@@ -842,7 +852,7 @@ _direct_send(pmixp_dconn_t *dconn, pmixp_ep_t *ep,
 	msg->buf_ptr = buf;
 	rc = pmixp_dconn_send(dconn, msg);
 	if (SLURM_SUCCESS != rc) {
-		msg->sent_cb(rc, msg->cbdata);
+		msg->sent_cb(rc, PMIXP_SRV_CB_INLINE, msg->cbdata);
 		xfree( msg );
 	}
 	eio_signal_wakeup(pmixp_info_io());

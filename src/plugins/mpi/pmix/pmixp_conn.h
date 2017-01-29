@@ -75,15 +75,6 @@ pmixp_conn_progress_rcv(pmixp_conn_t *conn)
 		ret = true;
 	}
 
-	if (pmixp_io_conn_closed(conn->eng)){
-		int fd = pmixp_io_detach(conn->eng);
-		close(fd);
-		/* stopping operation will cause connection
-		 * connection handler to be returned and dconn
-		 * will be notified that this connection was dropped.
-		 */
-	}
-
 	return ret;
 }
 

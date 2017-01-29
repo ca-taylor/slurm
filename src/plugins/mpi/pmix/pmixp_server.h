@@ -62,11 +62,15 @@ typedef struct {
 	} ep;
 } pmixp_ep_t;
 
-typedef void (*pmixp_server_sent_cb_t)(int rc, void *cb_data);
+typedef enum {
+	PMIXP_SRV_CB_INLINE,
+	PMIXP_SRV_CB_REGULAR
+} pmixp_srv_cb_context_t;
+typedef void (*pmixp_server_sent_cb_t)(int rc, pmixp_srv_cb_context_t ctx, void *cb_data);
 /* convenience callback to just release sent buffer
  * expects an object of type `Buf` to be passed as `cb_data`
  */
-void pmixp_server_sent_buf_cb(int rc, void *data);
+void pmixp_server_sent_buf_cb(int rc, pmixp_srv_cb_context_t ctx, void *data);
 
 int pmixp_stepd_init(const stepd_step_rec_t *job, char ***env);
 int pmixp_stepd_finalize(void);
@@ -80,5 +84,13 @@ int pmixp_server_send_nb(pmixp_ep_t *ep, pmixp_srv_cmd_t type,
 			 void *cb_data);
 Buf pmixp_server_buf_new(void);
 size_t pmixp_server_buf_reset(Buf buf);
+static inline void
+pmixp_server_buf_reserve(Buf buf, uint32_t size)
+{
+	if( remaining_buf(buf) < size ){
+		uint32_t to_reserve = size - remaining_buf(buf);
+		grow_buf(buf, to_reserve);
+	}
+}
 
 #endif /* PMIXP_SERVER_H */

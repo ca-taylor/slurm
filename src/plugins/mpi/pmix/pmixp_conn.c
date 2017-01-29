@@ -145,9 +145,14 @@ pmixp_conn_return(pmixp_conn_t *conn)
 	}
 	switch (conn->type){
 	case PMIXP_CONN_PERSIST:
-		/* corresponding I/O engine will be allocated somewhere else */
+		/* corresponding I/O engine was allocated somewhere else */
 		break;
-	case PMIXP_CONN_TEMP:
+	case PMIXP_CONN_TEMP: {
+		if( pmixp_io_conn_closed(conn->eng) ){
+			int fd = pmixp_io_detach(conn->eng);
+			close(fd);
+		}
+
 		/* grab the temp I/O engine of the corresponding type */
 		switch (conn->proto) {
 		case PMIXP_PROTO_SLURM:
@@ -162,6 +167,7 @@ pmixp_conn_return(pmixp_conn_t *conn)
 			abort();
 		}
 		break;
+	}
 	default:
 		/* should not happen */
 		PMIXP_ERROR("Bad connection type: %d", conn->type);
