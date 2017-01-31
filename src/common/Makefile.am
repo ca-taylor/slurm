@@ -10,7 +10,7 @@
 
 AUTOMAKE_OPTIONS = foreign
 
-AM_CPPFLAGS     = -I$(top_srcdir) $(BG_INCLUDES)
+AM_CPPFLAGS     = -I$(top_srcdir) $(BG_INCLUDES) $(UCX_CPPFLAGS)
 
 noinst_PROGRAMS = libcommon.o libeio.o libspank.o
 # This is needed if compiling on windows
@@ -125,6 +125,11 @@ libcommon_la_SOURCES = 			\
 	siphash24.c siphash_slurm.c siphash.h \
 	slurm_persist_conn.c slurm_persist_conn.h
 
+if HAVE_UCX
+libcommon_la_SOURCES += 	\
+	ucx.c ucx.h
+endif
+
 EXTRA_libcommon_la_SOURCES = 		\
 	uthash/LICENSE			\
 	uthash/README			\
@@ -142,9 +147,9 @@ libspank_la_SOURCES = \
 	plugstack.c plugstack.h \
 	optz.c      optz.h
 
-libcommon_la_LIBADD   = $(DL_LIBS)
+libcommon_la_LIBADD   = $(DL_LIBS) $(UCX_LIBS)
 
-libcommon_la_LDFLAGS  = $(LIB_LDFLAGS) -module --export-dynamic
+libcommon_la_LDFLAGS  = $(LIB_LDFLAGS) -module --export-dynamic $(UCX_LDFLAGS)
 
 # This was made so we could export all symbols from libcommon
 # on multiple platforms

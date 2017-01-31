@@ -9,7 +9,7 @@ bin_PROGRAMS = salloc
 
 salloc_SOURCES = salloc.c salloc.h opt.c opt.h
 
-convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) $(UCX_LIBS)
 
 salloc_LDADD = \
 	$(convenience_libs)
@@ -20,7 +20,7 @@ if HAVE_REAL_CRAY
 endif
 endif
 
-salloc_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+salloc_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(convenience_libs) : force

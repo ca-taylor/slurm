@@ -27,14 +27,14 @@ scontrol_SOURCES =	\
 	update_step.c   \
 	update_powercap.c
 
-convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) -lm
+convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) -lm $(UCX_LIBS)
 
 
 scontrol_LDADD = \
 	$(convenience_libs) \
 	$(READLINE_LIBS)
 
-scontrol_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+scontrol_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(convenience_libs) : force

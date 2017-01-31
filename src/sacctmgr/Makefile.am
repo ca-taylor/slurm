@@ -8,7 +8,7 @@ AM_CPPFLAGS = -I$(top_srcdir)
 bin_PROGRAMS = sacctmgr
 
 sacctmgr_LDADD =  $(top_builddir)/src/db_api/libslurmdb.o $(DL_LIBS) \
-	$(READLINE_LIBS)
+	$(READLINE_LIBS) $(UCX_LIBS)
 
 sacctmgr_SOURCES =	\
 	account_functions.c	\
@@ -32,7 +32,7 @@ sacctmgr_SOURCES =	\
 	problem_functions.c     \
 	tres_function.c
 
-sacctmgr_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sacctmgr_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(sacctmgr_LDADD) : force

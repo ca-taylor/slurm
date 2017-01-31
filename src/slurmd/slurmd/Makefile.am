@@ -13,9 +13,9 @@ slurmd_LDADD = 					   \
 	$(top_builddir)/src/bcast/libfile_bcast.la \
 	../common/libslurmd_common.o $(HWLOC_LIBS) \
 	$(top_builddir)/src/api/libslurm.o $(DL_LIBS)  \
-	../common/libslurmd_reverse_tree_math.la
+	../common/libslurmd_reverse_tree_math.la $(UCX_LIBS)
 
-slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(HWLOC_LDFLAGS) $(NUMA_LIBS)
+slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(HWLOC_LDFLAGS) $(NUMA_LIBS) $(UCX_LDFLAGS)
 
 SLURMD_SOURCES = \
 	slurmd.c slurmd.h \

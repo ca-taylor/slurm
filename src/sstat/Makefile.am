@@ -6,7 +6,7 @@ AM_CPPFLAGS = -I$(top_srcdir)
 
 bin_PROGRAMS = sstat
 
-sstat_LDADD = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+sstat_LDADD = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) $(UCX_LIBS)
 
 sstat_SOURCES =		\
 	options.c	\
@@ -19,5 +19,5 @@ force:
 $(sstat_LDADD) : force
 	 @cd `dirname $@` && $(MAKE) `basename $@`
 
-sstat_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sstat_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 

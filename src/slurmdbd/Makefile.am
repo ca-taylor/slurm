@@ -10,7 +10,8 @@ sbin_PROGRAMS = slurmdbd
 
 slurmdbd_LDADD = 					\
 	$(top_builddir)/src/common/libdaemonize.la \
-	$(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+	$(top_builddir)/src/api/libslurm.o $(DL_LIBS) \
+	$(UCX_LIBS)
 
 
 slurmdbd_SOURCES = 		\
@@ -25,7 +26,7 @@ slurmdbd_SOURCES = 		\
 	slurmdbd.c  		\
 	slurmdbd.h
 
-slurmdbd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+slurmdbd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(slurmdbd_LDADD) : force
