@@ -7,9 +7,9 @@ AM_CPPFLAGS = -I$(top_srcdir)
 
 bin_PROGRAMS = sacct
 
-sacct_LDADD = 	$(top_builddir)/src/db_api/libslurmdb.o $(DL_LIBS)
+sacct_LDADD = 	$(top_builddir)/src/db_api/libslurmdb.o $(DL_LIBS) $(UCX_LIBS)
 
-sacct_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sacct_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 noinst_HEADERS = sacct.c
 sacct_SOURCES =		\

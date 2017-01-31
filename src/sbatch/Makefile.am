@@ -9,11 +9,11 @@ bin_PROGRAMS = sbatch
 
 sbatch_SOURCES = sbatch.c opt.c opt.h
 
-convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) $(UCX_LIBS)
 
 sbatch_LDADD = $(convenience_libs)
 
-sbatch_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sbatch_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(convenience_libs) : force

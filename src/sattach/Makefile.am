@@ -12,12 +12,12 @@ sattach_SOURCES = \
 	sattach.c \
 	sattach.wrapper.c
 
-convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) $(UCX_LIBS)
 
 sattach_LDADD = \
 	$(convenience_libs)
 
-sattach_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sattach_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(convenience_libs) : force

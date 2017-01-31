@@ -7,7 +7,7 @@ if BUILD_SVIEW
 
 bin_PROGRAMS = sview
 
-sview_LDADD = $(top_builddir)/src/db_api/libslurmdb.o $(DL_LIBS)
+sview_LDADD = $(top_builddir)/src/db_api/libslurmdb.o $(DL_LIBS) $(UCX_LIBS)
 
 noinst_HEADERS = sview.h gthread_helper.h
 sview_SOURCES = sview.c popups.c grid.c part_info.c job_info.c \
@@ -19,7 +19,7 @@ force:
 $(sview_LDADD) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
-sview_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(BG_LDFLAGS) $(GTK_LIBS)
+sview_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(BG_LDFLAGS) $(GTK_LIBS) $(UCX_LDFLAGS)
 sview_CFLAGS = $(GTK_CFLAGS)
 
 else

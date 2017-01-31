@@ -137,11 +137,12 @@ convenience_libs = \
 	$(top_builddir)/src/api/libslurmhelper.la
 
 libslurm_la_SOURCES =
-libslurm_la_LIBADD = $(convenience_libs)
+libslurm_la_LIBADD = $(convenience_libs) $(UCX_LIBS)
 libslurm_la_LDFLAGS        = \
         $(LIB_LDFLAGS) \
         -version-info $(current):$(rev):$(age) \
-        $(OTHER_FLAGS)
+        $(OTHER_FLAGS) \
+        $(UCX_LDFLAGS)
 #
 # The libpmi_la_LIBADD specification below causes libpmi.la to relink
 # when running "make install", but removing it prevents essential slurm

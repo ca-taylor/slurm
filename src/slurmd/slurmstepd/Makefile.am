@@ -11,7 +11,7 @@ slurmstepd_LDADD = 				   \
 	$(top_builddir)/src/common/libdaemonize.la \
 	../common/libslurmd_common.o $(HWLOC_LDFLAGS) $(HWLOC_LIBS) \
 	$(top_builddir)/src/api/libslurm.o $(DL_LIBS) \
-	$(PAM_LIBS) $(UTIL_LIBS)
+	$(PAM_LIBS) $(UTIL_LIBS) $(UCX_LIBS)
 
 slurmstepd_SOURCES = 	        	\
 	slurmstepd.c slurmstepd.h	\
@@ -27,7 +27,7 @@ slurmstepd_SOURCES = 	        	\
 	multi_prog.c multi_prog.h	\
 	step_terminate_monitor.c step_terminate_monitor.h
 
-slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(slurmstepd_LDADD) : force

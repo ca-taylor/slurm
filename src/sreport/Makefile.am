@@ -18,9 +18,9 @@ sreport_SOURCES =	\
 
 sreport_LDADD =  \
 	$(top_builddir)/src/db_api/libslurmdb.o $(DL_LIBS) \
-	$(READLINE_LIBS)
+	$(READLINE_LIBS) $(UCX_LIBS)
 
-sreport_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sreport_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(sreport_LDADD) : force

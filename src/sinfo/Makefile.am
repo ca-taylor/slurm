@@ -6,7 +6,7 @@ AUTOMAKE_OPTIONS = foreign
 AM_CPPFLAGS = -I$(top_srcdir) $(BG_INCLUDES)
 bin_PROGRAMS = sinfo
 
-sinfo_LDADD = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+sinfo_LDADD = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) $(UCX_LIBS)
 
 noinst_HEADERS = sinfo.h print.h
 sinfo_SOURCES = sinfo.c opts.c print.c sort.c
@@ -15,5 +15,5 @@ force:
 $(sinfo_LDADD) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
-sinfo_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sinfo_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 

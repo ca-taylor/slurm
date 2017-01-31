@@ -9,13 +9,13 @@ bin_PROGRAMS = sshare
 
 sshare_LDADD =  \
 	$(top_builddir)/src/api/libslurm.o $(DL_LIBS) -lm \
-	$(READLINE_LIBS)
+	$(READLINE_LIBS) $(UCX_LIBS)
 
 sshare_SOURCES =	\
 	process.c               \
 	sshare.c sshare.h
 
-sshare_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+sshare_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 force:
 $(sshare_LDADD) : force
