@@ -67,6 +67,7 @@ int slurm_ucx_bind(int fd, slurm_ucx_address_t addr);
  */
 int slurm_ucx_init_client();
 
+void slurm_ucx_cleanup();
 
 /*
  * client-side receiv callback
@@ -78,7 +79,7 @@ typedef void (*slurm_ucx_cli_cb_t)(int fd, void *buf, size_t size, void *obj);
  * addr - remote endpoint address
  *
  */
-int slurm_ucx_conn(slurm_ucx_address_t *addr, slurm_ucx_cli_cb_t cb, void *obj);
+int slurm_ucx_conn_open(slurm_ucx_address_t *addr, slurm_ucx_cli_cb_t cb, void *obj);
 
 /*
  * close the virtual connection to a remote server

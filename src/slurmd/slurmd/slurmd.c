@@ -168,7 +168,7 @@ static void      _atfork_prepare(void);
 static int       _convert_spec_cores(void);
 static int       _core_spec_init(void);
 static void      _create_msg_socket(void);
-static void	_create_ucx_fd(void);
+static void	 _create_ucx_fd(void);
 static void      _decrement_thd_count(void);
 static void      _destroy_conf(void);
 static int       _drain_node(char *reason);

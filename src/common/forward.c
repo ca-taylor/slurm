@@ -404,7 +404,7 @@ void _forward_thread_ucx(forward_msg_t *fwd_msg)
 	name = hostlist_shift(hl);
 	uaddr.type = SLURM_UCX_SRV;
 	uaddr.addr.hname = name;
-	fd = slurm_ucx_conn(&uaddr, _ucx_fwd_cb, fwd_msg);
+	fd = slurm_ucx_conn_open(&uaddr, _ucx_fwd_cb, fwd_msg);
 
 	buf = hostlist_ranged_string_xmalloc(hl);
 
@@ -714,7 +714,7 @@ void *_fwd_tree_thread_ucx(void *arg)
 		slurm_mutex_init(&ret[j].lock);
 		uaddr.type = SLURM_UCX_SRV;
 		uaddr.addr.hname = name;
-		send_msg->conn_fd = slurm_ucx_conn(&uaddr, _ucx_recv_cb, &ret[j]);
+		send_msg->conn_fd = slurm_ucx_conn_open(&uaddr, _ucx_recv_cb, &ret[j]);
 		slurm_send_node_msg_ucx(send_msg->conn_fd, send_msg);
 	}
 
@@ -755,7 +755,6 @@ static void _start_msg_tree_internal_ucx(hostlist_t hl, hostlist_t* sp_hl,
 				     fwd_tree_t *fwd_tree_in,
 				     int hl_count)
 {
-	int j;
 	fwd_tree_t *fwd_tree;
 
 	xassert((hl || sp_hl) && !(hl && sp_hl));
