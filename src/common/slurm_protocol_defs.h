@@ -57,6 +57,7 @@
 #include "src/common/slurmdb_defs.h"
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
+#include "src/common/ucx.h"
 
 #define MAX_SLURM_NAME 64
 #define FORWARD_INIT 0xfffe
@@ -415,7 +416,7 @@ typedef struct slurm_protocol_header {
 
 	/* UCX portion */
 	bool is_ucx;
-	slurm_ucx_addr_t ucx_addr;
+	slurm_ucx_address_t ucx_addr;
 } header_t;
 
 typedef struct forward_struct {

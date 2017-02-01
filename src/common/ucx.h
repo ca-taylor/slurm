@@ -46,7 +46,7 @@ int slurm_ucx_reachable(slurm_ucx_address_t *addr);
  * also the tag of the initiation message has to be stored internally
  * so the response will reach correct receiver on the EP.
  */
-void (*slurm_ucx_srv_cb_t)(int fd, void *buf, size_t size, void *obj);
+typedef void (*slurm_ucx_srv_cb_t)(int fd, void *buf, size_t size, void *obj);
 
 /*
  * fd - file descriptor that will be used for polling
@@ -65,13 +65,13 @@ int slurm_ucx_bind(int fd, slurm_ucx_address_t addr);
  * Incurs a separate progress thread creation to call
  * ucx progress and calling registered callbacks
  */
-int slurm_ucx_init_server(slurm_ucx_srv_cb_t cb, void *obj);
+int slurm_ucx_init_client();
 
 
 /*
  * client-side receiv callback
  */
-void (*slurm_ucx_cli_cb_t)(int fd, void *buf, size_t size, void *obj);
+typedef void (*slurm_ucx_cli_cb_t)(int fd, void *buf, size_t size, void *obj);
 
 /*
  * open the virtual connection to a remote server
@@ -79,6 +79,13 @@ void (*slurm_ucx_cli_cb_t)(int fd, void *buf, size_t size, void *obj);
  *
  */
 int slurm_ucx_conn(slurm_ucx_address_t *addr, slurm_ucx_cli_cb_t cb, void *obj);
+
+/*
+ * close the virtual connection to a remote server
+ * addr - remote endpoint address
+ *
+ */
+int slurm_ucx_conn_close(int fd);
 
 /*
  * progress both client and server
@@ -90,5 +97,12 @@ void slurm_ucx_progress();
  *
  */
 void slurm_ucx_poll_prep();
+
+/*
+ * Prepare server for polling.
+ *
+ */
+void slurm_ucx_send(int fd, void *buf, size_t size);
+
 
 #endif

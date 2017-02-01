@@ -3521,7 +3521,6 @@ total_return:
 
 List slurm_receive_msgs_ucx(char *buf, int buflen)
 {
-	size_t buflen = 0;
 	header_t header;
 	int rc;
 	void *auth_cred = NULL;
@@ -3531,7 +3530,6 @@ List slurm_receive_msgs_ucx(char *buf, int buflen)
 	List ret_list = NULL;
 
 	slurm_msg_t_init(&msg);
-	msg.conn_fd = fd;
 
 	buffer = create_buf(buf, buflen);
 
@@ -3541,25 +3539,8 @@ List slurm_receive_msgs_ucx(char *buf, int buflen)
 		goto total_return;
 	}
 
-	if (check_header_version(&header) < 0) {
-		slurm_addr_t resp_addr;
-		char addr_str[32];
-		int uid = _unpack_msg_uid(buffer);
-		if (!slurm_get_peer_addr(fd, &resp_addr)) {
-			slurm_print_slurm_addr(
-				&resp_addr, addr_str, sizeof(addr_str));
-			error("Invalid Protocol Version %u from uid=%d at %s",
-			      header.version, uid, addr_str);
-		} else {
-			error("Invalid Protocol Version %u from uid=%d from "
-			      "problem connection: %m",
-			      header.version, uid);
-		}
+	xassert (check_header_version(&header) >= 0);
 
-		free_buf(buffer);
-		rc = SLURM_PROTOCOL_VERSION_ERROR;
-		goto total_return;
-	}
 	//info("ret_cnt = %d",header.ret_cnt);
 	if (header.ret_cnt > 0) {
 		if (header.ret_list)
@@ -3869,11 +3850,12 @@ total_return:
 
 }
 
-int slurm_receive_msg_and_forward_ucx(int fd, char *buf, size_t buflen, slurm_msg_t *msg)
+int slurm_receive_msg_and_forward_ucx(int fd,
+				      char *buf, size_t buflen,
+				      slurm_msg_t *msg)
 {
 	header_t header;
-	char *addr;
-	int len, rc;
+	int rc;
 	void *auth_cred = NULL;
 	Buf buffer;
 
@@ -4228,19 +4210,7 @@ int slurm_send_node_msg_ucx(int fd, slurm_msg_t * msg)
 	 */
 	buffer = init_buf(BUF_SIZE);
 	header.is_ucx = true;
-	header.ucx_type = slurm_ucx_whoami();
-	switch( header.ucx_type ){
-	case SLURM_UCX_SRV:
-		header.ucx_origin.name = slurm_ucx_hostname();
-		break;
-	case SLURM_UCX_CLI:
-		header.ucx_origin.address.addr = slurm_ucx_addr();
-		header.ucx_origin.address.addr_len = slurm_ucx_addr_len();
-		break;
-	default:
-		/* shouldn't happen */
-		xassert(0);
-	}
+	slurm_ucx_addr(&header.ucx_addr);
 	pack_header(&header, buffer);
 
 	/*

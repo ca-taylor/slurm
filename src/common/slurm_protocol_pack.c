@@ -905,10 +905,10 @@ pack_header(header_t * header, Buf buffer)
 		pack8(u8, buffer);
 		switch(header->ucx_addr.type){
 		case SLURM_UCX_SRV:
-			packmem(header->ucx_addr.addr.hname, strlen(header->ucx_origin.name) + 1, buffer);
+			packmem(header->ucx_addr.addr.hname, strlen(header->ucx_addr.addr.hname) + 1, buffer);
 			break;
 		case SLURM_UCX_CLI:
-			packmem(header->ucx_origin.addr.address.addr, header->ucx_origin.addr.address.len, buffer);
+			packmem(header->ucx_addr.addr.address.data, header->ucx_addr.addr.address.len, buffer);
 			break;
 		default:
 			/* shouldn't happen */
@@ -977,17 +977,17 @@ unpack_header(header_t * header, Buf buffer)
 	header->is_ucx = (bool)u8;
 	if( header->is_ucx ){
 		char *addr;
-		int len;
+		uint32_t len;
 		unpack8(&u8, buffer);
 		header->ucx_addr.type = (slurm_ucx_type_t)u8;
 		unpackmem_malloc(&addr,&len, buffer);
-		switch(header->ucx_type){
+		switch(header->ucx_addr.type){
 		case SLURM_UCX_SRV:
 			header->ucx_addr.addr.hname = addr;
 			break;
 		case SLURM_UCX_CLI:
-			header->ucx_origin.addr.address.addr = addr;
-			header->ucx_origin.addr.address.len = len;
+			header->ucx_addr.addr.address.data = addr;
+			header->ucx_addr.addr.address.len = len;
 			break;
 		default:
 			/* shouldn't happen */

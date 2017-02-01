@@ -1045,6 +1045,10 @@ List slurm_receive_msgs_ucx(char *buf, int buflen);
 int slurm_receive_msg_and_forward(int fd, slurm_addr_t *orig_addr,
 				  slurm_msg_t *resp, int timeout);
 
+int slurm_receive_msg_and_forward_ucx(int fd,
+				      char *buf, size_t buflen,
+				      slurm_msg_t *msg);
+
 /**********************************************************************\
  * send message functions
 \**********************************************************************/

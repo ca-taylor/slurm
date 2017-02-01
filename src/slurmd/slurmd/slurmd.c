@@ -95,6 +95,7 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/xsignal.h"
+#include "src/common/ucx.h"
 
 #include "src/slurmd/common/core_spec_plugin.h"
 #include "src/slurmd/slurmd/get_mach_stat.h"
@@ -167,6 +168,7 @@ static void      _atfork_prepare(void);
 static int       _convert_spec_cores(void);
 static int       _core_spec_init(void);
 static void      _create_msg_socket(void);
+static void	_create_ucx_fd(void);
 static void      _decrement_thd_count(void);
 static void      _destroy_conf(void);
 static int       _drain_node(char *reason);
@@ -348,6 +350,7 @@ main (int argc, char *argv[])
 	file_bcast_init();
 
 	_create_msg_socket();
+	_create_ucx_fd();
 
 	conf->pid = getpid();
 	/* This has to happen after daemon(), which closes all fd's,
@@ -471,12 +474,12 @@ _msg_engine(void)
 
 		slurm_ucx_poll_prep();
 
-		rc = poll(&pfd, 1, -1);
+		rc = poll(pfd, 2, -1);
 		if( rc < 0 ){
 			if( errno == EINTR ){
 				continue;
 			} else {
-				basta();
+				xassert(0);
 			}
 		}
 
@@ -598,40 +601,6 @@ static void _handle_connection(int fd, slurm_addr_t *cli)
 	}
 
 	return;
-}
-
-static void *
-_service_connection(void *arg)
-{
-	conn_t *con = (conn_t *) arg;
-	slurm_msg_t *msg = xmalloc(sizeof(slurm_msg_t));
-	int rc = SLURM_SUCCESS;
-
-	debug3("in the service_connection");
-	slurm_msg_t_init(msg);
-	if ((rc = slurm_receive_msg_and_forward(con->fd, con->cli_addr, msg, 0))
-	   != SLURM_SUCCESS) {
-		error("service_connection: slurm_receive_msg: %m");
-		/* if this fails we need to make sure the nodes we forward
-		   to are taken care of and sent back. This way the control
-		   also has a better idea what happened to us */
-		slurm_send_rc_msg(msg, rc);
-		goto cleanup;
-	}
-	debug2("got this type of message %d", msg->msg_type);
-
-	if (msg->msg_type != MESSAGE_COMPOSITE)
-		slurmd_req(msg);
-
-cleanup:
-	if ((msg->conn_fd >= 0) && slurm_close(msg->conn_fd) < 0)
-		error ("close(%d): %m", con->fd);
-
-	xfree(con->cli_addr);
-	xfree(con);
-	slurm_free_msg(msg);
-	_decrement_thd_count();
-	return NULL;
 }
 
 static void *
@@ -1495,8 +1464,7 @@ static void _ucx_srv_cb(int fd, void *buf, size_t size, void *obj)
 	int rc = SLURM_SUCCESS;
 
 	slurm_msg_t_init(msg);
-	if ((rc = slurm_receive_msg_and_forward(con->fd, con->cli_addr, msg, 0))
-	   != SLURM_SUCCESS) {
+	if ((rc = slurm_receive_msg_and_forward_ucx(fd, buf, size, msg) ) != SLURM_SUCCESS) {
 		error("service_connection: slurm_receive_msg: %m");
 		/* if this fails we need to make sure the nodes we forward
 		   to are taken care of and sent back. This way the control
@@ -1510,20 +1478,17 @@ static void _ucx_srv_cb(int fd, void *buf, size_t size, void *obj)
 		slurmd_req(msg);
 
 cleanup:
-	if ((msg->conn_fd >= 0) && slurm_close(msg->conn_fd) < 0)
-		error ("close(%d): %m", con->fd);
+	if (msg->conn_fd >= 0){
+		slurm_ucx_conn_close(msg->conn_fd);
+	}
 
-	xfree(con->cli_addr);
-	xfree(con);
 	slurm_free_msg(msg);
 	_decrement_thd_count();
-	return NULL;
 }
 
-static void
-_create_ucx_fd(void)
+static void _create_ucx_fd(void)
 {
-	conf->ucx_fd = slurm_ucx_server_init("/tmp/slurm_address.out");
+	conf->ucx_fd = slurm_ucx_init_server("/tmp/slurm_address.out",_ucx_srv_cb, NULL);
 	return;
 }
 
