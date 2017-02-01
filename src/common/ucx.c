@@ -456,8 +456,6 @@ int slurm_ucx_conn_close(int fd)
 	return SLURM_SUCCESS;
 }
 
-typedef void (*slurm_ucx_srv_cb_t)(int fd, void *buf, size_t size, void *obj);
-
 int _process_resp(int i)
 {
 	int fd, j;
