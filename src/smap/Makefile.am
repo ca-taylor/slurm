@@ -17,7 +17,7 @@ smap_SOURCES = smap.c \
 	job_functions.c partition_functions.c \
 	grid_functions.c reservation_functions.c opts.c
 
-smap_LDADD = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) $(NCURSES)
+smap_LDADD = $(top_builddir)/src/api/libslurm.o $(DL_LIBS) $(NCURSES) $(UCX_LIBS)
 
 if BLUEGENE_LOADED
 bg_dir = $(top_builddir)/src/plugins/select/bluegene
@@ -32,7 +32,7 @@ force:
 $(smap_LDADD) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
-smap_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+smap_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(UCX_LDFLAGS)
 
 else
 
