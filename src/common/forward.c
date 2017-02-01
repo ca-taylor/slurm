@@ -70,10 +70,17 @@ typedef struct {
 static void _start_msg_tree_internal(hostlist_t hl, hostlist_t* sp_hl,
 				     fwd_tree_t *fwd_tree_in,
 				     int hl_count);
+static void _start_msg_tree_internal_ucx(hostlist_t hl, hostlist_t* sp_hl,
+				     fwd_tree_t *fwd_tree_in,
+				     int hl_count);
+
 static void _forward_msg_internal(hostlist_t hl, hostlist_t* sp_hl,
 				  forward_struct_t *fwd_struct,
 				  header_t *header, int timeout,
 				  int hl_count);
+static void _forward_msg_internal_ucx(hostlist_t hl, hostlist_t* sp_hl,
+				  forward_struct_t *fwd_struct,
+				  header_t *header, int hl_count);
 
 void _destroy_tree_fwd(fwd_tree_t *fwd_tree)
 {
@@ -346,6 +353,94 @@ cleanup:
 	return (NULL);
 }
 
+static void
+_ucx_fwd_cb(int fd, void *buf, size_t size, void *obj)
+{
+	forward_msg_t *fwd_msg = (forward_msg_t *)obj;
+	ret_data_info_t *ret_data_info = NULL;
+	List ret_list = NULL;
+
+	ret_list = slurm_receive_msgs_ucx(buf, size);
+	/* info("sent %d forwards got %d back", */
+	/*      fwd_msg->header.forward.cnt, list_count(ret_list)); */
+
+	xassert( (ret_list && list_count(ret_list) > 1) ||
+		 (fwd_msg->header.forward.cnt == 0) );
+
+	slurm_mutex_lock(&fwd_msg->fwd_struct->forward_mutex);
+	if (ret_list) {
+		while ((ret_data_info = list_pop(ret_list)) != NULL) {
+			if (!ret_data_info->node_name) {
+				ret_data_info->node_name = xstrdup(name);
+			}
+			list_push(fwd_msg->fwd_struct->ret_list, ret_data_info);
+			debug3("got response from %s",
+			       ret_data_info->node_name);
+		}
+		FREE_NULL_LIST(ret_list);
+	}
+
+	slurm_ucx_close_conn(fd);
+	destroy_forward(&fwd_msg->header.forward);
+	free_buf(fwd_msg->buf);
+	slurm_cond_signal(&fwd_msg->fwd_struct->notify);
+	slurm_mutex_unlock(&fwd_msg->fwd_struct->forward_mutex);
+	xfree(fwd_msg);
+}
+
+void _forward_thread_ucx(forward_msg_t *fwd_msg)
+{
+	forward_struct_t *fwd_struct = fwd_msg->fwd_struct;
+	Buf buffer = init_buf(BUF_SIZE);	/* probably enough for header */
+	int fd = -1;
+	char *name = NULL;
+	hostlist_t hl = hostlist_create(fwd_msg->header.forward.nodelist);
+	slurm_addr_t addr;
+	char *buf = NULL;
+
+	fwd_msg->buf = buffer;
+	/* repeat until we are sure the message was sent */
+	name = hostlist_shift(hl);
+	fd = slurm_ucx_open_conn(name, _ucx_fwd_cb, fwd_msg);
+
+	buf = hostlist_ranged_string_xmalloc(hl);
+
+	xfree(fwd_msg->header.forward.nodelist);
+	fwd_msg->header.forward.nodelist = buf;
+	fwd_msg->header.forward.cnt = hostlist_count(hl);
+	fwd_msg->header.is_ucx = true;
+	fwd_msg->header.ucx_type = slurm_ucx_whoami();
+	switch( fwd_msg->header.ucx_type ){
+	case SLURM_UCX_SRV:
+		fwd_msg->header.ucx_origin.name = slurm_ucx_hostname();
+		break;
+	case SLURM_UCX_CLI:
+	default:
+		/* shouldn't happen */
+		xassert(0);
+	}
+
+	pack_header(&fwd_msg->header, buffer);
+
+	/* add forward data to buffer */
+	if (remaining_buf(buffer) < fwd_struct->buf_len) {
+		int new_size = buffer->processed + fwd_struct->buf_len;
+		new_size += 1024; /* padded for paranoia */
+		xrealloc_nz(buffer->head, new_size);
+		buffer->size = new_size;
+	}
+	if (fwd_struct->buf_len) {
+		memcpy(&buffer->head[buffer->processed],
+				fwd_struct->buf, fwd_struct->buf_len);
+		buffer->processed += fwd_struct->buf_len;
+	}
+
+	slurm_ucx_send(fd, get_buf_data(buffer), get_buf_offset(buffer));
+	free(name);
+	hostlist_destroy(hl);
+}
+
+
 void *_fwd_tree_thread(void *arg)
 {
 	fwd_tree_t *fwd_tree = (fwd_tree_t *)arg;
@@ -424,7 +519,7 @@ void *_fwd_tree_thread(void *arg)
 				}
 			}
 
-			slurm_mutex_lock(fwd_tree->tree_mutex);
+			slurm_mutex_lock(fwd_tree->tree_mutex);	
 			list_transfer(fwd_tree->ret_list, ret_list);
 			slurm_cond_signal(fwd_tree->notify);
 			slurm_mutex_unlock(fwd_tree->tree_mutex);
@@ -529,6 +624,11 @@ static void _start_msg_tree_internal(hostlist_t hl, hostlist_t* sp_hl,
 		(*fwd_tree->p_thr_count)++;
 		slurm_mutex_unlock(fwd_tree->tree_mutex);
 
+		/* TODO: detect if we can use UCX. If so - create
+		 * just one thread that will schedule sends and will
+		 * poll for the responses, fetch and collect them
+		 */
+
 		while (pthread_create(&thread_agent, &attr_agent,
 				      _fwd_tree_thread, (void *)fwd_tree)) {
 			error("pthread_create error %m");
@@ -539,6 +639,177 @@ static void _start_msg_tree_internal(hostlist_t hl, hostlist_t* sp_hl,
 		slurm_attr_destroy(&attr_agent);
 
 	}
+}
+
+struct _ucx_data {
+	hostlist_t hl;
+	hostlist_t* sp_hl;
+	fwd_tree_t *fwd_tree;
+	int hl_count;
+};
+
+enum ucx_rcv_status_t {
+	_SLURM_UCX_NONE = 0,
+	_SLURM_UCX_INIT,
+	_SLURM_UCX_DATA,
+};
+
+struct _ucx_recv_data {
+	volatile enum ucx_rcv_status_t stat;
+	List ret_list;
+	pthread_mutex_t lock;
+};
+
+static void
+_ucx_recv_cb(int fd, void *buf, size_t size, void *obj)
+{
+	struct _ucx_recv_data *rdata = (struct _ucx_recv_data *)obj;
+	xassert( _SLURM_UCX_INIT = rdata->stat );
+	slurm_mutex_lock(&rdata->lock);
+	rdata->ret_list = slurm_receive_msgs_ucx(buf, size);
+	rdata->stat = _SLURM_UCX_DATA;
+	slurm_mutex_unlock(&rdata->lock);
+}
+
+void *_fwd_tree_thread_ucx(void *arg)
+{
+	struct _ucx_data *udata = (_ucx_data *)arg;
+	fwd_tree_t *fwd_tree = udata->fwd_tree;
+	char *buf = NULL;
+	int hl_count = udata->hl_count;
+	if( 0 == hl_count ){
+		/* we will use udata->hl */
+		hl_count = 1;
+	}
+	slurm_msg_t send_array[hl_count];
+	struct _ucx_recv_data ret[hl_count];
+
+	for (j = 0; j < hl_count; j++) {
+		slurm_msg_t *send_msg = send_array + j;
+		hostlist_t hl;
+		char *name;
+
+		slurm_msg_t_init(send_msg);
+		send_msg->msg_type = fwd_tree->orig_msg->msg_type;
+		send_msg->data = fwd_tree->orig_msg->data;
+		send_msg->protocol_version = fwd_tree->orig_msg->protocol_version;
+
+		if (udata->sp_hl) {
+			hl = udata->sp_hl[j];
+			udata->sp_hl[j] = NULL;
+		} else if (udata->hl) {
+			name = hostlist_shift(udata->hl);
+			hl = hostlist_create(name);
+			free(name);
+		}
+		name = hostlist_shift(hl);
+
+		if ((send_msg->forward.cnt = hostlist_count(hl))){
+			buf = hostlist_ranged_string_xmalloc(hl);
+			send_msg->forward.nodelist = buf;
+			hostlist_destroy(hl);
+		} else {
+			send_msg->forward.nodelist = NULL;
+		}
+
+		memset(&ret[j], 0, sizeof(ret[j]));
+		ret[j].stat = _SLURM_UCX_INIT;
+		slurm_mutex_init(&ret[j].lock);
+		send_msg->conn_fd = slurm_ucx_open_conn(name, ucx_recv_cb, &ret[j]);
+		slurm_send_node_msg_ucx(send_msg);
+	}
+
+	while( !ready ){
+		int ready = 1;
+		for(j=0; j < hl_count; j++){
+			if( _SLURM_UCX_DATA != ret[j].stat ){
+				ready = 0;
+				break;
+			}
+		}
+		slurm_ucx_progress();
+	}
+
+	/* Collect the information and notify waiting thread */
+	xassert(ret_cnt == send_msg.forward.cnt);
+	slurm_mutex_lock(fwd_tree->tree_mutex);
+	for(j=0; j < hl_count; j++){
+		slurm_mutex_lock(&ret[j].lock);
+		xassert( _SLURM_UCX_DATA == ret[j].stat );
+		list_transfer(fwd_tree->ret_list, ret[j].ret_list);
+		FREE_NULL_LIST(ret[j].ret_list);
+		slurm_mutex_unlock(&ret[j].lock);
+		hostlist_destroy(send_array[j].forward.nodelist);
+		slurm_ucx_close_conn(send_msg->conn_fd);
+	}
+	slurm_cond_signal(fwd_tree->notify);
+	slurm_mutex_unlock(fwd_tree->tree_mutex);
+
+	_destroy_tree_fwd(fwd_tree);
+	xfree(udata);
+
+	return NULL;
+}
+
+static void _start_msg_tree_internal_ucx(hostlist_t hl, hostlist_t* sp_hl,
+				     fwd_tree_t *fwd_tree_in,
+				     int hl_count)
+{
+	int j;
+	fwd_tree_t *fwd_tree;
+
+	xassert((hl || sp_hl) && !(hl && sp_hl));
+	xassert(fwd_tree_in);
+	xassert(fwd_tree_in->p_thr_count);
+	xassert(fwd_tree_in->tree_mutex);
+	xassert(fwd_tree_in->notify);
+	xassert(fwd_tree_in->ret_list);
+
+	if (hl)
+		xassert(hl_count == hostlist_count(hl));
+
+	if (fwd_tree_in->timeout <= 0)
+		/* convert secs to msec */
+		fwd_tree_in->timeout  = slurm_get_msg_timeout() * 1000;
+
+	struct _ucx_data *udata = xmalloc(*udata);
+	pthread_attr_t attr_agent;
+	pthread_t thread_agent;
+	int retries = 0;
+
+	slurm_attr_init(&attr_agent);
+	if (pthread_attr_setdetachstate
+	    (&attr_agent, PTHREAD_CREATE_DETACHED))
+		error("pthread_attr_setdetachstate error %m");
+
+	fwd_tree = xmalloc(sizeof(fwd_tree_t));
+	memcpy(fwd_tree, fwd_tree_in, sizeof(fwd_tree_t));
+
+	if (sp_hl) {
+		fwd_tree->tree_hl = sp_hl[j];
+		sp_hl[j] = NULL;
+	} else if (hl) {
+		char *name = hostlist_shift(hl);
+		fwd_tree->tree_hl = hostlist_create(name);
+		free(name);
+	}
+
+	/*
+	 * We have only one thread here
+	 */
+	slurm_mutex_lock(fwd_tree->tree_mutex);
+	(*fwd_tree->p_thr_count) = 1;
+	slurm_mutex_unlock(fwd_tree->tree_mutex);
+
+	while (pthread_create(&thread_agent, &attr_agent,
+			      _fwd_tree_thread_ucx, (void *)udata)) {
+		error("pthread_create error %m");
+		if (++retries > MAX_RETRIES)
+			fatal("Can't create pthread");
+		usleep(100000);	/* sleep and try again */
+	}
+	slurm_attr_destroy(&attr_agent);
+
 }
 
 static void _forward_msg_internal(hostlist_t hl, hostlist_t* sp_hl,
@@ -604,6 +875,47 @@ static void _forward_msg_internal(hostlist_t hl, hostlist_t* sp_hl,
 	}
 }
 
+static void _forward_msg_internal_ucx(hostlist_t hl, hostlist_t* sp_hl,
+				  forward_struct_t *fwd_struct,
+				  header_t *header, int hl_count)
+{
+	int j;
+	char *buf = NULL, *tmp_char = NULL;
+	if( 0 == hl_count ){
+		hl_count = 1;
+	}
+
+
+	for (j = 0; j < hl_count; j++) {
+		forward_msg_t *fwd_msg = xmalloc(sizeof(*fwd_msg));
+
+		fwd_msg->fwd_struct = fwd_struct;
+
+		fwd_msg->timeout = timeout;
+
+		fwd_msg->header.version = header->version;
+		fwd_msg->header.flags = header->flags;
+		fwd_msg->header.msg_type = header->msg_type;
+		fwd_msg->header.body_length = header->body_length;
+		fwd_msg->header.ret_list = NULL;
+		fwd_msg->header.ret_cnt = 0;
+
+		if (sp_hl) {
+			buf = hostlist_ranged_string_xmalloc(sp_hl[j]);
+			hostlist_destroy(sp_hl[j]);
+		} else {
+			tmp_char = hostlist_shift(hl);
+			buf = xstrdup(tmp_char);
+			free(tmp_char);
+		}
+
+		forward_init(&fwd_msg->header.forward, NULL);
+		fwd_msg->header.forward.nodelist = buf;
+		_forward_thread_ucx(fwd_msg);
+	}
+}
+
+
 /*
  * forward_init    - initilize forward structure
  * IN: forward     - forward_t *   - struct to store forward info
@@ -633,7 +945,7 @@ extern void forward_init(forward_t *forward, forward_t *from)
  *                                             needing to be forwarded.
  * RET: SLURM_SUCCESS - int
  */
-extern int forward_msg(forward_struct_t *forward_struct, header_t *header)
+extern int forward_msg(forward_struct_t *forward_struct, header_t *header, bool is_ucx)
 {
 	hostlist_t hl = NULL;
 	hostlist_t* sp_hl;
@@ -653,13 +965,19 @@ extern int forward_msg(forward_struct_t *forward_struct, header_t *header)
 		return SLURM_ERROR;
 	}
 
-	_forward_msg_internal(NULL, sp_hl, forward_struct, header,
-			      forward_struct->timeout, hl_count);
+	if( !header->is_ucx ) {
+		_forward_msg_internal(NULL, sp_hl, forward_struct, header,
+				      forward_struct->timeout, hl_count);
+	} else {
+		_forward_msg_internal_ucx(NULL, sp_hl, forward_struct, header, hl_count);
+	}
 
 	xfree(sp_hl);
 	hostlist_destroy(hl);
 	return SLURM_SUCCESS;
 }
+
+
 
 /*
  * start_msg_tree  - logic to begin the forward tree and
@@ -709,7 +1027,16 @@ extern List start_msg_tree(hostlist_t hl, slurm_msg_t *msg, int timeout)
 	fwd_tree.p_thr_count = &thr_count;
 	fwd_tree.tree_mutex = &tree_mutex;
 
-	_start_msg_tree_internal(NULL, sp_hl, &fwd_tree, hl_count);
+	/* Check that UCX is available */
+	while ((name = hostlist_shift(fwd_tree->tree_hl))) {
+		if( slurm_ucx_reachable(name) ){
+			/* UCX path */
+			_start_msg_tree_internal_ucx(NULL, sp_hl, &fwd_tree, hl_count);
+		} else {
+			_start_msg_tree_internal(NULL, sp_hl, &fwd_tree, hl_count);
+		}
+		break;
+	}
 
 	xfree(sp_hl);
 
@@ -778,6 +1105,9 @@ extern void forward_wait(slurm_msg_t * msg)
 				count = list_count(msg->ret_list);
 			}
 			debug2("Got back %d", count);
+			if( msg->is_ucx ){
+				slurm_ucx_progress();
+			}
 		}
 		debug2("Got them all");
 		slurm_mutex_unlock(&msg->forward_struct->forward_mutex);

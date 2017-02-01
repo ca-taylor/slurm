@@ -412,6 +412,10 @@ typedef struct slurm_protocol_header {
 	forward_t forward;
 	slurm_addr_t orig_addr;
 	List ret_list;
+
+	/* UCX portion */
+	bool is_ucx;
+	slurm_ucx_addr_t ucx_addr;
 } header_t;
 
 typedef struct forward_struct {
@@ -428,6 +432,7 @@ typedef struct forward_message {
 	forward_struct_t *fwd_struct;
 	header_t header;
 	int timeout;
+	Buf buf;
 } forward_msg_t;
 
 typedef struct slurm_protocol_config {
@@ -462,6 +467,9 @@ typedef struct slurm_msg {
 	forward_struct_t *forward_struct;
 	slurm_addr_t orig_addr;
 	List ret_list;
+
+	/* UCX portion */
+	bool is_ucx;
 } slurm_msg_t;
 
 typedef struct ret_data_info {

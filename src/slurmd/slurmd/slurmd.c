@@ -109,6 +109,8 @@
 #include "src/slurmd/slurmd/slurmd_plugstack.h"
 #include "src/slurmd/common/xcpuinfo.h"
 
+#include <poll.h>
+
 #define GETOPT_ARGS	"bcCd:Df:hL:Mn:N:vV"
 
 #ifndef MAXHOSTNAMELEN
@@ -456,24 +458,45 @@ _msg_engine(void)
 	msg_pthread = pthread_self();
 	slurmd_req(NULL);	/* initialize timer */
 	while (!_shutdown) {
+		int rc;
+		struct pollfd pfd[] = {
+			{ conf->lfd, POLLIN, 0 },
+			{ conf->ucx_fd, POLLIN, 0 },
+		};
 		if (_reconfig) {
 			verbose("got reconfigure request");
 			_wait_for_all_threads(5); /* Wait for RPCs to finish */
 			_reconfigure();
 		}
 
-		cli = xmalloc (sizeof (slurm_addr_t));
-		if ((sock = slurm_accept_msg_conn(conf->lfd, cli)) >= 0) {
-			_handle_connection(sock, cli);
-			continue;
+		slurm_ucx_poll_prep();
+
+		rc = poll(&pfd, 1, -1);
+		if( rc < 0 ){
+			if( errno == EINTR ){
+				continue;
+			} else {
+				basta();
+			}
 		}
-		/*
-		 *  Otherwise, accept() failed.
-		 */
-		xfree (cli);
-		if (errno == EINTR)
-			continue;
-		error("accept: %m");
+
+		if( pfd[0].revents & POLLIN ) {
+			cli = xmalloc (sizeof (slurm_addr_t));
+			if ((sock = slurm_accept_msg_conn(conf->lfd, cli)) >= 0) {
+				_handle_connection(sock, cli);
+				continue;
+			}
+			/*
+			 *  Otherwise, accept() failed.
+			 */
+			xfree (cli);
+			if (errno == EINTR)
+				continue;
+			error("accept: %m");
+		}
+		if( pfd[1].revents & POLLIN ){
+			slurm_ucx_progress();
+		}
 	}
 	verbose("got shutdown request");
 	slurm_shutdown_msg_engine(conf->lfd);
@@ -575,6 +598,40 @@ static void _handle_connection(int fd, slurm_addr_t *cli)
 	}
 
 	return;
+}
+
+static void *
+_service_connection(void *arg)
+{
+	conn_t *con = (conn_t *) arg;
+	slurm_msg_t *msg = xmalloc(sizeof(slurm_msg_t));
+	int rc = SLURM_SUCCESS;
+
+	debug3("in the service_connection");
+	slurm_msg_t_init(msg);
+	if ((rc = slurm_receive_msg_and_forward(con->fd, con->cli_addr, msg, 0))
+	   != SLURM_SUCCESS) {
+		error("service_connection: slurm_receive_msg: %m");
+		/* if this fails we need to make sure the nodes we forward
+		   to are taken care of and sent back. This way the control
+		   also has a better idea what happened to us */
+		slurm_send_rc_msg(msg, rc);
+		goto cleanup;
+	}
+	debug2("got this type of message %d", msg->msg_type);
+
+	if (msg->msg_type != MESSAGE_COMPOSITE)
+		slurmd_req(msg);
+
+cleanup:
+	if ((msg->conn_fd >= 0) && slurm_close(msg->conn_fd) < 0)
+		error ("close(%d): %m", con->fd);
+
+	xfree(con->cli_addr);
+	xfree(con);
+	slurm_free_msg(msg);
+	_decrement_thd_count();
+	return NULL;
 }
 
 static void *
@@ -1429,6 +1486,44 @@ _create_msg_socket(void)
 	debug3("successfully opened slurm listen port %s:%d",
 	       node_addr, conf->port);
 
+	return;
+}
+
+static void _ucx_srv_cb(int fd, void *buf, size_t size, void *obj)
+{
+	slurm_msg_t *msg = xmalloc(sizeof(slurm_msg_t));
+	int rc = SLURM_SUCCESS;
+
+	slurm_msg_t_init(msg);
+	if ((rc = slurm_receive_msg_and_forward(con->fd, con->cli_addr, msg, 0))
+	   != SLURM_SUCCESS) {
+		error("service_connection: slurm_receive_msg: %m");
+		/* if this fails we need to make sure the nodes we forward
+		   to are taken care of and sent back. This way the control
+		   also has a better idea what happened to us */
+		slurm_send_rc_msg(msg, rc);
+		goto cleanup;
+	}
+	debug2("got this type of message %d", msg->msg_type);
+
+	if (msg->msg_type != MESSAGE_COMPOSITE)
+		slurmd_req(msg);
+
+cleanup:
+	if ((msg->conn_fd >= 0) && slurm_close(msg->conn_fd) < 0)
+		error ("close(%d): %m", con->fd);
+
+	xfree(con->cli_addr);
+	xfree(con);
+	slurm_free_msg(msg);
+	_decrement_thd_count();
+	return NULL;
+}
+
+static void
+_create_ucx_fd(void)
+{
+	conf->ucx_fd = slurm_ucx_server_init("/tmp/slurm_address.out");
 	return;
 }
 

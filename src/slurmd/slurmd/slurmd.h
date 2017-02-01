@@ -125,6 +125,7 @@ typedef struct slurmd_config {
 	char         *task_epilog;	/* per-task epilog script          */
 	int           port;		/* local slurmd port               */
 	int           lfd;		/* slurmd listen file descriptor   */
+	int           ucx_fd;
 	pid_t         pid;		/* server pid                      */
 	log_options_t log_opts;         /* current logging options         */
 	uint16_t      log_fmt;          /* Log file timestamp format flag  */

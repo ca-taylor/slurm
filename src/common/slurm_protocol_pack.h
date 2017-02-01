@@ -66,7 +66,6 @@ extern void pack_header ( header_t  * header , Buf buffer );
  */
 extern int unpack_header ( header_t * header , Buf buffer );
 
-
 /**************************************************************************/
 /* generic case statement Pack / Unpack methods for slurm protocol bodies */
 /**************************************************************************/

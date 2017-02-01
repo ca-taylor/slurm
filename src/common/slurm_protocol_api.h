@@ -1023,6 +1023,8 @@ int slurm_receive_msg(int fd, slurm_msg_t *msg, int timeout);
  */
 List slurm_receive_msgs(int fd, int steps, int timeout);
 
+List slurm_receive_msgs_ucx(char *buf, int buflen);
+
 /*
  *  Receive a slurm message on the open slurm descriptor "fd" waiting
  *    at most "timeout" seconds for the message data. This will also
@@ -1054,6 +1056,8 @@ int slurm_receive_msg_and_forward(int fd, slurm_addr_t *orig_addr,
  * RET int		- size of msg sent in bytes
  */
 int slurm_send_node_msg(int open_fd, slurm_msg_t *msg);
+
+int slurm_send_node_msg_ucx(int fd, slurm_msg_t * msg);
 
 /**********************************************************************\
  * msg connection establishment functions used by msg clients

@@ -86,7 +86,6 @@ if (forward_msg(forward_struct, &header) == SLURM_ERROR) {
 extern int forward_msg(forward_struct_t *forward_struct,
 		       header_t *header);
 
-
 /*
  * start_msg_tree  - logic to begin the forward tree and
  *                   accumulate the return codes from processes getting the

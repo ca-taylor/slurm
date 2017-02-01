@@ -890,11 +890,31 @@ extern uint32_t task_dist_old2new(uint16_t old_task_dist)
 void
 pack_header(header_t * header, Buf buffer)
 {
+	uint8_t u8;
 	/* The DBD always unpacks the message type first.  DO NOT UNPACK THIS ON
 	 * THE UNPACK SIDE.
 	 */
+
 	if (header->flags & SLURMDBD_CONNECTION)
 		pack16(header->msg_type, buffer);
+
+	u8 = (uint8_t)header->is_ucx;
+	pack8(u8, buffer);
+	if( header->is_ucx ){
+		u8 = (uint8_t)header->ucx_addr.type;
+		pack8(u8, buffer);
+		switch(header->ucx_addr.type){
+		case SLURM_UCX_SRV:
+			packmem(header->ucx_addr.addr.hname, strlen(header->ucx_origin.name) + 1, buffer);
+			break;
+		case SLURM_UCX_CLI:
+			packmem(header->ucx_origin.addr.address.addr, header->ucx_origin.addr.address.len, buffer);
+			break;
+		default:
+			/* shouldn't happen */
+			xassert(0);
+		}
+	}
 
 	pack16((uint16_t)header->version, buffer);
 
@@ -947,10 +967,35 @@ int
 unpack_header(header_t * header, Buf buffer)
 {
 	uint32_t uint32_tmp = 0;
+	uint8_t u8;
 
 	memset(header, 0, sizeof(header_t));
 	forward_init(&header->forward, NULL);
 	header->ret_list = NULL;
+
+	unpack8(&u8, buffer);
+	header->is_ucx = (bool)u8;
+	if( header->is_ucx ){
+		char *addr;
+		int len;
+		unpack8(&u8, buffer);
+		header->ucx_addr.type = (slurm_ucx_type_t)u8;
+		unpackmem_malloc(&addr,&len, buffer);
+		switch(header->ucx_type){
+		case SLURM_UCX_SRV:
+			header->ucx_addr.addr.hname = addr;
+			break;
+		case SLURM_UCX_CLI:
+			header->ucx_origin.addr.address.addr = addr;
+			header->ucx_origin.addr.address.len = len;
+			break;
+		default:
+			/* shouldn't happen */
+			xassert(0);
+		}
+	}
+
+
 	safe_unpack16(&header->version, buffer);
 
 	if (header->version >= SLURM_16_05_PROTOCOL_VERSION) {
@@ -1012,7 +1057,6 @@ unpack_error:
 	FREE_NULL_LIST(header->ret_list);
 	return SLURM_ERROR;
 }
-
 
 /* pack_msg
  * packs a generic slurm protocol message body
