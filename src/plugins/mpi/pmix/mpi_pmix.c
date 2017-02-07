@@ -105,7 +105,7 @@ extern int init(void)
 int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job, char ***env)
 {
 	int ret;
-	pmixp_debug_hang(0);
+    pmixp_debug_hang(0);
 	PMIXP_DEBUG("start");
 
 	if (job->batch)
