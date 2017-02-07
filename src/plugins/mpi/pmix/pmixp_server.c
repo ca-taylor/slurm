@@ -875,7 +875,6 @@ static void _slurm_new_msg(pmixp_conn_t *conn,
 		pmixp_dconn_t *dconn;
 		dconn = pmixp_dconn_connect(hdr->shdr.base_hdr.nodeid,
 					    hdr->shdr.rport);
-		xassert (NULL != dconn);
 		if( NULL != dconn ){
 			pmixp_conn_t *conn;
 			conn = pmixp_conn_new_persist(PMIXP_PROTO_DIRECT,
