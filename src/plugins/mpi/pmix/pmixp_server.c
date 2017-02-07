@@ -782,7 +782,7 @@ static void
 _direct_conn_establish(pmixp_conn_t *conn, void *_hdr, void *msg)
 {
 	pmixp_io_engine_t *eng = pmixp_conn_get_eng(conn);
-	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t *)hdr;
+	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t *)_hdr;
 	pmixp_dconn_t *dconn = NULL;
 	pmixp_conn_t *new_conn;
 	eio_obj_t *obj;
