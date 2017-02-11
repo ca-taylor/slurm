@@ -281,7 +281,7 @@ static void *_pmix_timer_thread(void *unused)
 		 * activity on the stop fd.
 		 * So normally we need to exit by the timeout.
 		 * This forses periodic timer events (once each second) */
-		int ret = poll(pfds, 1, 1000);
+		int ret = poll(pfds, 1, 10000);
 		char c = 1;
 		if (0 < ret) {
 			/* there was an event on stop_fd, exit */
@@ -322,29 +322,35 @@ int pmixp_agent_start(void)
 		sched_yield();
 	}
 
+    pmixp_debug_hang(0);
 
 	if( pmixp_info_nodeid() == 0 ){
 	int i;
-	for( i = 1; i <= 16*1024*1024; i *= 2) {
-		int count = pmixp_server_ppcount() + 100;
+	for( i = 1; i <= 64*1024; i *= 2) {
+		int count, iters = 100;
+		if( i > 4096 ) {
+		    iters = 20;
+        }
+        count = pmixp_server_ppcount() + iters;
 		struct timeval tv1, tv2;
 		double time;
 
 		gettimeofday(&tv1, NULL);
 		while( pmixp_server_ppcount() < count ){
 			int cur_count = pmixp_server_ppcount();
-			pmixp_server_pingpong(pmixp_info_job_host(1), 
-						pmixp_info_srv_addr(), i);
+			pmixp_server_pingpong(pmixp_info_job_host(1), i);
 			while( cur_count == pmixp_server_ppcount() ){
-				usleep(10);
+				usleep(1);
 			}
 		}
 		gettimeofday(&tv2, NULL);
 		time = tv2.tv_sec + 1E-6 * tv2.tv_usec - 
 				(tv1.tv_sec + 1E-6 * tv1.tv_usec);
-		PMIXP_ERROR("Node #0: Pingpong time: %d - %lf\n", i, time / 100 );
+		PMIXP_ERROR("Node #0: Pingpong time: %d - %lf\n", i, time / iters );
 	}
 	}
+	
+	pmixp_debug_hang( 0 && (1 == pmixp_info_nodeid()) );
 
 	PMIXP_DEBUG("agent thread started: tid = %lu",
 			(unsigned long) _agent_tid);

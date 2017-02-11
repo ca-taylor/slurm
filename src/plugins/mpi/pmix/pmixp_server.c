@@ -55,6 +55,27 @@
  * --------------------- I/O protocol -------------------
  */
 
+/*
+#include <time.h>
+#define GET_TS ({ \
+    struct timespec ts;                     \
+    double ret;                             \
+    clock_gettime(CLOCK_MONOTONIC, &ts);    \
+    ret = ts.tv_sec + 1E-9 * ts.tv_nsec;    \
+    ret;                                    \
+})
+*/
+double send_start;
+
+#define GET_TS ({ \
+    struct timeval tv;                     \
+    double ret;                             \
+    gettimeofday(&tv, NULL);    \
+    ret = tv.tv_sec + 1E-9 * tv.tv_usec;    \
+    ret;                                    \
+})
+
+
 #define PMIXP_SERVER_MSG_MAGIC 0xCAFECA11
 typedef struct {
 	uint32_t magic;
@@ -402,6 +423,9 @@ static struct io_operations direct_peer_ops = {
 };
 
 
+double serv_read_delay = 0, serv_write_delay = 0;
+
+
 static bool _serv_readable(eio_obj_t *obj)
 {
 	/* sanity check */
@@ -413,15 +437,26 @@ static bool _serv_readable(eio_obj_t *obj)
 		}
 		return false;
 	}
+
+    if( 0 != serv_read_delay ){
+        PMIXP_ERROR("Diff: %lf", GET_TS - serv_read_delay);
+    }
+    serv_read_delay = GET_TS;
+
+
 	return true;
 }
 
 static int _serv_read(eio_obj_t *obj, List objs)
 {
+    double start = GET_TS;
+    static int count = 0;
 	/* sanity check */
 	xassert(NULL != obj );
 	/* We should delete connection right when it  was closed or failed */
 	xassert(false == obj->shutdown);
+
+//double start = GET_TS;
 
 	PMIXP_DEBUG("fd = %d", obj->fd);
 	pmixp_conn_t *conn = (pmixp_conn_t *)obj->arg;
@@ -444,11 +479,19 @@ static int _serv_read(eio_obj_t *obj, List objs)
 			proceed = 0;
 		}
 	}
+
+//PMIXP_ERROR("_serv_read(): %lf", GET_TS - start);
+    if( 0 != serv_read_delay && 0.01 < (GET_TS - serv_read_delay)){
+        PMIXP_ERROR("count = %d ts = %lf Diff: %lf / %lf", count, GET_TS, GET_TS - serv_read_delay,
+                        GET_TS - start);
+    }
+    count++;
 	return 0;
 }
 
 static bool _serv_writable(eio_obj_t *obj)
 {
+    bool ret;
 	/* sanity check */
 	xassert(NULL != obj );
 	/* We should delete connection right when it  was closed or failed */
@@ -457,7 +500,8 @@ static bool _serv_writable(eio_obj_t *obj)
 			close(obj->fd);
 			obj->fd = -1;
 		}
-		return false;
+		ret = false;
+		goto exit;
 	}
 
 	/* get I/O engine */
@@ -469,14 +513,25 @@ static bool _serv_writable(eio_obj_t *obj)
 
 	/* check if we have something to send */
 	if( pmixp_io_send_pending(eng) ){
-		return true;
+		ret = true;
+		goto exit;
 	}
-	return false;
+    ret = false;
+
+
+exit:
+    if( 0 != serv_write_delay ){
+        PMIXP_ERROR("Diff: [%d] %lf", (int)ret, GET_TS - serv_write_delay);
+    }
+    serv_write_delay = GET_TS;
+    return ret;
+
 }
 
 static int _serv_write(eio_obj_t *obj, List objs)
 {
 	/* sanity check */
+	static int count = 0;
 	xassert(NULL != obj );
 	/* We should delete connection right when it  was closed or failed */
 	xassert(false == obj->shutdown);
@@ -498,46 +553,54 @@ static int _serv_write(eio_obj_t *obj, List objs)
 		eio_remove_obj(obj, objs);
 		pmixp_conn_return(conn);
 	}
+
+    if( 0 != serv_write_delay && (GET_TS - serv_write_delay)> 0.01){
+        PMIXP_ERROR("[%d] Diff: %lf", count, GET_TS - serv_write_delay);
+    }
+count++;
 	return 0;
 }
 
-static int pingpong_count = 0;
+static volatile int pingpong_count = 0;
 
 int pmixp_server_ppcount()
 {
 	return pingpong_count;
 }
 
-int pmixp_server_pingpong(char *hostlist,  const char *addr, int size)
+struct pp_cbdata
 {
-	send_header_t hdr;
-	char nhdr[sizeof(send_header_t)];
-	size_t hsize;
-	Buf buf = pmixp_server_new_buf();
-	char *data = get_buf_data(buf);
+    Buf buf;
+    double start;
+    int size;
+} cbdata;
+
+void pingpong_complete(int rc, pmixp_srv_cb_context_t ctx, void *data)
+{
+    struct pp_cbdata *d = (struct pp_cbdata*)data;
+    free_buf(d->buf);
+//    PMIXP_ERROR("Send complete: %d %lf", d->size, GET_TS - d->start);
+}
+
+int pmixp_server_pingpong(const char *host, int size)
+{
+	Buf buf = pmixp_server_buf_new();
 	int rc;
+	pmixp_ep_t ep;
 
-	hdr.magic = PMIX_SERVER_MSG_MAGIC;
-	hdr.type = PMIXP_MSG_PINGPONG;
-	hdr.msgsize = size;
-	hdr.seq = pingpong_count;
-
-	/* Store global nodeid that is
-	 *  independent from exact collective */
-	hdr.nodeid = pmixp_info_nodeid_job();
-	hsize = _send_pack_hdr(&hdr, nhdr);
-	memcpy(data, nhdr, hsize);
-
-	grow_buf(buf, size);
-	set_buf_offset(buf,get_buf_offset(buf) + size);
-
-	data = get_buf_data(buf);
-	rc = pmixp_stepd_send(hostlist, addr, data, get_buf_offset(buf), 4, 14, 1);
+	grow_buf(buf, size + sizeof(double));
+	ep.type = PMIXP_EP_HNAME;
+	ep.ep.hostname = (char*)host;
+	cbdata.buf = buf;
+	cbdata.start = GET_TS;
+	cbdata.size = size;
+	packdouble(cbdata.start, buf);
+	set_buf_offset(buf,get_buf_offset(buf) + size + sizeof(double));
+    rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
+			    pingpong_count, buf, pingpong_complete, (void*)&cbdata);
 	if (SLURM_SUCCESS != rc) {
-		PMIXP_ERROR("Was unable to wait for the parent %s to become alive on addr %s",
-			    hostlist, addr);
+		PMIXP_ERROR("Was unable to wait for the parent %s to become alive", host);
 	}
-
 	return rc;
 }
 
@@ -618,9 +681,11 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, void *payload)
 		/* this is just health ping.
 		 * TODO: can we do something more sophisticated?
 		 */
+        double start;
+        unpackdouble(&start, buf);
+        PMIXP_ERROR("Delivery time: %lf", GET_TS - start);
 		if( pmixp_info_nodeid() == 1 ){
-			pmixp_server_pingpong(pmixp_info_job_host(0), 
-						pmixp_info_srv_addr(), hdr->msgsize);
+			pmixp_server_pingpong(pmixp_info_job_host(0), hdr->msgsize);
 		}
 		pingpong_count++;
 		break;
@@ -901,6 +966,8 @@ _direct_send(pmixp_dconn_t *dconn, pmixp_ep_t *ep,
 	msg->hdr = bhdr;
 	msg->payload = _buf_finalize(buf, NULL, 0, &dsize);
 	msg->buf_ptr = buf;
+	
+	
 	rc = pmixp_dconn_send(dconn, msg);
 	if (SLURM_SUCCESS != rc) {
 		msg->sent_cb(rc, PMIXP_SRV_CB_INLINE, msg->cbdata);

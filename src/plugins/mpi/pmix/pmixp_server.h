@@ -93,7 +93,7 @@ pmixp_server_buf_reserve(Buf buf, uint32_t size)
 		grow_buf(buf, to_reserve);
 	}
 }
-int pmixp_server_pingpong(char *hostlist,  const char *addr, int size);
+int pmixp_server_pingpong(const char *hostlist, int size);
 int pmixp_server_ppcount();
 
 
