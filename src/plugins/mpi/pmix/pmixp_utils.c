@@ -46,6 +46,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
 #include "pmixp_common.h"
 #include "pmixp_utils.h"
@@ -112,11 +114,11 @@ size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown,
 	ssize_t ret, offs = 0;
 
 	*shutdown = 0;
-
+/*
 	if (!blocking && !pmixp_fd_read_ready(sd, shutdown)) {
 		return 0;
 	}
-
+*/
 	if (blocking) {
 		fd_set_blocking(sd);
 	}
@@ -136,6 +138,7 @@ size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown,
 			continue;
 		case EWOULDBLOCK:
 			/* we can get here in non-blocking mode only */
+			//PMIXP_ERROR("%d: EWOULDBLOCK %zd", sd, offs);
 			return offs;
 		default:
 			PMIXP_ERROR_STD("blocking=%d", blocking);
@@ -148,6 +151,16 @@ size_t pmixp_read_buf(int sd, void *buf, size_t count, int *shutdown,
 		fd_set_nonblocking(sd);
 	}
 	return offs;
+}
+
+int pmixp_fd_set_nodelay(int fd)
+{
+    int val = 1;
+    if ( 0 > setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&val, sizeof(val)) ) {
+        PMIXP_ERROR_STD("Cannot set TCP_NODELAY on fd = %d\n", fd);
+        return SLURM_ERROR;
+    }
+    return SLURM_SUCCESS;
 }
 
 size_t pmixp_write_buf(int sd, void *buf, size_t count, int *shutdown,

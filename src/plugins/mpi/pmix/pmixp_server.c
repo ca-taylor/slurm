@@ -437,19 +437,18 @@ static bool _serv_readable(eio_obj_t *obj)
 		}
 		return false;
 	}
-
+/*
     if( 0 != serv_read_delay ){
         PMIXP_ERROR("Diff: %lf", GET_TS - serv_read_delay);
     }
     serv_read_delay = GET_TS;
-
+*/
 
 	return true;
 }
 
 static int _serv_read(eio_obj_t *obj, List objs)
 {
-    double start = GET_TS;
     static int count = 0;
 	/* sanity check */
 	xassert(NULL != obj );
@@ -481,10 +480,12 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	}
 
 //PMIXP_ERROR("_serv_read(): %lf", GET_TS - start);
+/*
     if( 0 != serv_read_delay && 0.01 < (GET_TS - serv_read_delay)){
         PMIXP_ERROR("count = %d ts = %lf Diff: %lf / %lf", count, GET_TS, GET_TS - serv_read_delay,
                         GET_TS - start);
     }
+*/
     count++;
 	return 0;
 }
@@ -520,10 +521,12 @@ static bool _serv_writable(eio_obj_t *obj)
 
 
 exit:
+/*
     if( 0 != serv_write_delay ){
         PMIXP_ERROR("Diff: [%d] %lf", (int)ret, GET_TS - serv_write_delay);
     }
     serv_write_delay = GET_TS;
+*/
     return ret;
 
 }
@@ -553,10 +556,11 @@ static int _serv_write(eio_obj_t *obj, List objs)
 		eio_remove_obj(obj, objs);
 		pmixp_conn_return(conn);
 	}
-
+/*
     if( 0 != serv_write_delay && (GET_TS - serv_write_delay)> 0.01){
         PMIXP_ERROR("[%d] Diff: %lf", count, GET_TS - serv_write_delay);
     }
+*/
 count++;
 	return 0;
 }
@@ -588,14 +592,14 @@ int pmixp_server_pingpong(const char *host, int size)
 	int rc;
 	pmixp_ep_t ep;
 
-	grow_buf(buf, size + sizeof(double));
+	grow_buf(buf, size);
 	ep.type = PMIXP_EP_HNAME;
 	ep.ep.hostname = (char*)host;
 	cbdata.buf = buf;
 	cbdata.start = GET_TS;
 	cbdata.size = size;
-	packdouble(cbdata.start, buf);
-	set_buf_offset(buf,get_buf_offset(buf) + size + sizeof(double));
+//	packdouble(cbdata.start, buf);
+	set_buf_offset(buf,get_buf_offset(buf) + size);
     rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
 			    pingpong_count, buf, pingpong_complete, (void*)&cbdata);
 	if (SLURM_SUCCESS != rc) {
@@ -681,9 +685,11 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, void *payload)
 		/* this is just health ping.
 		 * TODO: can we do something more sophisticated?
 		 */
+/*
         double start;
         unpackdouble(&start, buf);
         PMIXP_ERROR("Delivery time: %lf", GET_TS - start);
+*/
 		if( pmixp_info_nodeid() == 1 ){
 			pmixp_server_pingpong(pmixp_info_job_host(0), hdr->msgsize);
 		}
@@ -932,6 +938,7 @@ void pmixp_server_direct_conn(int fd)
 	/* Set nonblocking */
 	fd_set_nonblocking(fd);
 	fd_set_close_on_exec(fd);
+	pmixp_fd_set_nodelay(fd);
 	conn = pmixp_conn_new_temp(PMIXP_PROTO_DIRECT, fd, _direct_conn_establish);
 
 	/* try to process right here */
