@@ -329,8 +329,6 @@ int pmixp_agent_start(void)
 	if( pmixp_info_nodeid() == 0 ){
 	int i;
 	
-    	pmixp_server_pp_wait_init();
-	
 //	for( i = 1; i <= 64*1024; i *= 2) {
 	for( i = 2; i < 3; i *= 2) {
 //		int count, iters = 100;
