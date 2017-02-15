@@ -110,4 +110,14 @@ static inline void _pmixp_debug_hang(int delay)
 #define pmixp_debug_hang(x) _pmixp_debug_hang(x)
 
 #endif
+
+#include <sys/time.h>
+#define GET_TS() ({ \
+    struct timeval tv;                     \
+    double ret;                             \
+    gettimeofday(&tv, NULL);    \
+    ret = tv.tv_sec + 1E-6 * tv.tv_usec;    \
+    ret;                                    \
+})
+
 #endif /* PMIXP_DEBUG_H */

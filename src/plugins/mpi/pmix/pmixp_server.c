@@ -67,14 +67,16 @@
 */
 double send_start;
 
-#define GET_TS ({ \
-    struct timeval tv;                     \
-    double ret;                             \
-    gettimeofday(&tv, NULL);    \
-    ret = tv.tv_sec + 1E-9 * tv.tv_usec;    \
-    ret;                                    \
-})
-
+struct my_timings {
+    double vals[1024];
+    int count;
+} serv_read = {{0}}, 
+  new_msg = {{0}}, 
+  process_req = {{0}}, 
+  PP_start = {{0}}, 
+  PP_send = {{0}},
+  PP_complete = {{0}},
+  PP_inc = {{0}};   
 
 #define PMIXP_SERVER_MSG_MAGIC 0xCAFECA11
 typedef struct {
@@ -455,7 +457,7 @@ static int _serv_read(eio_obj_t *obj, List objs)
 	/* We should delete connection right when it  was closed or failed */
 	xassert(false == obj->shutdown);
 
-//double start = GET_TS;
+    serv_read.vals[serv_read.count++] = GET_TS();
 
 	PMIXP_DEBUG("fd = %d", obj->fd);
 	pmixp_conn_t *conn = (pmixp_conn_t *)obj->arg;
@@ -583,11 +585,12 @@ void pingpong_complete(int rc, pmixp_srv_cb_context_t ctx, void *data)
 {
     struct pp_cbdata *d = (struct pp_cbdata*)data;
     free_buf(d->buf);
-//    PMIXP_ERROR("Send complete: %d %lf", d->size, GET_TS - d->start);
+    PP_complete.vals[PP_complete.count++] = GET_TS();
 }
 
 int pmixp_server_pingpong(const char *host, int size)
 {
+    PP_start.vals[PP_start.count++] = GET_TS();
 	Buf buf = pmixp_server_buf_new();
 	int rc;
 	pmixp_ep_t ep;
@@ -596,20 +599,68 @@ int pmixp_server_pingpong(const char *host, int size)
 	ep.type = PMIXP_EP_HNAME;
 	ep.ep.hostname = (char*)host;
 	cbdata.buf = buf;
-	cbdata.start = GET_TS;
+	cbdata.start = GET_TS();
 	cbdata.size = size;
 //	packdouble(cbdata.start, buf);
 	set_buf_offset(buf,get_buf_offset(buf) + size);
+
+    PP_send.vals[PP_send.count++] = GET_TS();
+
     rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
 			    pingpong_count, buf, pingpong_complete, (void*)&cbdata);
 	if (SLURM_SUCCESS != rc) {
 		PMIXP_ERROR("Was unable to wait for the parent %s to become alive", host);
 	}
+	
+	double norm = 1487117625;
+
+    if( (11 == pingpong_count) ){
+        int i = 1;
+        int flag = 1;
+        while(flag){
+            flag = 0;
+            if(i < serv_read.count ){
+                PMIXP_ERROR("_serv_read: %lf", serv_read.vals[i] - norm);
+                flag++;
+            }
+            if( (i-1) < new_msg.count ){
+                PMIXP_ERROR("_new_msg: %lf", new_msg.vals[i-1] - norm);
+                flag++;
+            }
+
+            if( i < process_req.count ){
+                PMIXP_ERROR("_serv_req: %lf", process_req.vals[i] - norm);
+                flag++;
+            }
+            if( i < PP_start.count ){
+                PMIXP_ERROR("_pp_start: %lf", PP_start.vals[i] - norm);
+                flag++;
+            }
+
+            if( i < PP_send.count ){
+                PMIXP_ERROR("_pp_send: %lf", PP_send.vals[i] - norm);
+                flag++;
+            }
+
+            if( i < PP_inc.count ){
+                PMIXP_ERROR("_pp_inc: %lf", PP_inc.vals[i] - norm);
+                flag++;
+            }
+            if( i < PP_complete.count ){
+                PMIXP_ERROR("_pp_complete: %lf", PP_complete.vals[i] - norm);
+                flag++;
+            }
+            i++;
+        }
+    }
 	return rc;
 }
 
 static void _process_server_request(pmixp_base_hdr_t *hdr, void *payload)
 {
+    process_req.vals[process_req.count++] = GET_TS();
+        
+
 	char *nodename = pmixp_info_job_host(hdr->nodeid);
 	Buf buf = create_buf(payload, hdr->msgsize);
 	int rc;
@@ -690,10 +741,15 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, void *payload)
         unpackdouble(&start, buf);
         PMIXP_ERROR("Delivery time: %lf", GET_TS - start);
 */
+
 		if( pmixp_info_nodeid() == 1 ){
+  //          PMIXP_ERROR("reply: %lf", GET_TS());
 			pmixp_server_pingpong(pmixp_info_job_host(0), hdr->msgsize);
 		}
+
+        PP_inc.vals[PP_inc.count++] = GET_TS();
 		pingpong_count++;
+
 		break;
 	}
 	default:
@@ -883,6 +939,9 @@ static void _direct_msg_free(void *_msg)
 static void _direct_new_msg(pmixp_conn_t *conn, void *_hdr, void *msg)
 {
 	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t*)_hdr;
+
+    new_msg.vals[new_msg.count++] = GET_TS();
+
 	_process_server_request(hdr, msg);
 }
 

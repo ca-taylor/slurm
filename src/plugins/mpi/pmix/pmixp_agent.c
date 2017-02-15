@@ -323,11 +323,18 @@ int pmixp_agent_start(void)
 	}
 
     pmixp_debug_hang(0);
+    
+    
 
 	if( pmixp_info_nodeid() == 0 ){
 	int i;
-	for( i = 1; i <= 64*1024; i *= 2) {
-		int count, iters = 100;
+	
+    	pmixp_server_pp_wait_init();
+	
+//	for( i = 1; i <= 64*1024; i *= 2) {
+	for( i = 2; i < 3; i *= 2) {
+//		int count, iters = 100;
+		int count, iters = 12;
 		if( i > 4096 ) {
 		    iters = 20;
         }
@@ -341,7 +348,7 @@ int pmixp_agent_start(void)
 			pmixp_server_pingpong(pmixp_info_job_host(1), i);
 			while( cur_count == pmixp_server_ppcount() ){
 				usleep(1);
-			}
+            }
 		}
 		gettimeofday(&tv2, NULL);
 		time = tv2.tv_sec + 1E-6 * tv2.tv_usec - 
