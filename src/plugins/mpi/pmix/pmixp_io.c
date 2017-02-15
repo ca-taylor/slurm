@@ -479,6 +479,41 @@ static inline int _send_payload_ok(pmixp_io_engine_t *eng)
 			&& (eng->send_offs == (eng->send_pay_size + eng->send_hdr_size));
 }
 
+static bool _send_pending(pmixp_io_engine_t *eng)
+{
+	int rc;
+	xassert(NULL != eng);
+	xassert(PMIXP_MSGSTATE_MAGIC == eng->magic);
+	xassert(NULL != eng->rcvd_hdr_net);
+	xassert(pmixp_io_enqueue_ok(eng));
+	xassert(eng->h.send_on);
+
+	if (!pmixp_io_enqueue_ok(eng)){
+		return false;
+	}
+
+	if (_send_payload_ok(eng)) {
+		/* The current message is send. Cleanup current msg */
+		_send_free_current(eng);
+	}
+
+	if (eng->send_current == NULL) {
+		/* Try next element */
+		int n = list_count(eng->send_queue);
+		if (0 == n) {
+			/* Nothing to do */
+			return false;
+		}
+		void *msg = list_dequeue(eng->send_queue);
+		xassert(msg != NULL);
+		if ((rc = _send_set_current(eng, msg))) {
+			PMIXP_ERROR_NO(rc, "Cannot switch to the next message");
+			pmixp_io_finalize(eng, rc);
+		}
+	}
+	return true;
+}
+
 static void 
 _send_progress(pmixp_io_engine_t *eng)
 {
@@ -495,7 +530,7 @@ _send_progress(pmixp_io_engine_t *eng)
 		return;
 	}
 
-	while (pmixp_io_send_pending(eng)) {
+	while (_send_pending(eng)) {
 		/* try to send everything untill fd became blockable
 		 * FIXME: maybe set some restriction on number of messages sended at once
 		 */
@@ -541,7 +576,7 @@ int pmixp_io_send_enqueue(pmixp_io_engine_t *eng, void *msg)
 		PMIXP_ERROR("Trying to enqueue to unprepared engine");
 		return SLURM_ERROR;
 	}
-	list_enqueue(eng->send_queue, msg);
+    list_enqueue(eng->send_queue, msg);
 	
 	/* if we don't send anything now - try
 	 * to progress immediately
@@ -549,49 +584,25 @@ int pmixp_io_send_enqueue(pmixp_io_engine_t *eng, void *msg)
     slurm_mutex_lock(&eng->send_lock);
     _send_progress(eng);
     slurm_mutex_unlock(&eng->send_lock);
+
 	return SLURM_SUCCESS;
 }
 
 bool pmixp_io_send_pending(pmixp_io_engine_t *eng)
 {
-	int rc;
-	xassert(NULL != eng);
-	xassert(PMIXP_MSGSTATE_MAGIC == eng->magic);
-	xassert(NULL != eng->rcvd_hdr_net);
-	xassert(pmixp_io_enqueue_ok(eng));
-	xassert(eng->h.send_on);
+	bool ret;
 
-	if (!pmixp_io_enqueue_ok(eng)){
-		return false;
-	}
-
-	if (_send_payload_ok(eng)) {
-		/* The current message is send. Cleanup current msg */
-		_send_free_current(eng);
-	}
-
-	if (eng->send_current == NULL) {
-		/* Try next element */
-		int n = list_count(eng->send_queue);
-		if (0 == n) {
-			/* Nothing to do */
-			return false;
-		}
-		void *msg = list_dequeue(eng->send_queue);
-		xassert(msg != NULL);
-		if ((rc = _send_set_current(eng, msg))) {
-			PMIXP_ERROR_NO(rc, "Cannot switch to the next message");
-			pmixp_io_finalize(eng, rc);
-		}
-	}
-	return true;
+    slurm_mutex_lock(&eng->send_lock);
+    ret = _send_pending(eng);
+    slurm_mutex_unlock(&eng->send_lock);
+	return ret;
 }
 
 void pmixp_io_send_cleanup(pmixp_io_engine_t *eng)
 {
     void *msg = NULL;
     
-    while( (msg = list_dequeue(eng->send_queue) ) ){
+    while( (msg = list_dequeue(eng->complete_queue) ) ){
         eng->h.msg_free_cb(msg);
     }
 }
