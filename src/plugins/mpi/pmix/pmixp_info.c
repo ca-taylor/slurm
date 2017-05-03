@@ -384,6 +384,18 @@ static int _env_set(char ***env)
 			_srv_use_direct_conn_ucx = false;
 		}
 	}
+
+	/* Propagate UCX env */
+	p = getenvp(*env, "UCX_NET_DEVICES");
+	if( NULL != p){
+		setenv("UCX_NET_DEVICES", p, 1);
+	}
+
+	p = getenvp(*env, "UCX_TLS");
+	if( NULL != p){
+		setenv("UCX_TLS", p, 1);
+	}
+
 #endif
 
 
