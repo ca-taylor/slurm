@@ -36,7 +36,8 @@
 
 #include "pmixp_dconn.h"
 #include "pmixp_dconn_ucx.h"
- #include <unistd.h>
+#include <unistd.h>
+#include <ucp/api/ucp.h>
 
 /* local variables */
 static bool _progress_on = false;
@@ -68,7 +69,7 @@ typedef struct {
 
 typedef struct {
 	int nodeid;
-	bool connected;
+	pmixp_ucx_status_t status;
 	ucp_ep_h server_ep;
 	void *ucx_addr;
 	size_t ucx_alen;
@@ -88,10 +89,10 @@ static void _recv_req_destruct(void *obj)
 {
 	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
 	ucp_request_cancel(ucp_worker, req);
-	_recv_req_release(req)
+	_recv_req_release(req);
 }
 
-static inline _send_req_release(pmixp_ucx_req_t *req)
+static inline void _send_req_release(pmixp_ucx_req_t *req)
 {
 	if( req->buffer ){
 		_direct_hdr.msg_free_cb(req->msg);
@@ -109,7 +110,7 @@ static void _send_req_destruct(void *obj)
 
 static void request_init(void *request)
 {
-	struct pmixp_ucx_req_t *req = (struct pmixp_ucx_req_t *) request;
+	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *) request;
 	req->status = PMIXP_UCX_ACTIVE;
 }
 
@@ -154,7 +155,7 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 	ucs_status_t status;
 	ucp_params_t ucp_params;
 	ucp_worker_params_t worker_params;
-	unsigned long len = server_addr_len;
+
 	slurm_mutex_init(&_ucx_worker_lock);
 
 	_ucx_req_snd = list_create(_req_destruct);
