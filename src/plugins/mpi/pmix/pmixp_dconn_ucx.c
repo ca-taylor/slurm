@@ -34,7 +34,413 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
-int pmixp_dconn_ucx_set_handlers(pmixp_dconn_handlers_t *_pmixp_dconn_h)
-{
+#include "pmixp_dconn.h"
+#include "pmixp_dconn_ucx.h"
+ #include <unistd.h>
 
+/* local variables */
+static bool _progress_on = false;
+static int _service_pipe[2];
+static List _ucx_req_rcv, _ucx_req_snd, _ucx_send_pending;
+static int _server_fd = -1;
+static bool _direct_hdr_set = false;
+static pmixp_io_engine_header_t _direct_hdr;
+pthread_mutex_t _ucx_worker_lock;
+
+/* UCX objects */
+ucp_context_h ucp_context;
+ucp_worker_h ucp_worker;
+static ucp_address_t *_ucx_addr;
+static size_t _ucx_alen;
+
+typedef enum {
+	PMIXP_UCX_ACTIVE = 0,
+	PMIXP_UCX_COMPLETE,
+	PMIXP_UCX_FAILED
+} pmixp_ucx_status_t;
+
+typedef struct {
+    volatile pmixp_ucx_status_t status;
+    void *buffer;
+    size_t len;
+    void *msg;
+} pmixp_ucx_req_t;
+
+typedef struct {
+	int nodeid;
+	bool connected;
+	ucp_ep_h server_ep;
+	void *ucx_addr;
+	size_t ucx_alen;
+	pmixp_io_engine_header_t eng_hdr;
+} pmixp_dconn_ucx_t;
+
+static inline void _recv_req_release(pmixp_ucx_req_t *req)
+{
+	if( req->buffer ){
+		xfree(req->buffer);
+	}
+	memset(req, 0, sizeof(*req));
+	ucp_request_release(req);
+}
+
+static void _recv_req_destruct(void *obj)
+{
+	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
+	ucp_request_cancel(ucp_worker, req);
+	_recv_req_release(req)
+}
+
+static inline _send_req_release(pmixp_ucx_req_t *req)
+{
+	if( req->buffer ){
+		_direct_hdr.msg_free_cb(req->msg);
+	}
+	memset(req, 0, sizeof(*req));
+	ucp_request_release(req);
+}
+
+static void _send_req_destruct(void *obj)
+{
+	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
+	ucp_request_cancel(ucp_worker, req);
+	_send_req_release(req);
+}
+
+static void request_init(void *request)
+{
+	struct pmixp_ucx_req_t *req = (struct pmixp_ucx_req_t *) request;
+	req->status = PMIXP_UCX_ACTIVE;
+}
+
+static void send_handle(void *request, ucs_status_t status)
+{
+	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *) request;
+	if (UCS_OK == status){
+		req->status = PMIXP_UCX_COMPLETE;
+	} else {
+		PMIXP_ERROR("UCX send request failed: %s",
+			    ucs_status_string(status));
+		req->status = PMIXP_UCX_FAILED;
+	}
+}
+
+static void recv_handle(void *request, ucs_status_t status,
+			ucp_tag_recv_info_t *info)
+{
+	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *) request;
+	if (UCS_OK == status){
+		req->status = PMIXP_UCX_COMPLETE;
+	} else {
+		PMIXP_ERROR("UCX send request failed: %s",
+			    ucs_status_string(status));
+		req->status = PMIXP_UCX_FAILED;
+	}
+}
+
+
+static bool _progress_readable(eio_obj_t *obj);
+static int _progress_read(eio_obj_t *obj, List objs);
+
+static struct io_operations _progress_ops = {
+	.readable = _progress_readable,
+	.handle_read = _progress_read
+};
+
+int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
+			    char **ep_data, size_t *ep_len)
+{
+	ucp_config_t *config;
+	ucs_status_t status;
+	ucp_params_t ucp_params;
+	ucp_worker_params_t worker_params;
+	unsigned long len = server_addr_len;
+	slurm_mutex_init(&_ucx_worker_lock);
+
+	_ucx_req_snd = list_create(_req_destruct);
+	_ucx_req_recv = list_create(_req_destruct);
+
+	status = ucp_config_read(NULL, NULL, &config);
+	if (status != UCS_OK) {
+		PMIXP_ERROR("Fail to read UCX config: %s", ucs_status_string(status));
+		return SLURM_ERROR;
+	}
+
+	ucp_params.features = UCP_FEATURE_TAG | UCP_FEATURE_WAKEUP;
+	ucp_params.request_size    = sizeof(struct pmixp_ucx_req_t);
+	ucp_params.request_init    = request_init;
+	ucp_params.request_cleanup = NULL;
+	ucp_params.field_mask      = UCP_PARAM_FIELD_FEATURES |
+			UCP_PARAM_FIELD_REQUEST_SIZE |
+			UCP_PARAM_FIELD_REQUEST_INIT |
+			UCP_PARAM_FIELD_REQUEST_CLEANUP;
+
+	status = ucp_init(&ucp_params, config, &ucp_context);
+	//    ucp_config_print(config, stdout, NULL, UCS_CONFIG_PRINT_CONFIG);
+	ucp_config_release(config);
+	if (status != UCS_OK) {
+		PMIXP_ERROR("Fail to init UCX: %s", ucs_status_string(status));
+		return SLURM_ERROR;
+	}
+
+	worker_params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
+	worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
+
+	status = ucp_worker_create(ucp_context, &worker_params, &ucp_worker);
+	if (status != UCS_OK) {
+		PMIXP_ERROR("Fail to create UCX worker: %s", ucs_status_string(status));
+		goto err_worker;
+	}
+
+	status = ucp_worker_get_address(ucp_worker, &_ucx_addr, &_ucx_alen);
+	if (status != UCS_OK) {
+		PMIXP_ERROR("Fail to get UCX address: %s", ucs_status_string(status));
+		goto err_addr;
+	}
+
+	status = ucp_worker_get_efd(ucp_worker, &_server_fd);
+	if (status != UCS_OK) {
+		PMIXP_ERROR("Fail to get UCX epoll fd: %s", ucs_status_string(status));
+		goto err_efd;
+	}
+
+	memset(handlers, 0, sizeof(*handlers));
+	handlers->connect = NULL;
+	handlers->init = _ucx_init;
+	handlers->fini = _ucx_fini;
+	handlers->send = _ucx_send;
+	handlers->getio = NULL;
+	handlers->regio = _ucx_regio;
+
+	*ep_data = (void*)_ucx_addr;
+	*ep_len  = (uint16_t)_ucx_alen;
+
+	return SLURM_SUCCESS;
+
+err_efd:
+	ucp_worker_release_address(ucp_worker, _ucx_addr);
+err_addr:
+	ucp_worker_destroy(ucp_worker);
+err_worker:
+	ucp_cleanup(ucp_context);
+	return SLURM_ERROR;
+
+}
+
+static bool _progress_readable(eio_obj_t *obj)
+{
+	char buf = 'c';
+	/* sanity check */
+	xassert(NULL != obj );
+	if( obj->shutdown ){
+		/* corresponding connection will be
+			 * cleaned up during plugin finalize
+			 */
+		return false;
+	}
+
+	if( !_progress_on ){
+		return false;
+	}
+
+	if( sizeof(buf) != write(_service_pipe[1], &buf, sizeof(buf)) ){
+		PMIXP_ERROR("Unable to activate UCX progress");
+		return false;
+	}
+	return true;
+}
+
+static int _progress_read(eio_obj_t *obj, List objs)
+{
+	pmixp_ucx_req_t *req = NULL;
+	ucp_tag_message_h msg_tag;
+	ucp_tag_recv_info_t info_tag;
+	ListIterator it;
+
+	/* sanity check */
+	xassert(NULL != obj );
+	if( obj->shutdown ){
+		/* corresponding connection will be
+		 * cleaned up during plugin finalize
+		 */
+		return 0;
+	}
+
+	assert(_progress_on);
+
+	/* empty pipe */
+	while( sizeof(buf) == read(_service_pipe[0], &buf, sizeof(buf)) );
+
+	slurm_mutex_lock(&_ucx_worker_lock);
+	/* Progress UCX */
+	ucp_worker_progress(ucp_worker);
+
+	/* Check pending requests */
+	it = list_iterator_create(_ucx_req_rcv);
+	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
+		if (PMIXP_UCX_ACTIVE == req->status){
+			continue;
+		}
+		list_remove(it);
+		if (PMIXP_UCX_FAILED == req->status){
+			_recv_req_release(req);
+			continue;
+		}
+		_ucx_process_msg(req->buffer, req->len);
+		/* release request to UCX */
+		memset(req, 0, sizeof(*req));
+		ucp_request_release(req);
+	}
+
+	it = list_iterator_create(_ucx_req_snd);
+	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
+		if (PMIXP_UCX_ACTIVE == req->status){
+			continue;
+		}
+		list_remove(it);
+		if (PMIXP_UCX_FAILED == req->status){
+			_send_req_release(req);
+			continue;
+		}
+		xassert(_direct_hdr_set);
+		_direct_hdr.msg_free_cb(req->msg);
+		/* release request to UCX */
+		memset(req, 0, sizeof(*req));
+		ucp_request_release(req);
+	}
+
+	/* check for new messages */
+	while(1) {
+		msg_tag = ucp_tag_probe_nb(ucp_worker, 1, 0xffffffffffffffff, 1, &info_tag);
+		if( NULL == msg_tag ) {
+			break;
+		}
+		char *msg = xmalloc(info_tag.length);
+		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
+				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
+						    ucp_dt_make_contig(1), msg_tag, recv_handle);
+		if (UCS_PTR_IS_ERR(req)) {
+			PMIXP_ERROR("ucp_tag_msg_recv_nb failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
+			return OMPI_ERROR;
+		}
+		req->buffer = msg;
+		req->len = info_tag.length;
+	}
+
+	if( !list_count(_ucx_req_rcv) && !list_count(_ucx_req_snd)){
+		/* All done with the progress */
+		_progress_on = false;
+	}
+	slurm_mutex_lock(&_ucx_worker_unlock);
+
+	return 0;
+}
+
+static void *_ucx_init(int nodeid, pmixp_io_engine_header_t direct_hdr)
+{
+	pmixp_dconn_ucx_t *priv = xmalloc(sizeof(pmixp_dconn_ucx_t));
+	priv->nodeid = nodeid;
+	priv->connected = false;
+	if (!_direct_hdr_set) {
+		_direct_hdr = direct_hdr;
+	}
+	return (void*)priv;
+}
+
+static void _ucx_fini(void *_priv)
+{
+	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
+	xfree(priv->ucx_addr);
+	ucp_ep_destroy(priv->server_ep);
+	xfree(priv);
+}
+
+static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
+			void *init_msg)
+{
+	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
+	ucp_ep_params_t ep_params;
+	ucp_ep_h server_ep;
+	ListIterator it;
+	void *msg = NULL;
+	int rc = SLURM_SUCCESS;
+
+	priv->ucx_addr = ep_data;
+	priv->ucx_alen = ep_len;
+	/* Connect to the server */
+	ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+	ep_params.address    = priv->ucx_addr;
+
+	slurm_mutex_lock(&_ucx_worker_lock);
+	status = ucp_ep_create(ucp_worker, &ep_params, &server_ep);
+	if (status != UCS_OK) {
+		PMIXP_ERROR("ucp_ep_create failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
+		rc = SLURM_ERROR;
+		goto exit;
+	}
+	priv->connected = true;
+exit:
+	slurm_mutex_unlock(&_ucx_worker_lock);
+	if (SLURM_SUCCESS == rc){
+		/* Try to send all pending messages */
+		it = list_iterator_create(_ucx_send_pending);
+		while ((msg = (void*)list_next(it))) {
+			list_remove(it);
+			_ucx_send(_priv, msg);
+		}
+	}
+
+	return rc;
+}
+
+
+static int _ucx_send(void *_priv, void *msg)
+{
+	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
+	int rc = SLURM_SUCCESS;
+
+	slurm_mutex_lock(&_ucx_worker_lock);
+	if( !priv->connected ){
+		list_append(_ucx_send_pending,msg);
+	} else {
+		pmixp_ucx_req_t *req = NULL;
+		xassert(_direct_hdr_set);
+		char *mptr = _direct_hdr.msg_ptr(msg);
+		size_t msize = _direct_hdr.msg_size(msg);
+		req = (pmixp_ucx_req_t*)ucp_tag_send_nb(priv->server_ep,
+						(void*)mptr, msize,
+						ucp_dt_make_contig(1), 1,
+						send_handle);
+		if (UCS_PTR_IS_ERR(req)) {
+			PMIXP_ERROR("Unable to send UCX message: %s\n", ucs_status_string(UCS_PTR_STATUS(req)));
+			goto exit;
+		} else if (UCS_OK == UCS_PTR_STATUS(request)) {
+			_direct_hdr.msg_free_cb(msg);
+			while( request->completed == 0 ){
+				ucp_worker_progress(ucp_worker);
+			}
+			ucp_request_release(request);
+		} else {
+			list_append(_ucx_req_snd);
+			_progress_on = true;
+		}
+	}
+exit:
+	slurm_mutex_unlock(&_ucx_worker_lock);
+	return rc;
+}
+
+
+static void _ucx_regio(eio_handle_t *h)
+{
+	eio_obj_t *obj;
+
+	pipe(_service_pipe);
+	fd_set_nonblocking(_service_pipe[0]);
+	fd_set_nonblocking(_service_pipe[1]);
+	fd_set_close_on_exec(_service_pipe[0]);
+	fd_set_close_on_exec(_service_pipe[1]);
+
+	obj = eio_obj_create(_service_pipe[0], &_progress_ops, (void *)(-1));
+	eio_new_initial_obj(h, obj);
 }

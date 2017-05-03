@@ -51,9 +51,10 @@ static int _tcp_connect(void *_priv, void *ep_data, size_t ep_len,
 			void *init_msg);
 static int _tcp_send(void *_priv, void *msg);
 static pmixp_io_engine_t *_tcp_getio(void *_priv);
+static void _tcp_regio(eio_handle_t *h);
 
 int pmixp_dconn_tcp_prepare(pmixp_dconn_handlers_t *handlers,
-			    char **ep_data, uint16_t *ep_len)
+			    char **ep_data, size_t *ep_len)
 {
 	memset(handlers, 0, sizeof(*handlers));
 	handlers->init = _tcp_init;
@@ -61,6 +62,7 @@ int pmixp_dconn_tcp_prepare(pmixp_dconn_handlers_t *handlers,
 	handlers->connect = _tcp_connect;
 	handlers->send = _tcp_send;
 	handlers->getio = _tcp_getio;
+	handlers->regio = _tcp_regio;
 
 	/* Create TCP socket for slurmd communication */
 	if (0 > net_stream_listen(&_server_fd, &_server_port)) {
@@ -169,5 +171,11 @@ static pmixp_io_engine_t *_tcp_getio(void *_priv)
 {
 	pmixp_dconn_tcp_t *priv = (pmixp_dconn_tcp_t *)_priv;
 	return &priv->eng;
+}
+
+/* don't need to do anything */
+static void _tcp_regio(eio_handle_t *h)
+{
+
 }
 

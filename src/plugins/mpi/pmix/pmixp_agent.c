@@ -258,14 +258,15 @@ static void *_agent_thread(void *unused)
 	obj = eio_obj_create(pmixp_info_srv_usock_fd(), &srv_ops, (void *)(-1));
 	eio_new_initial_obj(_io_handle, obj);
 
-	obj = eio_obj_create(pmixp_dconn_poll_fd(), &srv_ops, (void *)(-1));
+	obj = eio_obj_create(timer_data.work_in, &to_ops, (void *)(-1));
 	eio_new_initial_obj(_io_handle, obj);
 
-	obj = eio_obj_create(timer_data.work_in, &to_ops, (void *)(-1));
+	obj = eio_obj_create(pmixp_dconn_poll_fd(), &srv_ops, (void *)(-1));
 	eio_new_initial_obj(_io_handle, obj);
 
 	pmixp_info_io_set(_io_handle);
 
+	pmixp_dconn_regio(_io_handle);
 	_run_flag_set(&_agent_is_running, true);
 
 	eio_handle_mainloop(_io_handle);

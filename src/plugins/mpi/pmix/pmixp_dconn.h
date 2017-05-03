@@ -76,6 +76,7 @@ typedef int (*pmixp_dconn_p2p_connect_t)(void *_priv, void *ep_data, size_t ep_l
 					 void *init_msg);
 typedef int (*pmixp_dconn_p2p_send_nb_t)(void *_priv, void *msg);
 typedef pmixp_io_engine_t *(*pmixp_dconn_p2p_getio_t)(void *_priv);
+typedef void (*pmixp_dconn_p2p_regio_t)(eio_handle_t *h);
 
 typedef struct {
 	pmixp_dconn_p2p_init_t init;
@@ -83,6 +84,7 @@ typedef struct {
 	pmixp_dconn_p2p_connect_t connect;
 	pmixp_dconn_p2p_send_nb_t send;
 	pmixp_dconn_p2p_getio_t getio;
+	pmixp_dconn_p2p_regio_t regio;
 } pmixp_dconn_handlers_t;
 
 
@@ -148,6 +150,11 @@ static inline int
 pmixp_dconn_send(pmixp_dconn_t *dconn, void *msg)
 {
 	return _pmixp_dconn_h.send(dconn->priv, msg);
+}
+
+static inline void pmixp_dconn_regio(eio_handle_t *h)
+{
+	return _pmixp_dconn_h.regio(h);
 }
 
 int pmixp_dconn_connect_do(pmixp_dconn_t *dconn, void *ep_data, size_t ep_len, void *init_msg);
