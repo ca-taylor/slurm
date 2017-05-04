@@ -77,6 +77,10 @@ typedef struct {
 	pmixp_io_engine_header_t eng_hdr;
 } pmixp_dconn_ucx_t;
 
+static void _pending_send_destruct(void *obj)
+{
+}
+
 static inline void _recv_req_release(pmixp_ucx_req_t *req)
 {
 	if( req->buffer ){
@@ -175,6 +179,7 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 
 	_ucx_req_snd = list_create(_send_req_destruct);
 	_ucx_req_rcv = list_create(_recv_req_destruct);
+	_ucx_send_pending = list_create(_pending_send_destruct);
 
 	status = ucp_config_read(NULL, NULL, &config);
 	if (status != UCS_OK) {
@@ -219,6 +224,8 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 		PMIXP_ERROR("Fail to get UCX epoll fd: %s", ucs_status_string(status));
 		goto err_efd;
 	}
+
+ucp_worker_progress(ucp_worker);
 
 	memset(handlers, 0, sizeof(*handlers));
 	handlers->connect = _ucx_connect;
@@ -390,6 +397,7 @@ static void *_ucx_init(int nodeid, pmixp_io_engine_header_t direct_hdr)
 	priv->connected = false;
 	if (!_direct_hdr_set) {
 		_direct_hdr = direct_hdr;
+		_direct_hdr_set = true;
 		_host_hdr = xmalloc(_direct_hdr.recv_host_hsize);
 	}
 	return (void*)priv;
@@ -404,12 +412,11 @@ static void _ucx_fini(void *_priv)
 }
 
 static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
-			void *init_msg)
+						void *init_msg)
 {
 	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
 	ucp_ep_params_t ep_params;
 	ucs_status_t status;
-	ucp_ep_h server_ep;
 	ListIterator it;
 	void *msg = NULL;
 	int rc = SLURM_SUCCESS;
@@ -421,13 +428,14 @@ static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
 	ep_params.address    = priv->ucx_addr;
 
 	slurm_mutex_lock(&_ucx_worker_lock);
-	status = ucp_ep_create(ucp_worker, &ep_params, &server_ep);
+	status = ucp_ep_create(ucp_worker, &ep_params, &priv->server_ep);
 	if (status != UCS_OK) {
 		PMIXP_ERROR("ucp_ep_create failed: %s", ucs_status_string(status));
 		rc = SLURM_ERROR;
 		goto exit;
 	}
 	priv->connected = true;
+	list_push(_ucx_send_pending, init_msg);
 exit:
 	slurm_mutex_unlock(&_ucx_worker_lock);
 	if (SLURM_SUCCESS == rc){
