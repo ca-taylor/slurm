@@ -51,6 +51,7 @@ typedef int (*pmixp_io_hdr_unpack_cb_t)(void *hdr_net, void *hdr_host);
 typedef void *(*pmixp_io_buf_ptr_cb_t)(void *msg);
 typedef size_t (*pmixp_io_buf_size_cb_t)(void *msg);
 typedef void (*pmixp_io_msg_free_cb_t)(void *msg);
+typedef void (*pmixp_io_buf_return_cb_t)(void *hdr, Buf buf);
 
 typedef struct {
 	/* generic callback */
@@ -59,6 +60,7 @@ typedef struct {
 	bool recv_on;
 	uint32_t recv_host_hsize, recv_net_hsize;
 	pmixp_io_hdr_unpack_cb_t hdr_unpack_cb;
+	pmixp_io_buf_return_cb_t buf_return;
 	uint32_t recv_padding;
 	/* transmitter-related fields */
 	bool send_on;

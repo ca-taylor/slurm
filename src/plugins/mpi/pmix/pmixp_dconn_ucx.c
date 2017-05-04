@@ -46,6 +46,7 @@ static List _ucx_req_rcv, _ucx_req_snd, _ucx_send_pending;
 static int _server_fd = -1;
 static bool _direct_hdr_set = false;
 static pmixp_io_engine_header_t _direct_hdr;
+static void *_host_hdr = NULL;
 pthread_mutex_t _ucx_worker_lock;
 
 /* UCX objects */
@@ -69,7 +70,7 @@ typedef struct {
 
 typedef struct {
 	int nodeid;
-	pmixp_ucx_status_t status;
+	bool connected;
 	ucp_ep_h server_ep;
 	void *ucx_addr;
 	size_t ucx_alen;
@@ -148,6 +149,13 @@ static struct io_operations _progress_ops = {
 	.handle_read = _progress_read
 };
 
+static void *_ucx_init(int nodeid, pmixp_io_engine_header_t direct_hdr);
+static void _ucx_fini(void *_priv);
+static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
+			void *init_msg);
+static int _ucx_send(void *_priv, void *msg);
+static void _ucx_regio(eio_handle_t *h);
+
 int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 			    char **ep_data, size_t *ep_len)
 {
@@ -158,8 +166,8 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 
 	slurm_mutex_init(&_ucx_worker_lock);
 
-	_ucx_req_snd = list_create(_req_destruct);
-	_ucx_req_recv = list_create(_req_destruct);
+	_ucx_req_snd = list_create(_send_req_destruct);
+	_ucx_req_rcv = list_create(_recv_req_destruct);
 
 	status = ucp_config_read(NULL, NULL, &config);
 	if (status != UCS_OK) {
@@ -168,7 +176,7 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 	}
 
 	ucp_params.features = UCP_FEATURE_TAG | UCP_FEATURE_WAKEUP;
-	ucp_params.request_size    = sizeof(struct pmixp_ucx_req_t);
+	ucp_params.request_size    = sizeof(pmixp_ucx_req_t);
 	ucp_params.request_init    = request_init;
 	ucp_params.request_cleanup = NULL;
 	ucp_params.field_mask      = UCP_PARAM_FIELD_FEATURES |
@@ -206,7 +214,7 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 	}
 
 	memset(handlers, 0, sizeof(*handlers));
-	handlers->connect = NULL;
+	handlers->connect = _ucx_connect;
 	handlers->init = _ucx_init;
 	handlers->fini = _ucx_fini;
 	handlers->send = _ucx_send;
@@ -251,12 +259,23 @@ static bool _progress_readable(eio_obj_t *obj)
 	return true;
 }
 
+void _ucx_process_msg(char *buffer, size_t len)
+{
+	xassert(_direct_hdr_set);
+	_direct_hdr.hdr_unpack_cb(buffer, _host_hdr);
+
+	Buf buf = create_buf(buffer, len);
+	set_buf_offset(buf, _direct_hdr.recv_net_hsize);
+	_direct_hdr.buf_return(_host_hdr, buf);
+}
+
 static int _progress_read(eio_obj_t *obj, List objs)
 {
 	pmixp_ucx_req_t *req = NULL;
 	ucp_tag_message_h msg_tag;
 	ucp_tag_recv_info_t info_tag;
 	ListIterator it;
+	char buf;
 
 	/* sanity check */
 	xassert(NULL != obj );
@@ -322,7 +341,7 @@ static int _progress_read(eio_obj_t *obj, List objs)
 						    ucp_dt_make_contig(1), msg_tag, recv_handle);
 		if (UCS_PTR_IS_ERR(req)) {
 			PMIXP_ERROR("ucp_tag_msg_recv_nb failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
-			return OMPI_ERROR;
+			continue;
 		}
 		req->buffer = msg;
 		req->len = info_tag.length;
@@ -332,7 +351,7 @@ static int _progress_read(eio_obj_t *obj, List objs)
 		/* All done with the progress */
 		_progress_on = false;
 	}
-	slurm_mutex_lock(&_ucx_worker_unlock);
+	slurm_mutex_unlock(&_ucx_worker_lock);
 
 	return 0;
 }
@@ -344,6 +363,7 @@ static void *_ucx_init(int nodeid, pmixp_io_engine_header_t direct_hdr)
 	priv->connected = false;
 	if (!_direct_hdr_set) {
 		_direct_hdr = direct_hdr;
+		_host_hdr = xmalloc(_direct_hdr.recv_host_hsize);
 	}
 	return (void*)priv;
 }
@@ -361,6 +381,7 @@ static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
 {
 	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
 	ucp_ep_params_t ep_params;
+	ucs_status_t status;
 	ucp_ep_h server_ep;
 	ListIterator it;
 	void *msg = NULL;
@@ -375,7 +396,7 @@ static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
 	slurm_mutex_lock(&_ucx_worker_lock);
 	status = ucp_ep_create(ucp_worker, &ep_params, &server_ep);
 	if (status != UCS_OK) {
-		PMIXP_ERROR("ucp_ep_create failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
+		PMIXP_ERROR("ucp_ep_create failed: %s", ucs_status_string(status));
 		rc = SLURM_ERROR;
 		goto exit;
 	}
@@ -415,14 +436,11 @@ static int _ucx_send(void *_priv, void *msg)
 		if (UCS_PTR_IS_ERR(req)) {
 			PMIXP_ERROR("Unable to send UCX message: %s\n", ucs_status_string(UCS_PTR_STATUS(req)));
 			goto exit;
-		} else if (UCS_OK == UCS_PTR_STATUS(request)) {
+		} else if (UCS_OK == UCS_PTR_STATUS(req)) {
 			_direct_hdr.msg_free_cb(msg);
-			while( request->completed == 0 ){
-				ucp_worker_progress(ucp_worker);
-			}
-			ucp_request_release(request);
+			ucp_request_release(req);
 		} else {
-			list_append(_ucx_req_snd);
+			list_append(_ucx_req_snd, (void*)req);
 			_progress_on = true;
 		}
 	}

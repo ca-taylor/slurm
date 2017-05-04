@@ -261,6 +261,8 @@ static void *_direct_msg_ptr(void *msg);
 static size_t _direct_msg_size(void *msg);
 static void _direct_msg_free(void *msg);
 
+static void _direct_new_msg_2(void *hdr, Buf buf);
+
 static void _direct_new_msg(pmixp_conn_t *conn, void *_hdr, void *msg);
 static void _direct_send(pmixp_dconn_t *dconn, pmixp_ep_t *ep,
 			 pmixp_base_hdr_t bhdr, Buf buf,
@@ -276,6 +278,7 @@ pmixp_io_engine_header_t _direct_proto = {
 	.recv_net_hsize = PMIXP_BASE_HDR_SIZE,
 	.recv_padding = 0, /* no padding for the direct proto */
 	.hdr_unpack_cb = _direct_hdr_unpack,
+	.buf_return = _direct_new_msg_2,
 	/* transmitter-related fields */
 	.send_on = 1,
 	.msg_ptr = _direct_msg_ptr,
@@ -714,10 +717,7 @@ typedef struct {
 	void *cbdata;
 }_direct_proto_message_t;
 
-/*
- *  Server message processing
- */
-
+/* Size of the payload */
 static uint32_t _direct_paysize(void *buf)
 {
 	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t *)buf;
@@ -727,7 +727,6 @@ static uint32_t _direct_paysize(void *buf)
 /*
  * Unpack message header.
  * Returns 0 on success and -errno on failure
- * Note: asymmetric to _send_pack_hdr because of additional SLURM header
  */
 static int _direct_hdr_unpack(void *net, void *host)
 {
@@ -745,9 +744,7 @@ static int _direct_hdr_unpack(void *net, void *host)
 }
 
 /*
- * Pack message header.
- * Returns packed size
- * Note: asymmetric to _recv_unpack_hdr because of additional SLURM header
+ * Pack message header. Returns packed size
  */
 static size_t _direct_hdr_pack(void *host, void *net)
 {
@@ -763,29 +760,39 @@ static size_t _direct_hdr_pack(void *host, void *net)
 	return size;
 }
 
-/*
- * Get te pointer to the message header.
- * Returns packed size
- * Note: asymmetric to _recv_unpack_hdr because of additional SLURM header
- */
-
+/* Get te pointer to the message bufer */
 static void *_direct_msg_ptr(void *msg)
 {
 	_direct_proto_message_t *_msg = (_direct_proto_message_t*)msg;
 	return _msg->buffer;
 }
 
+/* Message size */
 static size_t _direct_msg_size(void *msg)
 {
 	_direct_proto_message_t *_msg = (_direct_proto_message_t*)msg;
 	return (_msg->hdr.msgsize + PMIXP_BASE_HDR_SIZE);
 }
 
+/* Release message.
+ * TODO: We need to fix that: I/O engine needs a way
+ * to provide the error code
+ */
 static void _direct_msg_free(void *_msg)
 {
 	_direct_proto_message_t *msg = (_direct_proto_message_t*)_msg;
 	msg->sent_cb(SLURM_SUCCESS, PMIXP_SRV_CB_REGULAR, msg->cbdata);
 	xfree(msg);
+}
+
+/*
+ * TODO: merge with _direct_new_msg as they have nearly similar functionality
+ * This one is part of I/O header.
+ */
+static void _direct_new_msg_2(void *_hdr, Buf buf)
+{
+	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t*)_hdr;
+	_process_server_request(hdr, buf);
 }
 
 /*
