@@ -117,6 +117,7 @@ static void request_init(void *request)
 {
 	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *) request;
 	req->status = PMIXP_UCX_ACTIVE;
+	memset(req, 0, sizeof(*req));
 }
 
 static void send_handle(void *request, ucs_status_t status)
@@ -205,7 +206,7 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 	}
 
 	worker_params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-	worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
+	worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
 
 	status = ucp_worker_create(ucp_context, &worker_params, &ucp_worker);
 	if (status != UCS_OK) {
