@@ -226,8 +226,6 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 		goto err_efd;
 	}
 
-ucp_worker_progress(ucp_worker);
-
 	memset(handlers, 0, sizeof(*handlers));
 	handlers->connect = _ucx_connect;
 	handlers->init = _ucx_init;
@@ -343,6 +341,20 @@ static int _epoll_read(eio_obj_t *obj, List objs)
 	return 0;
 }
 
+static int _activate_progress()
+{
+	int rc = write(_service_pipe[1], &buf, sizeof(buf));
+	if( sizeof(buf) != rc ){
+		PMIXP_ERROR("Unable to activate UCX progress");
+		if( 0 > rc ){
+			return rc;
+		} else {
+			return SLURM_ERROR;
+		}
+	}
+	return SLURM_SUCCESS;
+}
+
 static bool _progress_readable(eio_obj_t *obj)
 {
 	char buf = 'c';
@@ -355,13 +367,8 @@ static bool _progress_readable(eio_obj_t *obj)
 		return false;
 	}
 
-	if( !_progress_on ){
-		return false;
-	}
-
-	if( sizeof(buf) != write(_service_pipe[1], &buf, sizeof(buf)) ){
-		PMIXP_ERROR("Unable to activate UCX progress");
-		return false;
+	if( _progress_on ){
+		_activate_progress();
 	}
 	return true;
 }
@@ -476,8 +483,12 @@ static int _ucx_send(void *_priv, void *msg)
 			_direct_hdr.msg_free_cb(msg);
 			ucp_request_release(req);
 		} else {
+			req->msg = msg;
+			req->buffer = mptr;
+			req->len = msize;
 			list_append(_ucx_req_snd, (void*)req);
 			_progress_on = true;
+			_activate_progress();
 		}
 	}
 exit:
