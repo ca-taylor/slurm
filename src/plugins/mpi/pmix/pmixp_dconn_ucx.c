@@ -343,6 +343,7 @@ static int _epoll_read(eio_obj_t *obj, List objs)
 
 static int _activate_progress()
 {
+	char buf = 'c';
 	int rc = write(_service_pipe[1], &buf, sizeof(buf));
 	if( sizeof(buf) != rc ){
 		PMIXP_ERROR("Unable to activate UCX progress");
@@ -357,7 +358,6 @@ static int _activate_progress()
 
 static bool _progress_readable(eio_obj_t *obj)
 {
-	char buf = 'c';
 	/* sanity check */
 	xassert(NULL != obj );
 	if( obj->shutdown ){
