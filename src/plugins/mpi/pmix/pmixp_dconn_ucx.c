@@ -140,6 +140,13 @@ static void recv_handle(void *request, ucs_status_t status,
 	}
 }
 
+static bool _epoll_readable(eio_obj_t *obj);
+static int _epoll_read(eio_obj_t *obj, List objs);
+
+static struct io_operations _epoll_ops = {
+	.readable = _epoll_readable,
+	.handle_read = _epoll_read
+};
 
 static bool _progress_readable(eio_obj_t *obj);
 static int _progress_read(eio_obj_t *obj, List objs);
@@ -236,29 +243,6 @@ err_worker:
 
 }
 
-static bool _progress_readable(eio_obj_t *obj)
-{
-	char buf = 'c';
-	/* sanity check */
-	xassert(NULL != obj );
-	if( obj->shutdown ){
-		/* corresponding connection will be
-			 * cleaned up during plugin finalize
-			 */
-		return false;
-	}
-
-	if( !_progress_on ){
-		return false;
-	}
-
-	if( sizeof(buf) != write(_service_pipe[1], &buf, sizeof(buf)) ){
-		PMIXP_ERROR("Unable to activate UCX progress");
-		return false;
-	}
-	return true;
-}
-
 void _ucx_process_msg(char *buffer, size_t len)
 {
 	xassert(_direct_hdr_set);
@@ -269,29 +253,13 @@ void _ucx_process_msg(char *buffer, size_t len)
 	_direct_hdr.buf_return(_host_hdr, buf);
 }
 
-static int _progress_read(eio_obj_t *obj, List objs)
+static void _ucx_progress()
 {
 	pmixp_ucx_req_t *req = NULL;
 	ucp_tag_message_h msg_tag;
 	ucp_tag_recv_info_t info_tag;
 	ListIterator it;
-	char buf;
 
-	/* sanity check */
-	xassert(NULL != obj );
-	if( obj->shutdown ){
-		/* corresponding connection will be
-		 * cleaned up during plugin finalize
-		 */
-		return 0;
-	}
-
-	assert(_progress_on);
-
-	/* empty pipe */
-	while( sizeof(buf) == read(_service_pipe[0], &buf, sizeof(buf)) );
-
-	slurm_mutex_lock(&_ucx_worker_lock);
 	/* Progress UCX */
 	ucp_worker_progress(ucp_worker);
 
@@ -351,6 +319,65 @@ static int _progress_read(eio_obj_t *obj, List objs)
 		/* All done with the progress */
 		_progress_on = false;
 	}
+}
+
+static bool _epoll_readable(eio_obj_t *obj)
+{
+	return true;
+}
+
+static int _epoll_read(eio_obj_t *obj, List objs)
+{
+	slurm_mutex_lock(&_ucx_worker_lock);
+	_progress_on = true;
+	_ucx_progress();
+	slurm_mutex_unlock(&_ucx_worker_lock);
+	return 0;
+}
+
+static bool _progress_readable(eio_obj_t *obj)
+{
+	char buf = 'c';
+	/* sanity check */
+	xassert(NULL != obj );
+	if( obj->shutdown ){
+		/* corresponding connection will be
+			 * cleaned up during plugin finalize
+			 */
+		return false;
+	}
+
+	if( !_progress_on ){
+		return false;
+	}
+
+	if( sizeof(buf) != write(_service_pipe[1], &buf, sizeof(buf)) ){
+		PMIXP_ERROR("Unable to activate UCX progress");
+		return false;
+	}
+	return true;
+}
+
+static int _progress_read(eio_obj_t *obj, List objs)
+{
+	char buf;
+
+	/* sanity check */
+	xassert(NULL != obj );
+	if( obj->shutdown ){
+		/* corresponding connection will be
+		 * cleaned up during plugin finalize
+		 */
+		return 0;
+	}
+
+	assert(_progress_on);
+
+	/* empty pipe */
+	while( sizeof(buf) == read(_service_pipe[0], &buf, sizeof(buf)) );
+
+	slurm_mutex_lock(&_ucx_worker_lock);
+	_ucx_progress();
 	slurm_mutex_unlock(&_ucx_worker_lock);
 
 	return 0;
@@ -449,7 +476,6 @@ exit:
 	return rc;
 }
 
-
 static void _ucx_regio(eio_handle_t *h)
 {
 	eio_obj_t *obj;
@@ -461,5 +487,8 @@ static void _ucx_regio(eio_handle_t *h)
 	fd_set_close_on_exec(_service_pipe[1]);
 
 	obj = eio_obj_create(_service_pipe[0], &_progress_ops, (void *)(-1));
+	eio_new_initial_obj(h, obj);
+
+	obj = eio_obj_create(_server_fd, &_epoll_ops, (void *)(-1));
 	eio_new_initial_obj(h, obj);
 }
