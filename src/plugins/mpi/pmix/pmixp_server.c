@@ -62,72 +62,61 @@ typedef struct {
 	uint32_t seq;
 	uint32_t nodeid;
 	uint32_t msgsize;
+	uint8_t ext_flag;
 } pmixp_base_hdr_t;
 
-#define PMIXP_BASE_HDR_SIZE (5 * sizeof(uint32_t))
-
-typedef struct {
-	pmixp_base_hdr_t base_hdr;
-	uint8_t ext_flag;
-	uint32_t ep_len;
-	char *ep_data;
-} pmixp_slurm_shdr_t;
-
-#define PMIXP_SAPI_SHDR_SIZE (PMIXP_BASE_HDR_SIZE + sizeof(uint8_t))
-#define PMIXP_SAPI_SHDR_EXT_SIZE(ep_len) (sizeof(uint32_t) + ep_len)
-#define PMIXP_SAPI_SHDR_SIZE_MAX (PMIXP_SAPI_SHDR_SIZE + \
-			PMIXP_SAPI_SHDR_EXT_SIZE(pmixp_dconn_ep_len()))
-
-
-#define PMIXP_MAX_SEND_HDR (PMIXP_SAPI_SHDR_SIZE_MAX)
+#define PMIXP_BASE_HDR_SIZE (5 * sizeof(uint32_t) + sizeof(uint8_t))
+#define PMIXP_BASE_HDR_EXT_SIZE(ep_len) (sizeof(uint32_t) + ep_len)
+#define PMIXP_BASE_HDR_MAX (PMIXP_BASE_HDR_SIZE + \
+				PMIXP_BASE_HDR_EXT_SIZE(pmixp_dconn_ep_len()))
 
 typedef struct {
 	uint32_t size;		/* Has to be first (appended by SLURM API) */
-	pmixp_slurm_shdr_t shdr;
+	pmixp_base_hdr_t shdr;
 } pmixp_slurm_rhdr_t;
-#define PMIXP_SAPI_RHDR_SIZE (sizeof(uint32_t) + PMIXP_SAPI_SHDR_SIZE)
+#define PMIXP_SAPI_RECV_HDR_SIZE (sizeof(uint32_t) + PMIXP_BASE_HDR_SIZE)
 
-#define PMIXP_BASE_HDR_SETUP(bhdr, mtype, mseq, buf)                  \
-{                                                                   \
-	bhdr.magic = PMIXP_SERVER_MSG_MAGIC;                        \
+#define PMIXP_BASE_HDR_SETUP(bhdr, mtype, mseq, buf)                 \
+{                                                                    \
+	bhdr.magic = PMIXP_SERVER_MSG_MAGIC;                         \
 	bhdr.type = mtype;                                           \
-	bhdr.msgsize = get_buf_offset(buf) - PMIXP_MAX_SEND_HDR;    \
+	bhdr.msgsize = get_buf_offset(buf) - PMIXP_BASE_HDR_MAX;     \
 	bhdr.seq = mseq;                                             \
-	bhdr.nodeid = pmixp_info_nodeid_job();                      \
+	bhdr.nodeid = pmixp_info_nodeid_job();                       \
+	bhdr.ext_flag = 0;                                           \
 }
-
 
 #define PMIXP_SERVER_BUF_MAGIC 0xCA11CAFE
 Buf pmixp_server_buf_new(void)
 {
-	Buf buf = create_buf(xmalloc(PMIXP_MAX_SEND_HDR), PMIXP_MAX_SEND_HDR);
+	Buf buf = create_buf(xmalloc(PMIXP_BASE_HDR_MAX), PMIXP_BASE_HDR_MAX);
 #ifndef NDEBUG
 	/* Makesure that we only use buffers allocated through
 	 * this call, because we reserve the space for the
 	 * header here
 	 */
-	xassert( PMIXP_MAX_SEND_HDR >= sizeof(uint32_t));
+	xassert( PMIXP_BASE_HDR_MAX >= sizeof(uint32_t));
 	uint32_t tmp = PMIXP_SERVER_BUF_MAGIC;
 	pack32(tmp, buf);
 #endif
 
 	/* Skip header. It will be filled right before the sending */
-	set_buf_offset(buf, PMIXP_MAX_SEND_HDR);
+	set_buf_offset(buf, PMIXP_BASE_HDR_MAX);
 	return buf;
 }
 
 size_t pmixp_server_buf_reset(Buf buf)
 {
 #ifndef NDEBUG
-	xassert( PMIXP_MAX_SEND_HDR <= get_buf_offset(buf) );
+	xassert( PMIXP_BASE_HDR_MAX <= get_buf_offset(buf) );
 	set_buf_offset(buf,0);
 	/* Restore the protection magic number
 	 */
 	uint32_t tmp = PMIXP_SERVER_BUF_MAGIC;
 	pack32(tmp, buf);
 #endif
-	set_buf_offset(buf, PMIXP_MAX_SEND_HDR);
-	return PMIXP_MAX_SEND_HDR;
+	set_buf_offset(buf, PMIXP_BASE_HDR_MAX);
+	return PMIXP_BASE_HDR_MAX;
 }
 
 
@@ -135,11 +124,11 @@ static void *_buf_finalize(Buf buf, void *nhdr, size_t hsize,
 			  size_t *dsize)
 {
 	char *ptr = get_buf_data(buf);
-	size_t offset = PMIXP_MAX_SEND_HDR - hsize;
+	size_t offset = PMIXP_BASE_HDR_MAX - hsize;
 #ifndef NDEBUG
 	Buf tbuf = create_buf(ptr, get_buf_offset(buf));
-	xassert(PMIXP_MAX_SEND_HDR >= hsize);
-	xassert(PMIXP_MAX_SEND_HDR <= get_buf_offset(buf));
+	xassert(PMIXP_BASE_HDR_MAX >= hsize);
+	xassert(PMIXP_BASE_HDR_MAX <= get_buf_offset(buf));
 	uint32_t tmp;
 	unpack32(&tmp, tbuf);
 	xassert(PMIXP_SERVER_BUF_MAGIC == tmp);
@@ -157,16 +146,26 @@ static void *_buf_finalize(Buf buf, void *nhdr, size_t hsize,
 	return ptr + offset;
 }
 
-static void _base_hdr_pack(Buf packbuf, pmixp_base_hdr_t *hdr)
+static void _base_hdr_pack_full(Buf packbuf, pmixp_base_hdr_t *hdr)
 {
+	if (hdr->ext_flag) {
+		hdr->msgsize += PMIXP_BASE_HDR_EXT_SIZE(pmixp_dconn_ep_len());
+	}
 	pack32(hdr->magic, packbuf);
 	pack32(hdr->type, packbuf);
 	pack32(hdr->seq, packbuf);
 	pack32(hdr->nodeid, packbuf);
 	pack32(hdr->msgsize, packbuf);
+	pack8(hdr->ext_flag, packbuf);
+	if( hdr->ext_flag ){
+		uint32_t expected_size = PMIXP_BASE_HDR_SIZE +
+				PMIXP_BASE_HDR_EXT_SIZE(pmixp_dconn_ep_len());
+		packmem(pmixp_dconn_ep_data(), pmixp_dconn_ep_len(), packbuf);
+		xassert(get_buf_offset(packbuf) == expected_size);
+	}
 }
 
-static int _base_hdr_unpack(Buf packbuf, pmixp_base_hdr_t *hdr)
+static int _base_hdr_unpack_fixed(Buf packbuf, pmixp_base_hdr_t *hdr)
 {
 	if (unpack32(&hdr->magic, packbuf)) {
 		return -EINVAL;
@@ -188,43 +187,15 @@ static int _base_hdr_unpack(Buf packbuf, pmixp_base_hdr_t *hdr)
 	if (unpack32(&hdr->msgsize, packbuf)) {
 		return -EINVAL;
 	}
-	return 0;
-}
 
-static void _slurm_hdr_pack(Buf packbuf, pmixp_slurm_shdr_t *hdr)
-{
-	if (hdr->ext_flag) {
-		hdr->base_hdr.msgsize += PMIXP_SAPI_SHDR_EXT_SIZE(hdr->ep_len);
-	}
-	_base_hdr_pack(packbuf, &hdr->base_hdr);
-	pack8(hdr->ext_flag, packbuf);
-	xassert(get_buf_offset(packbuf) == PMIXP_SAPI_SHDR_SIZE);
-	if( hdr->ext_flag ){
-		uint32_t expected_size = PMIXP_SAPI_SHDR_SIZE +
-				PMIXP_SAPI_SHDR_EXT_SIZE(pmixp_dconn_ep_len());
-		packmem(hdr->ep_data, hdr->ep_len, packbuf);
-		xassert(get_buf_offset(packbuf) == expected_size);
-	}
-}
-
-static int _slurm_hdr_unpack_base(Buf packbuf, pmixp_slurm_rhdr_t *hdr)
-{
-	if (unpack32(&hdr->size, packbuf)) {
-		return -EINVAL;
-	}
-
-	if (_base_hdr_unpack(packbuf, &hdr->shdr.base_hdr)) {
-		return -EINVAL;
-	}
-
-	if (unpack8(&hdr->shdr.ext_flag, packbuf)) {
+	if (unpack8(&hdr->ext_flag, packbuf)) {
 		return -EINVAL;
 	}
 
 	return 0;
 }
 
-static int _slurm_hdr_unpack_ep(Buf packbuf, char **ep_data, uint32_t *ep_len)
+static int _base_hdr_unpack_ext(Buf packbuf, char **ep_data, uint32_t *ep_len)
 {
 	if( unpackmem_xmalloc(ep_data, ep_len, packbuf) ){
 		return -EINVAL;
@@ -232,22 +203,34 @@ static int _slurm_hdr_unpack_ep(Buf packbuf, char **ep_data, uint32_t *ep_len)
 	return 0;
 }
 
+
+static int _sapi_rhdr_unpack_fixed(Buf packbuf, pmixp_slurm_rhdr_t *hdr)
+{
+	if (unpack32(&hdr->size, packbuf)) {
+		return -EINVAL;
+	}
+
+	if (_base_hdr_unpack_fixed(packbuf, &hdr->shdr)) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 /* SLURM protocol I/O header */
 static uint32_t _slurm_proto_msize(void *buf);
-static int _slurm_pack_hdr(void *host, void *net);
+static int _slurm_pack_hdr(pmixp_base_hdr_t *hdr, void *net);
 static int _slurm_proto_unpack_hdr(void *net, void *host);
-static void _slurm_new_msg(pmixp_conn_t *conn,
-			   void *_hdr, void *msg);
-static int _slurm_send(pmixp_ep_t *ep,
-		       pmixp_base_hdr_t bhdr, Buf buf);
+static void _slurm_new_msg(pmixp_conn_t *conn, void *_hdr, void *msg);
+static int _slurm_send(pmixp_ep_t *ep, pmixp_base_hdr_t bhdr, Buf buf);
 
-pmixp_io_engine_header_t _slurm_proto = {
+pmixp_p2p_data_t _slurm_proto = {
 	/* generic callbacks */
 	.payload_size_cb = _slurm_proto_msize,
 	/* receiver-related fields */
 	.recv_on = 1,
-	.recv_host_hsize = sizeof(pmixp_slurm_rhdr_t),
-	.recv_net_hsize = PMIXP_SAPI_RHDR_SIZE, /*need to skip user ID*/
+	.rhdr_host_size = sizeof(pmixp_slurm_rhdr_t),
+	.rhdr_net_size = PMIXP_SAPI_RECV_HDR_SIZE, /*need to skip user ID*/
 	.recv_padding = sizeof(uint32_t),
 	.hdr_unpack_cb = _slurm_proto_unpack_hdr,
 };
@@ -267,22 +250,29 @@ static void _direct_new_msg(pmixp_conn_t *conn, void *_hdr, void *msg);
 static void _direct_send(pmixp_dconn_t *dconn, pmixp_ep_t *ep,
 			 pmixp_base_hdr_t bhdr, Buf buf,
 			pmixp_server_sent_cb_t complete_cb, void *cb_data);
+static void _direct_return_connection(pmixp_conn_t *conn);
 
+typedef struct {
+	pmixp_base_hdr_t hdr;
+	void *buffer;
+	Buf buf_ptr;
+	pmixp_server_sent_cb_t sent_cb;
+	void *cbdata;
+}_direct_proto_message_t;
 
-pmixp_io_engine_header_t _direct_proto = {
-	/* generic callback */
-	.payload_size_cb = _direct_paysize,
+pmixp_p2p_data_t _direct_proto = {
 	/* receiver-related fields */
 	.recv_on = 1,
-	.recv_host_hsize = sizeof(pmixp_base_hdr_t),
-	.recv_net_hsize = PMIXP_BASE_HDR_SIZE,
+	.rhdr_host_size = sizeof(pmixp_base_hdr_t),
+	.rhdr_net_size = PMIXP_BASE_HDR_SIZE,
 	.recv_padding = 0, /* no padding for the direct proto */
+	.payload_size_cb = _direct_paysize,
 	.hdr_unpack_cb = _direct_hdr_unpack,
-	.buf_return = _direct_new_msg_2,
+	.new_msg = _direct_new_msg_2,
 	/* transmitter-related fields */
 	.send_on = 1,
-	.msg_ptr = _direct_msg_ptr,
-	.msg_size = _direct_msg_size,
+	.buf_ptr = _direct_msg_ptr,
+	.buf_size = _direct_msg_size,
 	.msg_free_cb = _direct_msg_free
 };
 
@@ -535,6 +525,99 @@ static int _serv_write(eio_obj_t *obj, List objs)
 	return 0;
 }
 
+static int _process_extended_hdr(pmixp_base_hdr_t *hdr, Buf buf)
+{
+	char nhdr[PMIXP_BASE_HDR_SIZE];
+	bool send_init = false;
+	size_t dsize = 0, hsize = 0;
+	pmixp_dconn_t *dconn;
+	_direct_proto_message_t *init_msg = NULL;
+	int rc = SLURM_SUCCESS;
+	char *ep_data = NULL;
+	uint32_t ep_len = 0;
+
+	dconn = pmixp_dconn_lock(hdr->nodeid);
+	if (!dconn) {
+		/* Should not happen */
+		xassert( dconn );
+		abort();
+	}
+
+	/* Retrieve endpoint information */
+	_base_hdr_unpack_ext(buf, &ep_data, &ep_len);
+
+	/* Check if init message is required to establish
+	 * the connection
+	 */
+	if (!pmixp_dconn_require_connect(dconn, &send_init)) {
+		goto unlock;
+	}
+
+	if (send_init) {
+		Buf buf_init = pmixp_server_buf_new();
+		pmixp_base_hdr_t bhdr;
+		init_msg = xmalloc(sizeof(*init_msg));
+
+		PMIXP_BASE_HDR_SETUP(bhdr, PMIXP_MSG_INIT_DIRECT, 0, buf_init);
+		bhdr.ext_flag = 1;
+		hsize = _direct_hdr_pack(&bhdr, nhdr);
+
+		init_msg->sent_cb = pmixp_server_sent_buf_cb;
+		init_msg->cbdata = buf_init;
+		init_msg->hdr = bhdr;
+		init_msg->buffer = _buf_finalize(buf_init, nhdr, hsize, &dsize);
+		init_msg->buf_ptr = buf_init;
+	}
+
+	rc = pmixp_dconn_connect(dconn, ep_data, ep_len, init_msg);
+	if (rc) {
+		PMIXP_ERROR("Unable to connect to %d", dconn->nodeid);
+		if (init_msg) {
+			/* need to release `init_msg` here */
+			free_buf(init_msg->buf_ptr);
+			xfree(init_msg);
+		}
+		goto unlock;
+	}
+
+	switch (pmixp_dconn_progress_type(dconn)) {
+	case PMIXP_DCONN_PROGRESS_SW:{
+		/* this direct connection has fd that needs to be
+		 * polled to progress, use connection interface for that
+		 */
+		pmixp_io_engine_t *eng = pmixp_dconn_engine(dconn);
+		pmixp_conn_t *conn;
+		conn = pmixp_conn_new_persist(PMIXP_PROTO_DIRECT, eng,
+					      _direct_new_msg,
+					      _direct_return_connection,
+					      dconn);
+		if( NULL != conn ){
+			eio_obj_t *obj;
+			obj = eio_obj_create(pmixp_io_fd(eng),
+					     &direct_peer_ops,
+					     (void *)conn);
+			eio_new_obj(pmixp_info_io(), obj);
+			eio_signal_wakeup(pmixp_info_io());
+		} else {
+			/* TODO: handle this error */
+			rc = SLURM_ERROR;
+			goto unlock;
+		}
+		break;
+	}
+	case PMIXP_DCONN_PROGRESS_HW: {
+		break;
+	}
+	default:
+		/* Should not happen */
+		xassert(0 && pmixp_dconn_progress_type(dconn));
+		/* TODO: handle this error */
+	}
+unlock:
+	pmixp_dconn_unlock(dconn);
+	return rc;
+}
+
 static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 {
 	char *nodename = pmixp_info_job_host(hdr->nodeid);
@@ -708,15 +791,6 @@ send_direct:
  * ------------------- DIRECT communication protocol -----------------------
  */
 
-
-typedef struct {
-	pmixp_base_hdr_t hdr;
-	void *buffer;
-	Buf buf_ptr;
-	pmixp_server_sent_cb_t sent_cb;
-	void *cbdata;
-}_direct_proto_message_t;
-
 /* Size of the payload */
 static uint32_t _direct_paysize(void *buf)
 {
@@ -733,7 +807,7 @@ static int _direct_hdr_unpack(void *net, void *host)
 	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t *)host;
 	Buf packbuf = create_buf(net, PMIXP_BASE_HDR_SIZE);
 
-	if (_base_hdr_unpack(packbuf,hdr)) {
+	if (_base_hdr_unpack_fixed(packbuf, hdr)) {
 		return -EINVAL;
 	}
 
@@ -751,7 +825,7 @@ static size_t _direct_hdr_pack(void *host, void *net)
 	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t *)host;
 	Buf packbuf = create_buf(net, PMIXP_BASE_HDR_SIZE);
 	int size = 0;
-	_base_hdr_pack(packbuf, hdr);
+	_base_hdr_pack_full(packbuf, hdr);
 	size = get_buf_offset(packbuf);
 	xassert(size == PMIXP_BASE_HDR_SIZE);
 	/* free the Buf packbuf, but not the memory it points to */
@@ -792,6 +866,12 @@ static void _direct_msg_free(void *_msg)
 static void _direct_new_msg_2(void *_hdr, Buf buf)
 {
 	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t*)_hdr;
+	if( hdr->ext_flag ){
+		/* Extra information was incorporated into this message.
+		 * This should be an endpoint data
+		 */
+		_process_extended_hdr(hdr, buf);
+	}
 	_process_server_request(hdr, buf);
 }
 
@@ -923,76 +1003,15 @@ static void _slurm_new_msg(pmixp_conn_t *conn,
 			   void *_hdr, void *msg)
 {
 	pmixp_slurm_rhdr_t *hdr = (pmixp_slurm_rhdr_t *)_hdr;
-	Buf buf_msg = create_buf(msg, hdr->shdr.base_hdr.msgsize);
+	Buf buf_msg = create_buf(msg, hdr->shdr.msgsize);
 
-	if( 0 != hdr->shdr.ext_flag ){
+	if (hdr->shdr.ext_flag ) {
 		/* Extra information was incorporated into this message.
 		 * This should be an endpoint data
 		 */
-		char *ep_data;
-		uint32_t ep_len;
-		char nhdr[PMIXP_BASE_HDR_SIZE];
-		size_t dsize = 0, hsize = 0;
-		pmixp_dconn_t *dconn;
-		Buf buf_init = pmixp_server_buf_new();
-		pmixp_base_hdr_t bhdr;
-		_direct_proto_message_t *init_msg = xmalloc(sizeof(*init_msg));
-
-		PMIXP_BASE_HDR_SETUP(bhdr, PMIXP_MSG_INIT_DIRECT, 0, buf_init);
-		hsize = _direct_hdr_pack(&bhdr, nhdr);
-
-		_slurm_hdr_unpack_ep(buf_msg, &ep_data, &ep_len);
-
-		init_msg->sent_cb = pmixp_server_sent_buf_cb;
-		init_msg->cbdata = buf_init;
-		init_msg->hdr = bhdr;
-		init_msg->buffer = _buf_finalize(buf_init, nhdr, hsize, &dsize);
-		init_msg->buf_ptr = buf_init;
-
-		dconn = pmixp_dconn_connect(hdr->shdr.base_hdr.nodeid,
-					    ep_data, ep_len, init_msg);
-
-		if( NULL != dconn ){
-
-			switch (pmixp_dconn_type(dconn)) {
-			case PMIXP_DIRECT_TYPE_POLL:{
-				/* this direct connection has fd that needs to be
-				 * polled to progress, use connection interface for that
-				 */
-				pmixp_io_engine_t *eng = pmixp_dconn_engine(dconn);
-				pmixp_conn_t *conn;
-				conn = pmixp_conn_new_persist(PMIXP_PROTO_DIRECT, eng,
-							      _direct_new_msg,
-							      _direct_return_connection,
-							      dconn);
-				if( NULL != conn ){
-					eio_obj_t *obj;
-					obj = eio_obj_create(pmixp_io_fd(eng),
-							     &direct_peer_ops,
-							     (void *)conn);
-					eio_new_obj(pmixp_info_io(), obj);
-					eio_signal_wakeup(pmixp_info_io());
-				} else {
-					/* TODO: handle this error */
-				}
-				break;
-			}
-			case PMIXP_DIRECT_TYPE_AM: {
-				pmixp_dconn_set_cb(dconn, NULL);
-				break;
-			}
-			default:
-				/* Should not happen */
-				xassert(0 && pmixp_dconn_type(dconn));
-				/* TODO: handle this error */
-			}
-			pmixp_dconn_unlock(dconn);
-		} else {
-			/* need to release `init_msg` here */
-			xfree(init_msg);
-		}
+		_process_extended_hdr(&hdr->shdr, buf_msg);
 	}
-	_process_server_request(&hdr->shdr.base_hdr, buf_msg);
+	_process_server_request(&hdr->shdr, buf_msg);
 }
 
 
@@ -1034,9 +1053,9 @@ void pmixp_server_slurm_conn(int fd)
 
 static uint32_t _slurm_proto_msize(void *buf)
 {
-pmixp_slurm_rhdr_t *ptr = (pmixp_slurm_rhdr_t *)buf;
-	pmixp_base_hdr_t *hdr = &ptr->shdr.base_hdr;
-	xassert(ptr->size == hdr->msgsize + PMIXP_SAPI_SHDR_SIZE);
+	pmixp_slurm_rhdr_t *ptr = (pmixp_slurm_rhdr_t *)buf;
+	pmixp_base_hdr_t *hdr = &ptr->shdr;
+	xassert(ptr->size == hdr->msgsize + PMIXP_BASE_HDR_SIZE);
 	xassert(hdr->magic == PMIXP_SERVER_MSG_MAGIC);
 	return hdr->msgsize;
 }
@@ -1046,13 +1065,12 @@ pmixp_slurm_rhdr_t *ptr = (pmixp_slurm_rhdr_t *)buf;
  * Returns packed size
  * Note: asymmetric to _recv_unpack_hdr because of additional SLURM header
  */
-static int _slurm_pack_hdr(void *host, void *net)
+static int _slurm_pack_hdr(pmixp_base_hdr_t *hdr, void *net)
 {
-	pmixp_slurm_shdr_t *shdr = (pmixp_slurm_shdr_t *)host;
-	Buf packbuf = create_buf(net, PMIXP_MAX_SEND_HDR);
+	Buf packbuf = create_buf(net, PMIXP_BASE_HDR_MAX);
 	int size = 0;
 
-	_slurm_hdr_pack(packbuf, shdr);
+	_base_hdr_pack_full(packbuf, hdr);
 	size = get_buf_offset(packbuf);
 	/* free the Buf packbuf, but not the memory it points to */
 	packbuf->head = NULL;
@@ -1068,8 +1086,8 @@ static int _slurm_pack_hdr(void *host, void *net)
 static int _slurm_proto_unpack_hdr(void *net, void *host)
 {
 	pmixp_slurm_rhdr_t *rhdr = (pmixp_slurm_rhdr_t *)host;
-	Buf packbuf = create_buf(net, PMIXP_SAPI_RHDR_SIZE);
-	if (_slurm_hdr_unpack_base(packbuf, rhdr) ) {
+	Buf packbuf = create_buf(net, PMIXP_SAPI_RECV_HDR_SIZE);
+	if (_sapi_rhdr_unpack_fixed(packbuf, rhdr) ) {
 		return -EINVAL;
 	}
 	/* free the Buf packbuf, but not the memory it points to */
@@ -1082,23 +1100,19 @@ static int _slurm_proto_unpack_hdr(void *net, void *host)
 static int _slurm_send(pmixp_ep_t *ep, pmixp_base_hdr_t bhdr, Buf buf)
 {
 	const char *addr = NULL, *data = NULL, *hostlist = NULL;
-	pmixp_slurm_shdr_t hdr;
-	char nhdr[PMIXP_SAPI_SHDR_SIZE_MAX];
+	char nhdr[PMIXP_BASE_HDR_MAX];
 	size_t hsize = 0, dsize = 0;
 	int rc;
 
 	/* setup the header */
-	hdr.base_hdr = bhdr;
 	addr = pmixp_info_srv_usock_path();
 
-	hdr.ext_flag = 0;
+	bhdr.ext_flag = 0;
 	if (pmixp_info_srv_direct_conn() && PMIXP_EP_NOIDEID == ep->type) {
-		hdr.ext_flag = 1;
-		hdr.ep_len = pmixp_dconn_ep_len();
-		hdr.ep_data = pmixp_dconn_ep_data();
+		bhdr.ext_flag = 1;
 	}
 
-	hsize = _slurm_pack_hdr(&hdr, nhdr);
+	hsize = _slurm_pack_hdr(&bhdr, nhdr);
 	data = _buf_finalize(buf, nhdr, hsize, &dsize);
 
 	switch( ep->type ){

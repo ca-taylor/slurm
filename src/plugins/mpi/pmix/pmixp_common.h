@@ -134,4 +134,30 @@
 /* The bound after which message is considered large */
 #define PMIXP_PP_BOUND "SLURM_PMIX_PP_LARGE_PWR2"
 
+/* Message access callbacks */
+typedef int (*pmixp_p2p_hdr_unpack_cb_t)(void *hdr_net, void *hdr_host);
+typedef void *(*pmixp_p2p_buf_ptr_cb_t)(void *msg);
+
+typedef uint32_t (*pmixp_2p2_payload_size_cb_t)(void *hdr);
+typedef size_t (*pmixp_p2p_buf_size_cb_t)(void *msg);
+typedef void (*pmixp_p2p_msg_free_cb_t)(void *msg);
+typedef void (*pmixp_p2p_msg_return_cb_t)(void *hdr, Buf buf);
+
+typedef struct {
+	/* receiver-related fields */
+	bool recv_on;
+	uint32_t rhdr_host_size;
+	uint32_t rhdr_net_size;
+	pmixp_2p2_payload_size_cb_t payload_size_cb;
+	pmixp_p2p_hdr_unpack_cb_t hdr_unpack_cb;
+	pmixp_p2p_msg_return_cb_t new_msg;
+	uint32_t recv_padding;
+	/* transmitter-related fields */
+	bool send_on;
+	pmixp_p2p_buf_ptr_cb_t  buf_ptr;
+	pmixp_p2p_buf_size_cb_t buf_size;
+	pmixp_p2p_msg_free_cb_t msg_free_cb;
+} pmixp_p2p_data_t;
+
+
 #endif /* PMIXP_COMMON_H */

@@ -45,7 +45,7 @@ typedef struct {
 	pmixp_io_engine_t eng;
 } pmixp_dconn_tcp_t;
 
-static void *_tcp_init(int nodeid, pmixp_io_engine_header_t direct_hdr);
+static void *_tcp_init(int nodeid, pmixp_p2p_data_t direct_hdr);
 static void _tcp_fini(void *_priv);
 static int _tcp_connect(void *_priv, void *ep_data, size_t ep_len,
 			void *init_msg);
@@ -82,7 +82,7 @@ void pmixp_dconn_tcp_finalize()
 	close(_server_fd);
 }
 
-static void *_tcp_init(int nodeid, pmixp_io_engine_header_t direct_hdr)
+static void *_tcp_init(int nodeid, pmixp_p2p_data_t direct_hdr)
 {
 	pmixp_dconn_tcp_t *priv = xmalloc(sizeof(pmixp_dconn_tcp_t));
 	pmixp_io_init(&priv->eng, direct_hdr);
@@ -142,8 +142,11 @@ static int _tcp_connect(void *_priv, void *ep_data, size_t ep_len,
 	pmixp_fd_set_nodelay(fd);
 	fd_set_nonblocking(fd);
 
-	/* Init message has to be first in the line */
-	pmixp_io_send_urgent(&priv->eng, init_msg);
+	/* Send initialization message if requested */
+	if (init_msg) {
+		/* Init message has to be first in the line */
+		pmixp_io_send_urgent(&priv->eng, init_msg);
+	}
 
 	/* enable send */
 	pmixp_io_attach(&priv->eng, fd);

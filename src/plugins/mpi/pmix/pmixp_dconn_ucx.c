@@ -45,7 +45,7 @@ static int _service_pipe[2];
 static List _ucx_req_rcv, _ucx_req_snd, _ucx_send_pending;
 static int _server_fd = -1;
 static bool _direct_hdr_set = false;
-static pmixp_io_engine_header_t _direct_hdr;
+static pmixp_p2p_data_t _direct_hdr;
 static void *_host_hdr = NULL;
 pthread_mutex_t _ucx_worker_lock;
 
@@ -74,7 +74,7 @@ typedef struct {
 	ucp_ep_h server_ep;
 	void *ucx_addr;
 	size_t ucx_alen;
-	pmixp_io_engine_header_t eng_hdr;
+	pmixp_p2p_data_t eng_hdr;
 } pmixp_dconn_ucx_t;
 
 static void _pending_send_destruct(void *obj)
@@ -161,7 +161,7 @@ static struct io_operations _progress_ops = {
 	.handle_read = _progress_read
 };
 
-static void *_ucx_init(int nodeid, pmixp_io_engine_header_t direct_hdr);
+static void *_ucx_init(int nodeid, pmixp_p2p_data_t direct_hdr);
 static void _ucx_fini(void *_priv);
 static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
 			void *init_msg);
@@ -270,8 +270,8 @@ void _ucx_process_msg(char *buffer, size_t len)
 	_direct_hdr.hdr_unpack_cb(buffer, _host_hdr);
 
 	Buf buf = create_buf(buffer, len);
-	set_buf_offset(buf, _direct_hdr.recv_net_hsize);
-	_direct_hdr.buf_return(_host_hdr, buf);
+	set_buf_offset(buf, _direct_hdr.rhdr_net_size);
+	_direct_hdr.new_msg(_host_hdr, buf);
 }
 
 static void _ucx_progress()
@@ -408,7 +408,7 @@ static int _progress_read(eio_obj_t *obj, List objs)
 	return 0;
 }
 
-static void *_ucx_init(int nodeid, pmixp_io_engine_header_t direct_hdr)
+static void *_ucx_init(int nodeid, pmixp_p2p_data_t direct_hdr)
 {
 	pmixp_dconn_ucx_t *priv = xmalloc(sizeof(pmixp_dconn_ucx_t));
 	priv->nodeid = nodeid;
@@ -416,7 +416,7 @@ static void *_ucx_init(int nodeid, pmixp_io_engine_header_t direct_hdr)
 	if (!_direct_hdr_set) {
 		_direct_hdr = direct_hdr;
 		_direct_hdr_set = true;
-		_host_hdr = xmalloc(_direct_hdr.recv_host_hsize);
+		_host_hdr = xmalloc(_direct_hdr.rhdr_host_size);
 	}
 	return (void*)priv;
 }
@@ -453,7 +453,11 @@ static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
 		goto exit;
 	}
 	priv->connected = true;
-	list_push(_ucx_send_pending, init_msg);
+
+	/* Enqueue initialization message if requested */
+	if (init_msg) {
+		list_push(_ucx_send_pending, init_msg);
+	}
 exit:
 	slurm_mutex_unlock(&_ucx_worker_lock);
 	if (SLURM_SUCCESS == rc){
@@ -480,8 +484,8 @@ static int _ucx_send(void *_priv, void *msg)
 	} else {
 		pmixp_ucx_req_t *req = NULL;
 		xassert(_direct_hdr_set);
-		char *mptr = _direct_hdr.msg_ptr(msg);
-		size_t msize = _direct_hdr.msg_size(msg);
+		char *mptr = _direct_hdr.buf_ptr(msg);
+		size_t msize = _direct_hdr.buf_size(msg);
 		req = (pmixp_ucx_req_t*)ucp_tag_send_nb(priv->server_ep,
 						(void*)mptr, msize,
 						ucp_dt_make_contig(1), 1,

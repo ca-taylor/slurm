@@ -50,7 +50,7 @@
 static inline void _rcvd_clear_counters(pmixp_io_engine_t *eng);
 
 static void
-_verify_transceiver(pmixp_io_engine_header_t header)
+_verify_transceiver(pmixp_p2p_data_t header)
 {
 	/* sanity checks */
 	if (NULL == header.payload_size_cb){
@@ -59,11 +59,11 @@ _verify_transceiver(pmixp_io_engine_header_t header)
 	}
 
 	if( header.recv_on ){
-		if (0 == header.recv_host_hsize){
+		if (0 == header.rhdr_host_size){
 			PMIXP_ERROR("Bad host header size");
 			goto check_fail;
 		}
-		if (0 == header.recv_net_hsize){
+		if (0 == header.rhdr_net_size){
 			PMIXP_ERROR("Bad net header size");
 			goto check_fail;
 		}
@@ -75,11 +75,11 @@ _verify_transceiver(pmixp_io_engine_header_t header)
 
 	/* sanity checks */
 	if( header.send_on ){
-		if (NULL == header.msg_ptr){
+		if (NULL == header.buf_ptr){
 			PMIXP_ERROR("No message pointer callback provided");
 			goto check_fail;
 		}
-		if (NULL == header.msg_size){
+		if (NULL == header.buf_size){
 			PMIXP_ERROR("No message size callback provided");
 			goto check_fail;
 		}
@@ -94,7 +94,7 @@ check_fail:
 }
 
 void pmixp_io_init(pmixp_io_engine_t *eng,
-		  pmixp_io_engine_header_t header)
+		  pmixp_p2p_data_t header)
 {
 	memset(eng, 0, sizeof(*eng));
 	/* Initialize general options */
@@ -111,8 +111,8 @@ void pmixp_io_init(pmixp_io_engine_t *eng,
 	if( eng->h.recv_on ){
 		_rcvd_clear_counters(eng);
 		/* we are going to receive data */
-		eng->rcvd_hdr_net = xmalloc(eng->h.recv_net_hsize);
-		eng->rcvd_hdr_host = xmalloc(eng->h.recv_host_hsize);
+		eng->rcvd_hdr_net = xmalloc(eng->h.rhdr_net_size);
+		eng->rcvd_hdr_host = xmalloc(eng->h.rhdr_host_size);
 	} else {
 		/* receiver won't be used */
 		eng->rcvd_hdr_host = NULL;
@@ -248,7 +248,7 @@ static inline int _rcvd_swithch_to_body(pmixp_io_engine_t *eng)
 	xassert(NULL != eng->rcvd_hdr_net);
 	xassert(pmixp_io_operating(eng));
 	xassert(eng->h.recv_on);
-	xassert(eng->h.recv_net_hsize == eng->rcvd_hdr_offs);
+	xassert(eng->h.rhdr_net_size == eng->rcvd_hdr_offs);
 
 	eng->rcvd_pay_offs = eng->rcvd_pay_size = 0;
 	eng->rcvd_payload = NULL;
@@ -282,7 +282,7 @@ static inline bool _rcvd_need_header(pmixp_io_engine_t *eng)
 	xassert(pmixp_io_operating(eng));
 	xassert(eng->h.recv_on);
 
-	return eng->rcvd_hdr_offs < eng->h.recv_net_hsize;
+	return eng->rcvd_hdr_offs < eng->h.rhdr_net_size;
 }
 
 void pmixp_io_rcvd_progress(pmixp_io_engine_t *eng)
@@ -329,7 +329,7 @@ void pmixp_io_rcvd_progress(pmixp_io_engine_t *eng)
 
 	if (_rcvd_need_header(eng)) {
 		/* need to finish with the header */
-		size = eng->h.recv_net_hsize;
+		size = eng->h.rhdr_net_size;
 		remain = size - eng->rcvd_hdr_offs;
 		offs = eng->rcvd_hdr_net + eng->rcvd_hdr_offs;
 		eng->rcvd_hdr_offs +=
@@ -354,7 +354,7 @@ void pmixp_io_rcvd_progress(pmixp_io_engine_t *eng)
 		/* go ahared with body receive */
 	}
 	/* we are receiving the body */
-	xassert(eng->rcvd_hdr_offs == eng->h.recv_net_hsize);
+	xassert(eng->rcvd_hdr_offs == eng->h.rhdr_net_size);
 	if (0 == eng->rcvd_pay_size) {
 		/* zero-byte message. Exit so we will hit pmixp_io_rcvd_ready */
 		return;
@@ -389,7 +389,7 @@ void *pmixp_io_rcvd_extract(pmixp_io_engine_t *eng, void *header)
 		return NULL;
 	}
 	void *ptr = eng->rcvd_payload;
-	memcpy(header, eng->rcvd_hdr_host, (size_t)eng->h.recv_host_hsize);
+	memcpy(header, eng->rcvd_hdr_host, (size_t)eng->h.rhdr_host_size);
 	/* Drop message state to receive new one */
 	_rcvd_clear_counters(eng);
 	return ptr;
@@ -409,8 +409,8 @@ static inline int _send_set_current(pmixp_io_engine_t *eng, void *msg)
 	eng->send_current = msg;
 
 	/* Setup payload for sending */
-	eng->send_msg_ptr = eng->h.msg_ptr(msg);
-	eng->send_msg_size = eng->h.msg_size(msg);
+	eng->send_msg_ptr = eng->h.buf_ptr(msg);
+	eng->send_msg_size = eng->h.buf_size(msg);
 
 	/* Setup send offset */
 	eng->send_offs = 0;

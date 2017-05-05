@@ -263,7 +263,7 @@ static void *_agent_thread(void *unused)
 
 	pmixp_info_io_set(_io_handle);
 
-	if (PMIXP_DIRECT_TYPE_POLL == pmixp_dconn_type()) {
+	if (PMIXP_DCONN_PROGRESS_SW == pmixp_dconn_progress_type()) {
 		obj = eio_obj_create(pmixp_dconn_poll_fd(), &srv_ops, (void *)(-1));
 		eio_new_initial_obj(_io_handle, obj);
 	} else {
