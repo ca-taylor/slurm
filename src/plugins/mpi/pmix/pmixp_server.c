@@ -826,7 +826,8 @@ static size_t _direct_hdr_pack(pmixp_base_hdr_t *hdr, void *net)
 	int size = 0;
 	_base_hdr_pack_full(packbuf, hdr);
 	size = get_buf_offset(packbuf);
-	xassert(size == PMIXP_BASE_HDR_SIZE);
+	xassert(size >= PMIXP_BASE_HDR_SIZE);
+	xassert(size <= PMIXP_BASE_HDR_MAX);
 	/* free the Buf packbuf, but not the memory it points to */
 	packbuf->head = NULL;
 	free_buf(packbuf);
