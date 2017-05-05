@@ -334,6 +334,7 @@ static void _ucx_progress()
 		}
 		req->buffer = msg;
 		req->len = info_tag.length;
+		list_append(_ucx_req_rcv, req);
 	}
 
 	if( !list_count(_ucx_req_rcv) && !list_count(_ucx_req_snd)){
