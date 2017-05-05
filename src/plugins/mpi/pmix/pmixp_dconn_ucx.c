@@ -249,6 +249,21 @@ err_worker:
 
 }
 
+static int _activate_progress()
+{
+	char buf = 'c';
+	int rc = write(_service_pipe[1], &buf, sizeof(buf));
+	if( sizeof(buf) != rc ){
+		PMIXP_ERROR("Unable to activate UCX progress");
+		if( 0 > rc ){
+			return rc;
+		} else {
+			return SLURM_ERROR;
+		}
+	}
+	return SLURM_SUCCESS;
+}
+
 void _ucx_process_msg(char *buffer, size_t len)
 {
 	xassert(_direct_hdr_set);
@@ -329,6 +344,15 @@ static void _ucx_progress()
 
 static bool _epoll_readable(eio_obj_t *obj)
 {
+	ucs_status_t status;
+
+	slurm_mutex_lock(&_ucx_worker_lock);
+	status = ucp_worker_arm(ucp_worker);
+	if (status == UCS_ERR_BUSY) { /* some events are arrived already */
+		_progress_on = 1;
+		_activate_progress();
+	}
+	slurm_mutex_unlock(&_ucx_worker_lock);
 	return true;
 }
 
@@ -339,21 +363,6 @@ static int _epoll_read(eio_obj_t *obj, List objs)
 	_ucx_progress();
 	slurm_mutex_unlock(&_ucx_worker_lock);
 	return 0;
-}
-
-static int _activate_progress()
-{
-	char buf = 'c';
-	int rc = write(_service_pipe[1], &buf, sizeof(buf));
-	if( sizeof(buf) != rc ){
-		PMIXP_ERROR("Unable to activate UCX progress");
-		if( 0 > rc ){
-			return rc;
-		} else {
-			return SLURM_ERROR;
-		}
-	}
-	return SLURM_SUCCESS;
 }
 
 static bool _progress_readable(eio_obj_t *obj)
