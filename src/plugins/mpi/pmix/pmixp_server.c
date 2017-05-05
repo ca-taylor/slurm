@@ -237,7 +237,7 @@ pmixp_p2p_data_t _slurm_proto = {
 
 /* direct protocol I/O header */
 static uint32_t _direct_paysize(void *hdr);
-static size_t _direct_hdr_pack(void *host, void *net);
+static size_t _direct_hdr_pack(pmixp_base_hdr_t *hdr, void *net);
 static int _direct_hdr_unpack(void *net, void *host);
 
 static void *_direct_msg_ptr(void *msg);
@@ -527,7 +527,7 @@ static int _serv_write(eio_obj_t *obj, List objs)
 
 static int _process_extended_hdr(pmixp_base_hdr_t *hdr, Buf buf)
 {
-	char nhdr[PMIXP_BASE_HDR_SIZE];
+	char nhdr[PMIXP_BASE_HDR_MAX];
 	bool send_init = false;
 	size_t dsize = 0, hsize = 0;
 	pmixp_dconn_t *dconn;
@@ -820,9 +820,8 @@ static int _direct_hdr_unpack(void *net, void *host)
 /*
  * Pack message header. Returns packed size
  */
-static size_t _direct_hdr_pack(void *host, void *net)
+static size_t _direct_hdr_pack(pmixp_base_hdr_t *hdr, void *net)
 {
-	pmixp_base_hdr_t *hdr = (pmixp_base_hdr_t *)host;
 	Buf packbuf = create_buf(net, PMIXP_BASE_HDR_SIZE);
 	int size = 0;
 	_base_hdr_pack_full(packbuf, hdr);
