@@ -822,7 +822,7 @@ static int _direct_hdr_unpack(void *net, void *host)
  */
 static size_t _direct_hdr_pack(pmixp_base_hdr_t *hdr, void *net)
 {
-	Buf packbuf = create_buf(net, PMIXP_BASE_HDR_SIZE);
+	Buf packbuf = create_buf(net, PMIXP_BASE_HDR_MAX);
 	int size = 0;
 	_base_hdr_pack_full(packbuf, hdr);
 	size = get_buf_offset(packbuf);
