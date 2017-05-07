@@ -687,6 +687,9 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		buf = create_buf(NULL, 0);
 		break;
 	}
+	case PMIXP_MSG_INIT_DIRECT:
+		PMIXP_ERROR("Direct connection init from %d", hdr->nodeid);
+		break;
 #ifndef NDEBUG
 	case PMIXP_MSG_PINGPONG: {
 		/* if the pingpong mode was activated - node 0 sends ping requests
