@@ -40,7 +40,6 @@
 #include <ucp/api/ucp.h>
 
 /* local variables */
-static bool _progress_on = false;
 static int _service_pipe[2];
 static List _ucx_req_rcv, _ucx_req_snd, _ucx_send_pending;
 static int _server_fd = -1;
@@ -280,9 +279,13 @@ static void _ucx_progress()
 	ucp_tag_message_h msg_tag;
 	ucp_tag_recv_info_t info_tag;
 	ListIterator it;
+	List _send_complete = list_create(NULL);
+	List _recv_complete = list_create(NULL);
 
-	/* Progress UCX */
+	/* protected progress of UCX */
+	slurm_mutex_lock(&_ucx_worker_lock);
 	ucp_worker_progress(ucp_worker);
+	slurm_mutex_unlock(&_ucx_worker_lock);
 
 	/* Check pending requests */
 	it = list_iterator_create(_ucx_req_rcv);
@@ -291,14 +294,11 @@ static void _ucx_progress()
 			continue;
 		}
 		list_remove(it);
+		list_append(_recv_complete, req);
 		if (PMIXP_UCX_FAILED == req->status){
-			_recv_req_release(req);
 			continue;
 		}
 		_ucx_process_msg(req->buffer, req->len);
-		/* release request to UCX */
-		memset(req, 0, sizeof(*req));
-		ucp_request_release(req);
 	}
 
 	it = list_iterator_create(_ucx_req_snd);
@@ -307,15 +307,7 @@ static void _ucx_progress()
 			continue;
 		}
 		list_remove(it);
-		if (PMIXP_UCX_FAILED == req->status){
-			_send_req_release(req);
-			continue;
-		}
-		xassert(_direct_hdr_set);
-		_direct_hdr.msg_free_cb(req->msg);
-		/* release request to UCX */
-		memset(req, 0, sizeof(*req));
-		ucp_request_release(req);
+		list_append(_send_complete, req);
 	}
 
 	/* check for new messages */
@@ -337,10 +329,40 @@ static void _ucx_progress()
 		list_append(_ucx_req_rcv, req);
 	}
 
-	if( !list_count(_ucx_req_rcv) && !list_count(_ucx_req_snd)){
-		/* All done with the progress */
-		_progress_on = false;
+
+	slurm_mutex_lock(&_ucx_worker_lock);
+
+	it = list_iterator_create(_recv_complete);
+	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
+		list_remove(it);
+		if (PMIXP_UCX_FAILED == req->status){
+			_recv_req_release(req);
+			continue;
+		}
+		/* release request to UCX */
+		memset(req, 0, sizeof(*req));
+		ucp_request_release(req);
 	}
+
+	it = list_iterator_create(_send_complete);
+	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
+		if (PMIXP_UCX_ACTIVE == req->status){
+			continue;
+		}
+		list_remove(it);
+		if (PMIXP_UCX_FAILED == req->status){
+			_send_req_release(req);
+			continue;
+		}
+		xassert(_direct_hdr_set);
+		_direct_hdr.msg_free_cb(req->msg);
+		/* release request to UCX */
+		memset(req, 0, sizeof(*req));
+		ucp_request_release(req);
+	}
+
+	slurm_mutex_unlock(&_ucx_worker_lock);
+
 }
 
 static bool _epoll_readable(eio_obj_t *obj)
@@ -349,20 +371,17 @@ static bool _epoll_readable(eio_obj_t *obj)
 
 	slurm_mutex_lock(&_ucx_worker_lock);
 	status = ucp_worker_arm(ucp_worker);
+	slurm_mutex_unlock(&_ucx_worker_lock);
+
 	if (status == UCS_ERR_BUSY) { /* some events are arrived already */
-		_progress_on = 1;
 		_activate_progress();
 	}
-	slurm_mutex_unlock(&_ucx_worker_lock);
 	return true;
 }
 
 static int _epoll_read(eio_obj_t *obj, List objs)
 {
-	slurm_mutex_lock(&_ucx_worker_lock);
-	_progress_on = true;
 	_ucx_progress();
-	slurm_mutex_unlock(&_ucx_worker_lock);
 	return 0;
 }
 
@@ -377,7 +396,7 @@ static bool _progress_readable(eio_obj_t *obj)
 		return false;
 	}
 
-	if( _progress_on ){
+	if( list_count(_ucx_req_rcv) || list_count(_ucx_req_snd)){
 		_activate_progress();
 	}
 	return true;
@@ -396,14 +415,10 @@ static int _progress_read(eio_obj_t *obj, List objs)
 		return 0;
 	}
 
-	assert(_progress_on);
-
 	/* empty pipe */
 	while( sizeof(buf) == read(_service_pipe[0], &buf, sizeof(buf)) );
 
-	slurm_mutex_lock(&_ucx_worker_lock);
 	_ucx_progress();
-	slurm_mutex_unlock(&_ucx_worker_lock);
 
 	return 0;
 }
@@ -477,6 +492,7 @@ static int _ucx_send(void *_priv, void *msg)
 {
 	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
 	int rc = SLURM_SUCCESS;
+	bool release = false;
 
 	slurm_mutex_lock(&_ucx_worker_lock);
 	if( !priv->connected ){
@@ -494,19 +510,23 @@ static int _ucx_send(void *_priv, void *msg)
 			PMIXP_ERROR("Unable to send UCX message: %s\n", ucs_status_string(UCS_PTR_STATUS(req)));
 			goto exit;
 		} else if (UCS_OK == UCS_PTR_STATUS(req)) {
-			_direct_hdr.msg_free_cb(msg);
-			ucp_request_release(req);
+			/* defer release until we unlock ucp worker */
+			release = true;
 		} else {
 			req->msg = msg;
 			req->buffer = mptr;
 			req->len = msize;
 			list_append(_ucx_req_snd, (void*)req);
-			_progress_on = true;
 			_activate_progress();
+
 		}
 	}
 exit:
 	slurm_mutex_unlock(&_ucx_worker_lock);
+
+	if (release){
+		_direct_hdr.msg_free_cb(msg);
+	}
 	return rc;
 }
 
