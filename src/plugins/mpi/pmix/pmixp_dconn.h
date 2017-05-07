@@ -227,7 +227,7 @@ pmixp_dconn_connect(pmixp_dconn_t *dconn, void *ep_data, int ep_len, void *init_
 	int rc;
 	/* establish the connection */
 	rc = pmixp_dconn_connect_do(dconn, ep_data, ep_len, init_msg);
-	if (rc){
+	if (SLURM_SUCCESS == rc){
 		dconn->state = PMIXP_DIRECT_CONNECTED;
 	} else {
 		/* drop the state to INIT so we will try again later
