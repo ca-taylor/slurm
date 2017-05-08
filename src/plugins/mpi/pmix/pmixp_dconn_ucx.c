@@ -448,8 +448,10 @@ static void *_ucx_init(int nodeid, pmixp_p2p_data_t direct_hdr)
 static void _ucx_fini(void *_priv)
 {
 	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
-	xfree(priv->ucx_addr);
-	ucp_ep_destroy(priv->server_ep);
+	if (priv->connected) {
+		xfree(priv->ucx_addr);
+		ucp_ep_destroy(priv->server_ep);
+	}
 	xfree(priv);
 }
 
