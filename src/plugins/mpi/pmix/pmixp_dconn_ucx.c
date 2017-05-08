@@ -76,10 +76,6 @@ typedef struct {
 	pmixp_p2p_data_t eng_hdr;
 } pmixp_dconn_ucx_t;
 
-static void _pending_send_destruct(void *obj)
-{
-}
-
 static inline void _recv_req_release(pmixp_ucx_req_t *req)
 {
 	if( req->buffer ){
@@ -89,27 +85,13 @@ static inline void _recv_req_release(pmixp_ucx_req_t *req)
 	ucp_request_release(req);
 }
 
-static void _recv_req_destruct(void *obj)
-{
-	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
-	ucp_request_cancel(ucp_worker, req);
-	_recv_req_release(req);
-}
-
-static inline void _send_req_release(pmixp_ucx_req_t *req)
+static inline void _send_req_release(pmixp_ucx_req_t *req, int rc)
 {
 	if( req->buffer ){
-		_direct_hdr.msg_free_cb(req->msg);
+		_direct_hdr.send_complete(req->msg, PMIXP_P2P_REGULAR, rc);
 	}
 	memset(req, 0, sizeof(*req));
 	ucp_request_release(req);
-}
-
-static void _send_req_destruct(void *obj)
-{
-	pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
-	ucp_request_cancel(ucp_worker, req);
-	_send_req_release(req);
 }
 
 static void request_init(void *request)
@@ -177,9 +159,9 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 
 	slurm_mutex_init(&_ucx_worker_lock);
 
-	_ucx_req_snd = list_create(_send_req_destruct);
-	_ucx_req_rcv = list_create(_recv_req_destruct);
-	_ucx_send_pending = list_create(_pending_send_destruct);
+	_ucx_req_snd = list_create(NULL);
+	_ucx_req_rcv = list_create(NULL);
+	_ucx_send_pending = list_create(NULL);
 
 	status = ucp_config_read(NULL, NULL, &config);
 	if (status != UCS_OK) {
@@ -247,6 +229,32 @@ err_worker:
 	return SLURM_ERROR;
 
 }
+
+void pmixp_dconn_ucx_finalize()
+{
+	ListIterator it;
+	void *obj;
+	it = list_iterator_create(_ucx_req_snd);
+	while ((obj = list_next(it))) {
+		list_remove(it);
+		pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
+		ucp_request_cancel(ucp_worker, req);
+		_send_req_release(req, SLURM_SUCCESS);
+	}
+
+	it = list_iterator_create(_ucx_req_rcv);
+	while ((obj = list_next(it))){
+		pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
+		ucp_request_cancel(ucp_worker, req);
+		_recv_req_release(req);
+	}
+
+	it = list_iterator_create(_ucx_send_pending);
+	while ((obj = list_next(it))) {
+		_direct_hdr.send_complete(obj, PMIXP_P2P_REGULAR, SLURM_SUCCESS);
+	}
+}
+
 
 static int _activate_progress()
 {
@@ -351,11 +359,12 @@ static void _ucx_progress()
 		}
 		list_remove(it);
 		if (PMIXP_UCX_FAILED == req->status){
-			_send_req_release(req);
+			_send_req_release(req, SLURM_ERROR);
 			continue;
 		}
 		xassert(_direct_hdr_set);
-		_direct_hdr.msg_free_cb(req->msg);
+		_direct_hdr.send_complete(req->msg, PMIXP_P2P_REGULAR,
+					  SLURM_SUCCESS);
 		/* release request to UCX */
 		memset(req, 0, sizeof(*req));
 		ucp_request_release(req);
@@ -525,7 +534,7 @@ exit:
 	slurm_mutex_unlock(&_ucx_worker_lock);
 
 	if (release){
-		_direct_hdr.msg_free_cb(msg);
+		_direct_hdr.send_complete(msg, PMIXP_P2P_INLINE, SLURM_SUCCESS);
 	}
 	return rc;
 }

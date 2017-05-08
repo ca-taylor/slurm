@@ -134,13 +134,18 @@
 /* The bound after which message is considered large */
 #define PMIXP_PP_BOUND "SLURM_PMIX_PP_LARGE_PWR2"
 
+typedef enum {
+	PMIXP_P2P_INLINE,
+	PMIXP_P2P_REGULAR
+} pmixp_p2p_ctx_t;
+
 /* Message access callbacks */
 typedef int (*pmixp_p2p_hdr_unpack_cb_t)(void *hdr_net, void *hdr_host);
 typedef void *(*pmixp_p2p_buf_ptr_cb_t)(void *msg);
 
 typedef uint32_t (*pmixp_2p2_payload_size_cb_t)(void *hdr);
 typedef size_t (*pmixp_p2p_buf_size_cb_t)(void *msg);
-typedef void (*pmixp_p2p_msg_free_cb_t)(void *msg);
+typedef void (*pmixp_p2p_send_complete_cb_t)(void *msg, pmixp_p2p_ctx_t ctx, int rc);
 typedef void (*pmixp_p2p_msg_return_cb_t)(void *hdr, Buf buf);
 
 typedef struct {
@@ -156,7 +161,7 @@ typedef struct {
 	bool send_on;
 	pmixp_p2p_buf_ptr_cb_t  buf_ptr;
 	pmixp_p2p_buf_size_cb_t buf_size;
-	pmixp_p2p_msg_free_cb_t msg_free_cb;
+	pmixp_p2p_send_complete_cb_t send_complete;
 } pmixp_p2p_data_t;
 
 

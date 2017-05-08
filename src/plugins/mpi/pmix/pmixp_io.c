@@ -83,7 +83,7 @@ _verify_transceiver(pmixp_p2p_data_t header)
 			PMIXP_ERROR("No message size callback provided");
 			goto check_fail;
 		}
-		if (NULL == header.msg_free_cb){
+		if (NULL == header.send_complete){
 			PMIXP_ERROR("No message free callback provided");
 			goto check_fail;
 		}
@@ -124,8 +124,8 @@ void pmixp_io_init(pmixp_io_engine_t *eng,
 	eng->send_current = NULL;
 	eng->send_offs = eng->send_msg_size = 0;
 	eng->send_msg_ptr = NULL;
-	eng->send_queue = list_create(eng->h.msg_free_cb);
-	eng->complete_queue = list_create(eng->h.msg_free_cb);
+	eng->send_queue = list_create(NULL);
+	eng->complete_queue = list_create(NULL);
 }
 
 static inline void
@@ -149,11 +149,13 @@ _pmixp_io_drop_messages(pmixp_io_engine_t *eng)
 
 		/* drop all outstanding messages */
 		while( (msg = list_dequeue(eng->send_queue) ) ){
-			eng->h.msg_free_cb(msg);
+			eng->h.send_complete(msg, PMIXP_P2P_REGULAR,
+					     SLURM_SUCCESS);
 		}
 
 		if (NULL != eng->send_current) {
-			eng->h.msg_free_cb(eng->send_current);
+			eng->h.send_complete(eng->send_current,
+					     PMIXP_P2P_REGULAR, SLURM_SUCCESS);
 			eng->send_current = NULL;
 		}
 		eng->send_msg_ptr = NULL;
@@ -584,7 +586,7 @@ void pmixp_io_send_cleanup(pmixp_io_engine_t *eng)
 {
 	void *msg = NULL;
 	while( (msg = list_dequeue(eng->complete_queue) ) ){
-		eng->h.msg_free_cb(msg);
+		eng->h.send_complete(msg, PMIXP_P2P_REGULAR, SLURM_SUCCESS);
 	}
 }
 
