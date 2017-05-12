@@ -913,7 +913,6 @@ _direct_conn_establish(pmixp_conn_t *conn, void *_hdr, void *msg)
 	eio_obj_t *obj;
 	int fd;
 
-	xassert(0 == hdr->msgsize);
 	fd = pmixp_io_detach(eng);
 
 	dconn = pmixp_dconn_accept(hdr->nodeid, fd);
