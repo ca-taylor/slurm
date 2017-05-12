@@ -293,6 +293,25 @@ static void _ucx_progress()
 	/* protected progress of UCX */
 	slurm_mutex_lock(&_ucx_worker_lock);
 	ucp_worker_progress(ucp_worker);
+
+	/* check for new messages */
+	while(1) {
+		msg_tag = ucp_tag_probe_nb(ucp_worker, 1, 0xffffffffffffffff, 1, &info_tag);
+		if( NULL == msg_tag ) {
+			break;
+		}
+		char *msg = xmalloc(info_tag.length);
+		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
+				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
+						    ucp_dt_make_contig(1), msg_tag, recv_handle);
+		if (UCS_PTR_IS_ERR(req)) {
+			PMIXP_ERROR("ucp_tag_msg_recv_nb failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
+			continue;
+		}
+		req->buffer = msg;
+		req->len = info_tag.length;
+		list_append(_ucx_req_rcv, req);
+	}
 	slurm_mutex_unlock(&_ucx_worker_lock);
 
 	/* Check pending requests */
@@ -318,28 +337,7 @@ static void _ucx_progress()
 		list_append(_send_complete, req);
 	}
 
-	/* check for new messages */
-	while(1) {
-		msg_tag = ucp_tag_probe_nb(ucp_worker, 1, 0xffffffffffffffff, 1, &info_tag);
-		if( NULL == msg_tag ) {
-			break;
-		}
-		char *msg = xmalloc(info_tag.length);
-		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
-				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
-						    ucp_dt_make_contig(1), msg_tag, recv_handle);
-		if (UCS_PTR_IS_ERR(req)) {
-			PMIXP_ERROR("ucp_tag_msg_recv_nb failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
-			continue;
-		}
-		req->buffer = msg;
-		req->len = info_tag.length;
-		list_append(_ucx_req_rcv, req);
-	}
-
-
 	slurm_mutex_lock(&_ucx_worker_lock);
-
 	it = list_iterator_create(_recv_complete);
 	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
 		list_remove(it);

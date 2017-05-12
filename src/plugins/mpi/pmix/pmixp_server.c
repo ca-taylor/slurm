@@ -688,7 +688,7 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		break;
 	}
 	case PMIXP_MSG_INIT_DIRECT:
-		PMIXP_ERROR("Direct connection init from %d", hdr->nodeid);
+		PMIXP_DEBUG("Direct connection init from %d", hdr->nodeid);
 		break;
 #ifndef NDEBUG
 	case PMIXP_MSG_PINGPONG: {
