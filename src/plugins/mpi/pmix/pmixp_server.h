@@ -104,6 +104,7 @@ void pmixp_server_pp_inc();
 void pmixp_server_pp_start();
 int pmixp_server_pp_warmups();
 int pmixp_server_pp_same_thread();
+bool pmixp_server_pp_check_fini();
 
 #else
 /* Stubs for the initialization code */

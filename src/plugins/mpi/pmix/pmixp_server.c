@@ -695,18 +695,21 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		/* if the pingpong mode was activated - node 0 sends ping requests
 		 * and receiver assumed to respond back to node 0
 		 */
-		pmixp_server_pp_inc();
+		int msize = remaining_buf(buf);
 
 		if( pmixp_info_nodeid() ){
-			pmixp_server_pp_send(0, hdr->msgsize);
+			pmixp_server_pp_send(0, msize);
 		} else {
 			if (pmixp_server_pp_same_thread()) {
 				if (pmixp_server_pp_count() == pmixp_server_pp_warmups()) {
 					pmixp_server_pp_start();
 				}
-				pmixp_server_pp_send(0, hdr->msgsize);
+				if( !pmixp_server_pp_check_fini(msize) ){
+					pmixp_server_pp_send(1, msize);
+				}
 			}
 		}
+		pmixp_server_pp_inc();
 		break;
 	}
 #endif
@@ -1162,6 +1165,8 @@ static int _slurm_send(pmixp_ep_t *ep, pmixp_base_hdr_t bhdr, Buf buf)
  * of the plugin
  */
 
+static pthread_mutex_t _pmixp_pp_lock;
+
 static bool _pmixp_pp_on = false;
 static bool _pmixp_pp_same_thr = false;
 static int _pmixp_pp_low = 0;
@@ -1211,6 +1216,19 @@ void pmixp_server_pp_start()
 	_pmixp_pp_start = GET_TS();
 }
 
+bool pmixp_server_pp_check_fini(int size)
+{
+
+    if ( (pmixp_server_pp_count() + 1) >= (_pmixp_pp_warmup + _pmixp_pp_iters)){
+        slurm_mutex_lock(&_pmixp_pp_lock);
+		PMIXP_ERROR("latency: %d - %lf", size,
+			    (GET_TS() - _pmixp_pp_start) / _pmixp_pp_iters );
+        slurm_mutex_unlock(&_pmixp_pp_lock);
+		return true;
+	}
+	return false;
+}
+
 static bool _consists_from_digits(char *s)
 {
 	if (strspn(s, "0123456789") == strlen(s)){
@@ -1222,6 +1240,8 @@ static bool _consists_from_digits(char *s)
 void pmixp_server_init_pp(char ***env)
 {
 	char *env_ptr = NULL;
+
+    slurm_mutex_init(&_pmixp_pp_lock);
 
 	/* check if we want to run ping-pong */
 	if (!(env_ptr = getenvp(*env, PMIXP_PP_ON))) {
@@ -1333,16 +1353,19 @@ void pmixp_server_run_pp()
 			PMIXP_ERROR("latency: %d - %lf", i, time / iters );
 		} else {
 			int count = iters + iters/10;
+			
+			slurm_mutex_lock(&_pmixp_pp_lock);
 			_pmixp_pp_warmup = iters/10;
 			_pmixp_pp_iters = iters;
 			_pmixp_pp_count = 0;
+			slurm_mutex_unlock(&_pmixp_pp_lock);
 			/* initiate sends */
 			pmixp_server_pp_send(1, i);
-			while (pmixp_server_pp_count() > count){
+			while (pmixp_server_pp_count() < count){
 				sched_yield();
 			}
-			PMIXP_ERROR("latency: %d - %lf", i,
-				    (GET_TS() - _pmixp_pp_start) / iters );
+//			PMIXP_ERROR("latency: %d - %lf", i,
+//				    (GET_TS() - _pmixp_pp_start) / iters );
 		}
 	}
 }
