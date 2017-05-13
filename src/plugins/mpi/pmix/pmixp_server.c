@@ -695,10 +695,18 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		/* if the pingpong mode was activated - node 0 sends ping requests
 		 * and receiver assumed to respond back to node 0
 		 */
+		pmixp_server_pp_inc();
+
 		if( pmixp_info_nodeid() ){
 			pmixp_server_pp_send(0, hdr->msgsize);
+		} else {
+			if (pmixp_server_pp_same_thread()) {
+				if (pmixp_server_pp_count() == pmixp_server_pp_warmups()) {
+					pmixp_server_pp_start();
+				}
+				pmixp_server_pp_send(0, hdr->msgsize);
+			}
 		}
-		pmixp_server_pp_inc();
 		break;
 	}
 #endif
@@ -1155,6 +1163,7 @@ static int _slurm_send(pmixp_ep_t *ep, pmixp_base_hdr_t bhdr, Buf buf)
  */
 
 static bool _pmixp_pp_on = false;
+static bool _pmixp_pp_same_thr = false;
 static int _pmixp_pp_low = 0;
 static int _pmixp_pp_up = 24;
 static int _pmixp_pp_bound = 10;
@@ -1163,14 +1172,43 @@ static int _pmixp_pp_liter = 100;
 
 static volatile int _pmixp_pp_count = 0;
 
+#include <time.h>
+#define GET_TS() ({                             \
+	struct timespec ts;                     \
+	double ret = 0;                         \
+	clock_gettime(CLOCK_MONOTONIC, &ts);    \
+	ret = ts.tv_sec + 1E-9*ts.tv_nsec;      \
+	ret;                                    \
+})
+
+static volatile int _pmixp_pp_warmup = 0;
+static volatile int _pmixp_pp_iters = 0;
+static volatile int _pmixp_pp_iter_count = 0;
+static double _pmixp_pp_start = 0;
+
 int pmixp_server_pp_count()
 {
 	return _pmixp_pp_count;
 }
 
+int pmixp_server_pp_warmups()
+{
+	return _pmixp_pp_warmup;
+}
+
 void pmixp_server_pp_inc()
 {
 	_pmixp_pp_count++;
+}
+
+int pmixp_server_pp_same_thread()
+{
+	return _pmixp_pp_same_thr;
+}
+
+void pmixp_server_pp_start()
+{
+	_pmixp_pp_start = GET_TS();
 }
 
 static bool _consists_from_digits(char *s)
@@ -1192,6 +1230,14 @@ void pmixp_server_init_pp(char ***env)
 	if (!strcmp("1", env_ptr) || !strcmp("true", env_ptr)) {
 		_pmixp_pp_on = true;
 	}
+
+	if (!(env_ptr = getenvp(*env, PMIXP_PP_SAMETHR))) {
+		return;
+	}
+	if (!strcmp("1", env_ptr) || !strcmp("true", env_ptr)) {
+		_pmixp_pp_same_thr = true;
+	}
+
 
 	if ((env_ptr = getenvp(*env, PMIXP_PP_LOW))) {
 		if (_consists_from_digits(env_ptr)) {
@@ -1260,30 +1306,44 @@ void pmixp_server_run_pp()
 			iters = _pmixp_pp_liter;
 		}
 
-		/* warmup - 10% of iters # */
-		count = pmixp_server_pp_count() + iters/10;
-		while( pmixp_server_pp_count() < count ){
-			int cur_count = pmixp_server_pp_count();
-			pmixp_server_pp_send(1, i);
-			while( cur_count == pmixp_server_pp_count() ){
-				usleep(1);
+		if (_pmixp_pp_same_thr) {
+			/* warmup - 10% of iters # */
+			count = pmixp_server_pp_count() + iters/10;
+			while( pmixp_server_pp_count() < count ){
+				int cur_count = pmixp_server_pp_count();
+				pmixp_server_pp_send(1, i);
+				while( cur_count == pmixp_server_pp_count() ){
+					usleep(1);
+				}
 			}
-		}
 
-		count = pmixp_server_pp_count() + iters;
-		gettimeofday(&tv1, NULL);
-		while( pmixp_server_pp_count() < count ){
-			int cur_count = pmixp_server_pp_count();
-			/* Send the message to the (nodeid == 1) */
+			count = pmixp_server_pp_count() + iters;
+			gettimeofday(&tv1, NULL);
+			while( pmixp_server_pp_count() < count ){
+				int cur_count = pmixp_server_pp_count();
+				/* Send the message to the (nodeid == 1) */
+				pmixp_server_pp_send(1, i);
+				/* wait for the response */
+				while (cur_count == pmixp_server_pp_count());
+			}
+			gettimeofday(&tv2, NULL);
+			time = tv2.tv_sec + 1E-6 * tv2.tv_usec -
+					(tv1.tv_sec + 1E-6 * tv1.tv_usec);
+			/* Output measurements to the slurmd.log */
+			PMIXP_ERROR("latency: %d - %lf", i, time / iters );
+		} else {
+			int count = iters + iters/10;
+			_pmixp_pp_warmup = iters/10;
+			_pmixp_pp_iters = iters;
+			_pmixp_pp_count = 0;
+			/* initiate sends */
 			pmixp_server_pp_send(1, i);
-			/* wait for the response */
-			while (cur_count == pmixp_server_pp_count());
+			while (pmixp_server_pp_count() > count){
+				sched_yield();
+			}
+			PMIXP_ERROR("latency: %d - %lf", i,
+				    (GET_TS() - _pmixp_pp_start) / iters );
 		}
-		gettimeofday(&tv2, NULL);
-		time = tv2.tv_sec + 1E-6 * tv2.tv_usec -
-				(tv1.tv_sec + 1E-6 * tv1.tv_usec);
-		/* Output measurements to the slurmd.log */
-		PMIXP_ERROR("latency: %d - %lf", i, time / iters );
 	}
 }
 

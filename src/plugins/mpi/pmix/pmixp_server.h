@@ -101,6 +101,10 @@ void pmixp_server_run_pp();
 int pmixp_server_pp_send(int nodeid, int size);
 int pmixp_server_pp_count();
 void pmixp_server_pp_inc();
+void pmixp_server_pp_start();
+int pmixp_server_pp_warmups();
+int pmixp_server_pp_same_thread();
+
 #else
 /* Stubs for the initialization code */
 #define pmixp_server_want_pp() (0)
