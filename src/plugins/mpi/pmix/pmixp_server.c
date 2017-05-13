@@ -1243,6 +1243,9 @@ void pmixp_server_init_pp(char ***env)
 
     slurm_mutex_init(&_pmixp_pp_lock);
 
+
+pmixp_debug_hang(1);
+
 	/* check if we want to run ping-pong */
 	if (!(env_ptr = getenvp(*env, PMIXP_PP_ON))) {
 		return;
@@ -1251,13 +1254,11 @@ void pmixp_server_init_pp(char ***env)
 		_pmixp_pp_on = true;
 	}
 
-	if (!(env_ptr = getenvp(*env, PMIXP_PP_SAMETHR))) {
-		return;
+	if ((env_ptr = getenvp(*env, PMIXP_PP_SAMETHR))) {
+		if (!strcmp("1", env_ptr) || !strcmp("true", env_ptr)) {
+			_pmixp_pp_same_thr = true;
+		}
 	}
-	if (!strcmp("1", env_ptr) || !strcmp("true", env_ptr)) {
-		_pmixp_pp_same_thr = true;
-	}
-
 
 	if ((env_ptr = getenvp(*env, PMIXP_PP_LOW))) {
 		if (_consists_from_digits(env_ptr)) {
@@ -1313,6 +1314,7 @@ void pmixp_server_run_pp()
 	if( pmixp_info_nodeid() ){
 		return;
 	}
+
 
 	start = 1 << _pmixp_pp_low;
 	end = 1 << _pmixp_pp_up;
