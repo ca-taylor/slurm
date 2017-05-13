@@ -1306,7 +1306,7 @@ void pmixp_server_run_pp()
 			iters = _pmixp_pp_liter;
 		}
 
-		if (_pmixp_pp_same_thr) {
+		if (!_pmixp_pp_same_thr) {
 			/* warmup - 10% of iters # */
 			count = pmixp_server_pp_count() + iters/10;
 			while( pmixp_server_pp_count() < count ){
