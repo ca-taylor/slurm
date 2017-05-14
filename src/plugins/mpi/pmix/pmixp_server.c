@@ -1243,9 +1243,6 @@ void pmixp_server_init_pp(char ***env)
 
     slurm_mutex_init(&_pmixp_pp_lock);
 
-
-pmixp_debug_hang(1);
-
 	/* check if we want to run ping-pong */
 	if (!(env_ptr = getenvp(*env, PMIXP_PP_ON))) {
 		return;
