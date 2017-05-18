@@ -1367,6 +1367,16 @@ void pmixp_server_run_pp()
 //				    (GET_TS() - _pmixp_pp_start) / iters );
 		}
 	}
+	
+	{
+		extern char *_ucx_int_descr[];
+		extern int _ucx_int_count;
+		extern double _ucx_int_vals[];
+		int i;
+		for(i=0; i<_ucx_int_count; i++){
+			PMIXP_ERROR("%s: %lf", _ucx_int_descr[i], _ucx_int_vals[i]);
+		}
+	}
 }
 
 

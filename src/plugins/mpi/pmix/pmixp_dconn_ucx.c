@@ -76,6 +76,24 @@ typedef struct {
 	pmixp_p2p_data_t eng_hdr;
 } pmixp_dconn_ucx_t;
 
+#include <time.h>
+#define GET_TS() ({                         \
+    struct timeval tv;                      \
+    double ret = 0;                         \
+    gettimeofday(&tv, NULL);                \
+    ret = tv.tv_sec + 1E-6*tv.tv_usec;      \
+    ret;                                    \
+})
+
+#define GET_TS2() ({                         \
+    struct timespec ts;                     \
+    double ret = 0;                         \
+    clock_gettime(CLOCK_MONOTONIC, &ts);    \
+    ret = ts.tv_sec + 1E-9*ts.tv_nsec;      \
+    ret;                                    \
+    })
+
+
 static inline void _recv_req_release(pmixp_ucx_req_t *req)
 {
 	if( req->buffer ){
@@ -281,6 +299,27 @@ void _ucx_process_msg(char *buffer, size_t len)
 	_direct_hdr.new_msg(_host_hdr, buf);
 }
 
+char *_ucx_int_descr[] = {
+	"locking",
+	"progress",
+	"probe",
+	"process",
+	"release",
+	"arm",
+	"activate"
+};
+#define _UCX_INT_COUNT (sizeof(_ucx_int_descr)/sizeof(_ucx_int_descr[0]))
+#define _UCX_IDX_LOCK 0
+#define _UCX_IDX_PROGRESS 1
+#define _UCX_IDX_PROBE 2 
+#define _UCX_IDX_PROCESS 3 
+#define _UCX_IDX_RELEASE 4
+#define _UCX_IDX_ARM 5
+#define _UCX_IDX_ACTIVATE 6
+
+int _ucx_int_count = _UCX_INT_COUNT;
+double _ucx_int_vals[_UCX_INT_COUNT] = { 0 };
+
 static void _ucx_progress()
 {
 	pmixp_ucx_req_t *req = NULL;
@@ -289,10 +328,19 @@ static void _ucx_progress()
 	ListIterator it;
 	List _send_complete = list_create(NULL);
 	List _recv_complete = list_create(NULL);
+	double start = GET_TS2();
 
 	/* protected progress of UCX */
+
 	slurm_mutex_lock(&_ucx_worker_lock);
+	
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
+	
 	ucp_worker_progress(ucp_worker);
+
+	_ucx_int_vals[_UCX_IDX_PROGRESS] += GET_TS2() - start;
+	start = GET_TS2();
 
 	/* check for new messages */
 	while(1) {
@@ -312,7 +360,14 @@ static void _ucx_progress()
 		req->len = info_tag.length;
 		list_append(_ucx_req_rcv, req);
 	}
+
+	_ucx_int_vals[_UCX_IDX_PROBE] += GET_TS2() - start;
+	start = GET_TS2();
+
 	slurm_mutex_unlock(&_ucx_worker_lock);
+
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
 
 	/* Check pending requests */
 	it = list_iterator_create(_ucx_req_rcv);
@@ -337,8 +392,16 @@ static void _ucx_progress()
 		list_append(_send_complete, req);
 	}
 
+	_ucx_int_vals[_UCX_IDX_PROCESS] += GET_TS2() - start;
+	start = GET_TS2();
+
 	slurm_mutex_lock(&_ucx_worker_lock);
+
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
+
 	it = list_iterator_create(_recv_complete);
+
 	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
 		list_remove(it);
 		if (PMIXP_UCX_FAILED == req->status){
@@ -368,21 +431,42 @@ static void _ucx_progress()
 		ucp_request_release(req);
 	}
 
+	_ucx_int_vals[_UCX_IDX_RELEASE] += GET_TS2() - start;
+	start = GET_TS2();
+
 	slurm_mutex_unlock(&_ucx_worker_lock);
+
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
 
 }
 
 static bool _epoll_readable(eio_obj_t *obj)
 {
 	ucs_status_t status;
+	double start = GET_TS2();
 
 	slurm_mutex_lock(&_ucx_worker_lock);
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
+
 	status = ucp_worker_arm(ucp_worker);
+
+	_ucx_int_vals[_UCX_IDX_ARM] += GET_TS2() - start;
+	start = GET_TS2();
+
 	slurm_mutex_unlock(&_ucx_worker_lock);
+
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
 
 	if (status == UCS_ERR_BUSY) { /* some events are arrived already */
 		_activate_progress();
 	}
+
+	_ucx_int_vals[_UCX_IDX_ACTIVATE] += GET_TS2() - start;
+	start = GET_TS2();
+
 	return true;
 }
 
@@ -402,16 +486,24 @@ static bool _progress_readable(eio_obj_t *obj)
 			 */
 		return false;
 	}
+	
+	double start = GET_TS2();
 
 	if( list_count(_ucx_req_rcv) || list_count(_ucx_req_snd)){
 		_activate_progress();
 	}
+
+	_ucx_int_vals[_UCX_IDX_ACTIVATE] += GET_TS2() - start;
+	start = GET_TS2();
+
 	return true;
 }
 
 static int _progress_read(eio_obj_t *obj, List objs)
 {
 	char buf;
+
+	double start = GET_TS2();
 
 	/* sanity check */
 	xassert(NULL != obj );
@@ -424,6 +516,9 @@ static int _progress_read(eio_obj_t *obj, List objs)
 
 	/* empty pipe */
 	while( sizeof(buf) == read(_service_pipe[0], &buf, sizeof(buf)) );
+
+	_ucx_int_vals[_UCX_IDX_ACTIVATE] += GET_TS2() - start;
+	start = GET_TS2();
 
 	_ucx_progress();
 
@@ -502,8 +597,14 @@ static int _ucx_send(void *_priv, void *msg)
 	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
 	int rc = SLURM_SUCCESS;
 	bool release = false;
+	
+	double start = GET_TS2();
 
 	slurm_mutex_lock(&_ucx_worker_lock);
+
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
+
 	if( !priv->connected ){
 		list_append(_ucx_send_pending,msg);
 	} else {
@@ -531,11 +632,18 @@ static int _ucx_send(void *_priv, void *msg)
 		}
 	}
 exit:
+	start = GET_TS2();
 	slurm_mutex_unlock(&_ucx_worker_lock);
+
+	_ucx_int_vals[_UCX_IDX_LOCK] += GET_TS2() - start;
+	start = GET_TS2();
 
 	if (release){
 		_direct_hdr.send_complete(msg, PMIXP_P2P_INLINE, SLURM_SUCCESS);
 	}
+
+	_ucx_int_vals[_UCX_IDX_RELEASE] += GET_TS2() - start;
+
 	return rc;
 }
 
