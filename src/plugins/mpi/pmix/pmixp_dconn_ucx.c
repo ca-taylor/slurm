@@ -34,10 +34,37 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
  \*****************************************************************************/
 
+#define _GNU_SOURCE         /* See feature_test_macros(7) */
+#include <stdio.h>
+
 #include "pmixp_dconn.h"
 #include "pmixp_dconn_ucx.h"
 #include <unistd.h>
 #include <ucp/api/ucp.h>
+
+#include <time.h>
+#define GET_TS1() ({                         \
+    struct timeval tv;                      \
+    double ret = 0;                         \
+    gettimeofday(&tv, NULL);                \
+    ret = tv.tv_sec + 1E-6*tv.tv_usec;      \
+    ret;                                    \
+})
+
+#define GET_TS2() ({                         \
+    struct timespec ts;                     \
+    double ret = 0;                         \
+    clock_gettime(CLOCK_MONOTONIC, &ts);    \
+    ret = ts.tv_sec + 1E-9*ts.tv_nsec;      \
+    ret;                                    \
+    })
+
+#define GET_TS() GET_TS1() 
+
+char *myucx_ts_des[100*1024] = { NULL };
+double myucx_ts_val[100*1024] = {0.0};
+int myucx_ts_cnt = 0;
+
 
 /* local variables */
 static int _service_pipe[2];
@@ -255,10 +282,22 @@ void pmixp_dconn_ucx_finalize()
 	}
 }
 
+#define INSERT_PROF(x)
+
+#define INSERT_PROF_ON(x) { \
+	myucx_ts_des[myucx_ts_cnt] = x;				\
+	myucx_ts_val[myucx_ts_cnt++] = GET_TS();	\
+}
+
 
 static int _activate_progress()
 {
 	char buf = 'c';
+
+	if( !(list_count(_ucx_req_rcv) || list_count(_ucx_req_snd)) ){
+		return SLURM_SUCCESS;
+	}
+
 	int rc = write(_service_pipe[1], &buf, sizeof(buf));
 	if( sizeof(buf) != rc ){
 		PMIXP_ERROR("Unable to activate UCX progress");
@@ -281,7 +320,7 @@ void _ucx_process_msg(char *buffer, size_t len)
 	_direct_hdr.new_msg(_host_hdr, buf);
 }
 
-static void _ucx_progress()
+static void _ucx_progress(int need_probe)
 {
 	pmixp_ucx_req_t *req = NULL;
 	ucp_tag_message_h msg_tag;
@@ -290,16 +329,24 @@ static void _ucx_progress()
 	List _send_complete = list_create(NULL);
 	List _recv_complete = list_create(NULL);
 
+	INSERT_PROF("_ucx_progress:ucp_worker_progress");
+
 	/* protected progress of UCX */
 	slurm_mutex_lock(&_ucx_worker_lock);
 	ucp_worker_progress(ucp_worker);
 
+	INSERT_PROF("_ucx_progress:probe");
+
 	/* check for new messages */
-	while(1) {
+	while(need_probe) {
 		msg_tag = ucp_tag_probe_nb(ucp_worker, 1, 0xffffffffffffffff, 1, &info_tag);
 		if( NULL == msg_tag ) {
 			break;
 		}
+		char *ptr;
+		asprintf(&ptr, "probe_msg:%d", (int)info_tag.length);
+		INSERT_PROF_ON(ptr);
+
 		char *msg = xmalloc(info_tag.length);
 		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
 				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
@@ -308,11 +355,19 @@ static void _ucx_progress()
 			PMIXP_ERROR("ucp_tag_msg_recv_nb failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
 			continue;
 		}
+
+		asprintf(&ptr, "ucp_tag_msg_recv_nb:%d:%d", 
+					(int)info_tag.length,
+					(PMIXP_UCX_ACTIVE == req->status));
+		INSERT_PROF_ON(ptr);
+
 		req->buffer = msg;
 		req->len = info_tag.length;
 		list_append(_ucx_req_rcv, req);
 	}
 	slurm_mutex_unlock(&_ucx_worker_lock);
+
+	INSERT_PROF("_ucx_progress:recv_dispatch");
 
 	/* Check pending requests */
 	it = list_iterator_create(_ucx_req_rcv);
@@ -325,8 +380,14 @@ static void _ucx_progress()
 		if (PMIXP_UCX_FAILED == req->status){
 			continue;
 		}
+
+		char *ptr;
+		asprintf(&ptr,"recv_msg:%d", (int)info_tag.length);
+		INSERT_PROF_ON(ptr);
 		_ucx_process_msg(req->buffer, req->len);
 	}
+
+	INSERT_PROF("_ucx_progress:send_dispatch");
 
 	it = list_iterator_create(_ucx_req_snd);
 	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
@@ -336,6 +397,8 @@ static void _ucx_progress()
 		list_remove(it);
 		list_append(_send_complete, req);
 	}
+
+	INSERT_PROF("_ucx_progress:cleanup");
 
 	slurm_mutex_lock(&_ucx_worker_lock);
 	it = list_iterator_create(_recv_complete);
@@ -370,30 +433,59 @@ static void _ucx_progress()
 
 	slurm_mutex_unlock(&_ucx_worker_lock);
 
+	INSERT_PROF("_ucx_progress:end");
 }
+
+static int _ucx_need_arm = 1;
 
 static bool _epoll_readable(eio_obj_t *obj)
 {
 	ucs_status_t status;
 
+if( pmixp_info_nodeid() ){
+	static int delay = 0;
+	pmixp_debug_hang(delay);
+}
+
+	INSERT_PROF("_epoll_readable:start");
+
+while( _ucx_need_arm ) {
 	slurm_mutex_lock(&_ucx_worker_lock);
 	status = ucp_worker_arm(ucp_worker);
 	slurm_mutex_unlock(&_ucx_worker_lock);
 
 	if (status == UCS_ERR_BUSY) { /* some events are arrived already */
-		_activate_progress();
+		INSERT_PROF("_epoll_readable:_ucx_progress(1)");
+		_ucx_progress(1);
+	} else {
+		_ucx_need_arm = 0;
 	}
+}
+
+	_activate_progress();
+
+	INSERT_PROF("_epoll_readable:end");
+
 	return true;
 }
 
 static int _epoll_read(eio_obj_t *obj, List objs)
 {
-	_ucx_progress();
+	INSERT_PROF("_epoll_read:start");
+
+	_ucx_need_arm = 1;
+
+	_ucx_progress(1);
+
+	INSERT_PROF("_epoll_read:end");
+
 	return 0;
 }
 
 static bool _progress_readable(eio_obj_t *obj)
 {
+	INSERT_PROF("_progress_readable:start");
+
 	/* sanity check */
 	xassert(NULL != obj );
 	if( obj->shutdown ){
@@ -403,15 +495,26 @@ static bool _progress_readable(eio_obj_t *obj)
 		return false;
 	}
 
-	if( list_count(_ucx_req_rcv) || list_count(_ucx_req_snd)){
-		_activate_progress();
+	_activate_progress();
+
+	if( list_count(_ucx_req_rcv) ) {
+		INSERT_PROF("_progress_readable:_ucx_recv");
 	}
+
+	if( list_count(_ucx_req_snd) ) {
+		INSERT_PROF("_progress_readable:_ucx_send");
+	}
+
+	INSERT_PROF("_progress_readable:end");
+
 	return true;
 }
 
 static int _progress_read(eio_obj_t *obj, List objs)
 {
 	char buf;
+
+	INSERT_PROF("_progress_read:start");
 
 	/* sanity check */
 	xassert(NULL != obj );
@@ -422,16 +525,23 @@ static int _progress_read(eio_obj_t *obj, List objs)
 		return 0;
 	}
 
+	INSERT_PROF("_progress_read:read");
+
 	/* empty pipe */
 	while( sizeof(buf) == read(_service_pipe[0], &buf, sizeof(buf)) );
 
-	_ucx_progress();
+	INSERT_PROF("_progress_read:progress");
+
+	_ucx_progress(0);
+
+	INSERT_PROF("_progress_read:end");
 
 	return 0;
 }
 
 static void *_ucx_init(int nodeid, pmixp_p2p_data_t direct_hdr)
 {
+
 	pmixp_dconn_ucx_t *priv = xmalloc(sizeof(pmixp_dconn_ucx_t));
 	priv->nodeid = nodeid;
 	priv->connected = false;
@@ -502,6 +612,12 @@ static int _ucx_send(void *_priv, void *msg)
 	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
 	int rc = SLURM_SUCCESS;
 	bool release = false;
+	size_t msize;
+
+if( pmixp_info_nodeid() ){
+	static int delay = 0;
+	pmixp_debug_hang(delay);
+}
 
 	slurm_mutex_lock(&_ucx_worker_lock);
 	if( !priv->connected ){
@@ -510,7 +626,7 @@ static int _ucx_send(void *_priv, void *msg)
 		pmixp_ucx_req_t *req = NULL;
 		xassert(_direct_hdr_set);
 		char *mptr = _direct_hdr.buf_ptr(msg);
-		size_t msize = _direct_hdr.buf_size(msg);
+		msize = _direct_hdr.buf_size(msg);
 		req = (pmixp_ucx_req_t*)ucp_tag_send_nb(priv->server_ep,
 						(void*)mptr, msize,
 						ucp_dt_make_contig(1), 1,
@@ -521,13 +637,18 @@ static int _ucx_send(void *_priv, void *msg)
 		} else if (UCS_OK == UCS_PTR_STATUS(req)) {
 			/* defer release until we unlock ucp worker */
 			release = true;
+			char *ptr;
+			asprintf(&ptr, "send_inline(%d)", (int)msize);
+			INSERT_PROF_ON(ptr);
 		} else {
 			req->msg = msg;
 			req->buffer = mptr;
 			req->len = msize;
 			list_append(_ucx_req_snd, (void*)req);
 			_activate_progress();
-
+			char *ptr;
+			asprintf(&ptr, "send_regular(%d)", (int)msize);
+			INSERT_PROF_ON(ptr);
 		}
 	}
 exit:
@@ -535,6 +656,9 @@ exit:
 
 	if (release){
 		_direct_hdr.send_complete(msg, PMIXP_P2P_INLINE, SLURM_SUCCESS);
+		char *ptr;
+		asprintf(&ptr, "send_release(%d)", (int)msize);
+		INSERT_PROF_ON(ptr);
 	}
 	return rc;
 }

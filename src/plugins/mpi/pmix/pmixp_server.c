@@ -696,7 +696,18 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		 * and receiver assumed to respond back to node 0
 		 */
 		int msize = remaining_buf(buf);
-
+static int count = 0;
+count++;
+if( count == 100 ){
+extern char *myucx_ts_des[];
+extern double myucx_ts_val[];
+extern int myucx_ts_cnt;
+	int i;
+	PMIXP_ERROR("profile:");
+	for(i=0; i< myucx_ts_cnt; i++) {
+		PMIXP_ERROR("\t%s\t%lf", myucx_ts_des[i], myucx_ts_val[i]);
+	}
+}
 		if( pmixp_info_nodeid() ){
 			pmixp_server_pp_send(0, msize);
 		} else {
@@ -1317,6 +1328,8 @@ void pmixp_server_run_pp()
 	end = 1 << _pmixp_pp_up;
 	bound = 1 << _pmixp_pp_bound;
 
+pmixp_debug_hang(0);
+
 	for( i = start; i <= end; i *= 2) {
 		int count, iters = _pmixp_pp_siter;
 		struct timeval tv1, tv2;
@@ -1367,6 +1380,18 @@ void pmixp_server_run_pp()
 //				    (GET_TS() - _pmixp_pp_start) / iters );
 		}
 	}
+
+{
+extern char *myucx_ts_des[];
+extern double myucx_ts_val[];
+extern int myucx_ts_cnt;
+	int i;
+	PMIXP_ERROR("profile:");
+	for(i=0; i< myucx_ts_cnt; i++) {
+		PMIXP_ERROR("\t%s\t%lf", myucx_ts_des[i], myucx_ts_val[i]);
+	}
+}
+
 }
 
 

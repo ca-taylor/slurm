@@ -305,7 +305,7 @@ static void *_pmix_timer_thread(void *unused)
 		 * activity on the stop fd.
 		 * So normally we need to exit by the timeout.
 		 * This forses periodic timer events (once each second) */
-		int ret = poll(pfds, 1, 1000);
+		int ret = poll(pfds, 1, 1000000);
 		char c = 1;
 		if (0 < ret) {
 			/* there was an event on stop_fd, exit */
