@@ -41,12 +41,17 @@
 
 /* local variables */
 static int _service_pipe[2];
-static List _ucx_req_rcv, _ucx_req_snd, _ucx_send_pending;
+//static List _ucx_req_rcv, _ucx_req_snd, _ucx_send_pending;
+#define PMIXP_UCX_LIST_PREALLOC 16
+static pmixp_list_t _free_list;
+static pmixp_rlist_t _req_rcv, _req_snd, _pnd_snd;
 static int _server_fd = -1;
 static bool _direct_hdr_set = false;
 static pmixp_p2p_data_t _direct_hdr;
 static void *_host_hdr = NULL;
 pthread_mutex_t _ucx_worker_lock;
+
+
 
 /* UCX objects */
 ucp_context_h ucp_context;
@@ -80,15 +85,6 @@ static inline void _recv_req_release(pmixp_ucx_req_t *req)
 {
 	if( req->buffer ){
 		xfree(req->buffer);
-	}
-	memset(req, 0, sizeof(*req));
-	ucp_request_release(req);
-}
-
-static inline void _send_req_release(pmixp_ucx_req_t *req, int rc)
-{
-	if( req->buffer ){
-		_direct_hdr.send_complete(req->msg, PMIXP_P2P_REGULAR, rc);
 	}
 	memset(req, 0, sizeof(*req));
 	ucp_request_release(req);
@@ -159,9 +155,10 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 
 	slurm_mutex_init(&_ucx_worker_lock);
 
-	_ucx_req_snd = list_create(NULL);
-	_ucx_req_rcv = list_create(NULL);
-	_ucx_send_pending = list_create(NULL);
+	pmixp_list_init(&_free_list);
+	pmixp_rlist_init(&_req_rcv, &_free_list, PMIXP_UCX_LIST_PREALLOC);
+	pmixp_rlist_init(&_req_snd, &_free_list, PMIXP_UCX_LIST_PREALLOC);
+	pmixp_rlist_init(&_pnd_snd, &_free_list, PMIXP_UCX_LIST_PREALLOC);
 
 	status = ucp_config_read(NULL, NULL, &config);
 	if (status != UCS_OK) {
@@ -232,26 +229,52 @@ err_worker:
 
 void pmixp_dconn_ucx_finalize()
 {
-	ListIterator it;
-	void *obj;
-	it = list_iterator_create(_ucx_req_snd);
-	while ((obj = list_next(it))) {
-		list_remove(it);
-		pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
-		ucp_request_cancel(ucp_worker, req);
-		_send_req_release(req, SLURM_SUCCESS);
-	}
+	pmixp_list_elem_t *elem;
+	size_t count, i;
+	xassert(_direct_hdr_set);
 
-	it = list_iterator_create(_ucx_req_rcv);
-	while ((obj = list_next(it))){
-		pmixp_ucx_req_t *req = (pmixp_ucx_req_t *)obj;
+	count = pmixp_rlist_count(&_req_snd);
+	for(i=0; i<count; i++) {
+		pmixp_ucx_req_t *req;
+		req = (pmixp_ucx_req_t*)pmixp_rlist_deq(&_req_snd);
+		xassert(req);
+
+		ucp_request_cancel(ucp_worker, req);
+		if( req->buffer ){
+			/* NOTE: since we are finalizing, we don't really care
+			 * about status
+			 */
+			_direct_hdr.send_complete(req->msg, PMIXP_P2P_REGULAR,
+						  SLURM_SUCCESS);
+		}
+		ucp_request_release(req);
+	}
+	pmixp_rlist_fini(&_req_snd);
+
+	count = pmixp_rlist_count(&_req_rcv);
+	for(i=0; i < count; i++){
+		pmixp_ucx_req_t *req;
+		req = (pmixp_ucx_req_t*)pmixp_rlist_deq(&_req_snd);
+		xassert(req);
 		ucp_request_cancel(ucp_worker, req);
 		_recv_req_release(req);
 	}
+	pmixp_rlist_fini(&_req_rcv);
 
-	it = list_iterator_create(_ucx_send_pending);
-	while ((obj = list_next(it))) {
+	count = pmixp_rlist_count(&_pnd_snd);
+	for(i=0; i<count; i++){
+		void *obj = pmixp_rlist_deq(&_req_snd);
 		_direct_hdr.send_complete(obj, PMIXP_P2P_REGULAR, SLURM_SUCCESS);
+	}
+	pmixp_rlist_fini(&_pnd_snd);
+
+	/* All elements from the previous lists should settle
+	 * down in this free list now. Release it!
+	 */
+	count = pmixp_list_count(&_free_list);
+	for(i=0; i < count; i++){
+		elem = pmixp_list_deq(&_free_list);
+		pmixp_list_elem_free(elem);
 	}
 }
 
@@ -286,9 +309,9 @@ static void _ucx_progress()
 	pmixp_ucx_req_t *req = NULL;
 	ucp_tag_message_h msg_tag;
 	ucp_tag_recv_info_t info_tag;
-	ListIterator it;
-	List _send_complete = list_create(NULL);
-	List _recv_complete = list_create(NULL);
+	pmixp_rlist_t _snd_done, _rcv_done;
+	pmixp_list_elem_t *elem;
+	bool new_msg = false;
 
 	/* protected progress of UCX */
 	slurm_mutex_lock(&_ucx_worker_lock);
@@ -310,66 +333,90 @@ static void _ucx_progress()
 		}
 		req->buffer = msg;
 		req->len = info_tag.length;
-		list_append(_ucx_req_rcv, req);
+		pmixp_rlist_enq(&_req_rcv, req);
+		new_msg = true;
+	}
+
+	if (new_msg) {
+		/* do the progress if new messages was discovered */
+		ucp_worker_progress(ucp_worker);
+	}
+
+	/* Temp lists to hold completed requests */
+	pmixp_rlist_init(&_snd_done, &_free_list, PMIXP_UCX_LIST_PREALLOC);
+	pmixp_rlist_init(&_rcv_done, &_free_list, PMIXP_UCX_LIST_PREALLOC);
+
+	/* Check pending requests */
+	elem = pmixp_rlist_start(&_req_rcv);
+	while (elem) {
+		req = PMIXP_LIST_VAL(elem);
+		if (PMIXP_UCX_ACTIVE == req->status){
+			/* go to the next element */
+			elem = pmixp_rlist_next(elem);
+		} else {
+			/* grab this element for processing */
+			elem = pmixp_rlist_rem(&_req_rcv, elem);
+			pmixp_rlist_enq(&_rcv_done, req);
+		}
+	}
+
+	elem = pmixp_rlist_start(&_req_snd);
+	while (elem) {
+		req = PMIXP_LIST_VAL(elem);
+		if (PMIXP_UCX_ACTIVE == req->status){
+			/* go to the next element */
+			elem = pmixp_rlist_next(elem);
+		} else {
+			/* grab this element for processing */
+			elem = pmixp_rlist_rem(&_req_snd, elem);
+			pmixp_rlist_enq(&_snd_done, req);
+		}
 	}
 	slurm_mutex_unlock(&_ucx_worker_lock);
 
-	/* Check pending requests */
-	it = list_iterator_create(_ucx_req_rcv);
-	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
-		if (PMIXP_UCX_ACTIVE == req->status){
-			continue;
-		}
-		list_remove(it);
-		list_append(_recv_complete, req);
+	/* process sends and receives unlocked */
+	elem = pmixp_rlist_start(&_rcv_done);
+	while (elem) {
+		req = PMIXP_LIST_VAL(elem);
+		/* Skip failed receives
+		 * TODO: what more can we do? */
 		if (PMIXP_UCX_FAILED == req->status){
 			continue;
 		}
 		_ucx_process_msg(req->buffer, req->len);
 	}
 
-	it = list_iterator_create(_ucx_req_snd);
-	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
-		if (PMIXP_UCX_ACTIVE == req->status){
-			continue;
+	elem = pmixp_rlist_start(&_rcv_done);
+	while (elem) {
+		req = PMIXP_LIST_VAL(elem);
+		int rc = SLURM_SUCCESS;
+		if (PMIXP_UCX_FAILED == req->status){
+			rc = SLURM_ERROR;
 		}
-		list_remove(it);
-		list_append(_send_complete, req);
+		xassert(_direct_hdr_set);
+		if( req->buffer ){
+			_direct_hdr.send_complete(req->msg, PMIXP_P2P_REGULAR, rc);
+		}
 	}
 
 	slurm_mutex_lock(&_ucx_worker_lock);
-	it = list_iterator_create(_recv_complete);
-	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
-		list_remove(it);
-		if (PMIXP_UCX_FAILED == req->status){
-			_recv_req_release(req);
-			continue;
-		}
+
+	while( (req = (pmixp_ucx_req_t *)pmixp_rlist_deq(&_rcv_done)) ){
 		/* release request to UCX */
 		memset(req, 0, sizeof(*req));
 		ucp_request_release(req);
 	}
 
-	it = list_iterator_create(_send_complete);
-	while( (req = (pmixp_ucx_req_t *)list_next(it)) ){
-		if (PMIXP_UCX_ACTIVE == req->status){
-			continue;
-		}
-		list_remove(it);
-		if (PMIXP_UCX_FAILED == req->status){
-			_send_req_release(req, SLURM_ERROR);
-			continue;
-		}
-		xassert(_direct_hdr_set);
-		_direct_hdr.send_complete(req->msg, PMIXP_P2P_REGULAR,
-					  SLURM_SUCCESS);
+	while( (req = (pmixp_ucx_req_t *)pmixp_rlist_deq(&_snd_done)) ){
 		/* release request to UCX */
 		memset(req, 0, sizeof(*req));
 		ucp_request_release(req);
 	}
+
+	pmixp_rlist_fini(&_snd_done);
+	pmixp_rlist_fini(&_rcv_done);
 
 	slurm_mutex_unlock(&_ucx_worker_lock);
-
 }
 
 static bool _epoll_readable(eio_obj_t *obj)
@@ -403,7 +450,7 @@ static bool _progress_readable(eio_obj_t *obj)
 		return false;
 	}
 
-	if( list_count(_ucx_req_rcv) || list_count(_ucx_req_snd)){
+	if( !pmixp_rlist_empty(&_req_rcv) || pmixp_rlist_empty(&_req_snd)){
 		_activate_progress();
 	}
 	return true;
@@ -459,7 +506,6 @@ static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
 	pmixp_dconn_ucx_t *priv = (pmixp_dconn_ucx_t *)_priv;
 	ucp_ep_params_t ep_params;
 	ucs_status_t status;
-	ListIterator it;
 	void *msg = NULL;
 	int rc = SLURM_SUCCESS;
 
@@ -480,15 +526,13 @@ static int _ucx_connect(void *_priv, void *ep_data, size_t ep_len,
 
 	/* Enqueue initialization message if requested */
 	if (init_msg) {
-		list_push(_ucx_send_pending, init_msg);
+		pmixp_rlist_push(&_pnd_snd, init_msg);
 	}
 exit:
 	slurm_mutex_unlock(&_ucx_worker_lock);
 	if (SLURM_SUCCESS == rc){
-		/* Try to send all pending messages */
-		it = list_iterator_create(_ucx_send_pending);
-		while ((msg = (void*)list_next(it))) {
-			list_remove(it);
+		/* Send all pending messages */
+		while ((msg = pmixp_rlist_deq(&_pnd_snd))) {
 			_ucx_send(_priv, msg);
 		}
 	}
@@ -505,7 +549,7 @@ static int _ucx_send(void *_priv, void *msg)
 
 	slurm_mutex_lock(&_ucx_worker_lock);
 	if( !priv->connected ){
-		list_append(_ucx_send_pending,msg);
+		pmixp_rlist_enq(&_pnd_snd, msg);
 	} else {
 		pmixp_ucx_req_t *req = NULL;
 		xassert(_direct_hdr_set);
@@ -525,7 +569,7 @@ static int _ucx_send(void *_priv, void *msg)
 			req->msg = msg;
 			req->buffer = mptr;
 			req->len = msize;
-			list_append(_ucx_req_snd, (void*)req);
+			pmixp_rlist_enq(&_req_snd, (void*)req);
 			_activate_progress();
 
 		}
