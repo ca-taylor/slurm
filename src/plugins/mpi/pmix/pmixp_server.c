@@ -698,7 +698,7 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		int msize = remaining_buf(buf);
 static int count = 0;
 count++;
-if( count == 100 ){
+if( count == 100 && pmixp_info_nodeid() ){
 extern char *myucx_ts_des[];
 extern double myucx_ts_val[];
 extern int myucx_ts_cnt;

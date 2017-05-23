@@ -65,6 +65,9 @@ char *myucx_ts_des[100*1024] = { NULL };
 double myucx_ts_val[100*1024] = {0.0};
 int myucx_ts_cnt = 0;
 
+char myucx_ts_bufs[50*1024][32];
+int myucx_ts_cur_buf = 0;
+
 
 /* local variables */
 static int _service_pipe[2];
@@ -323,11 +326,17 @@ void _ucx_process_msg(char *buffer, size_t len)
 static void _ucx_progress(int need_probe)
 {
 	pmixp_ucx_req_t *req = NULL;
+	pmixp_ucx_req_t *req_list[1024];
+	int req_cnt = 0;
 	ucp_tag_message_h msg_tag;
 	ucp_tag_recv_info_t info_tag;
 	ListIterator it;
 	List _send_complete = list_create(NULL);
 	List _recv_complete = list_create(NULL);
+	bool probe_ok = false;
+	static int call_num = 0;
+	
+	call_num++;
 
 	INSERT_PROF("_ucx_progress:ucp_worker_progress");
 
@@ -335,17 +344,19 @@ static void _ucx_progress(int need_probe)
 	slurm_mutex_lock(&_ucx_worker_lock);
 	ucp_worker_progress(ucp_worker);
 
-	INSERT_PROF("_ucx_progress:probe");
 
 	/* check for new messages */
 	while(need_probe) {
+		INSERT_PROF_ON("_ucx_progress:probe");
 		msg_tag = ucp_tag_probe_nb(ucp_worker, 1, 0xffffffffffffffff, 1, &info_tag);
 		if( NULL == msg_tag ) {
 			break;
 		}
-		char *ptr;
-		asprintf(&ptr, "probe_msg:%d", (int)info_tag.length);
+		char *ptr = myucx_ts_bufs[myucx_ts_cur_buf++];
+		sprintf(ptr, "%d:probe_msg:%d", call_num, (int)info_tag.length);
 		INSERT_PROF_ON(ptr);
+
+		probe_ok = true;
 
 		char *msg = xmalloc(info_tag.length);
 		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
@@ -356,18 +367,48 @@ static void _ucx_progress(int need_probe)
 			continue;
 		}
 
-		asprintf(&ptr, "ucp_tag_msg_recv_nb:%d:%d", 
+		ptr = myucx_ts_bufs[myucx_ts_cur_buf++];
+		sprintf(ptr, "%d:ucp_tag_msg_recv_nb:%d:%d", call_num, 
 					(int)info_tag.length,
 					(PMIXP_UCX_ACTIVE == req->status));
 		INSERT_PROF_ON(ptr);
 
 		req->buffer = msg;
 		req->len = info_tag.length;
-		list_append(_ucx_req_rcv, req);
+		INSERT_PROF_ON("_ucx_progress:probe:list_append");
+		req_list[req_cnt++] = req;
+		INSERT_PROF_ON("_ucx_progress:probe:next");
 	}
+	
+	if( probe_ok ) {
+		INSERT_PROF_ON("ucp_worker_progress");
+		ucp_worker_progress(ucp_worker);
+		INSERT_PROF_ON("ucp_worker_progress");
+	}
+	
 	slurm_mutex_unlock(&_ucx_worker_lock);
 
-	INSERT_PROF("_ucx_progress:recv_dispatch");
+//	INSERT_PROF_ON("_ucx_progress:recv_local");
+
+	if( req_cnt ){
+		int i = 0;
+		for(i=0; i < req_cnt; i++){
+			req = req_list[i];
+			if (PMIXP_UCX_ACTIVE == req->status){
+				INSERT_PROF_ON("_ucx_progress:recv_local:move");
+				list_append(_ucx_req_rcv, req);
+				req_list[i] = NULL;
+				continue;
+			}
+			char *ptr = myucx_ts_bufs[myucx_ts_cur_buf++];
+			sprintf(ptr,"%d:recv_msg_local:%d", call_num, (int)info_tag.length);
+			INSERT_PROF_ON(ptr);
+			_ucx_process_msg(req->buffer, req->len);
+			req_list[i] = NULL;
+		} 
+	}
+
+//	INSERT_PROF("_ucx_progress:recv_dispatch");
 
 	/* Check pending requests */
 	it = list_iterator_create(_ucx_req_rcv);
@@ -381,8 +422,8 @@ static void _ucx_progress(int need_probe)
 			continue;
 		}
 
-		char *ptr;
-		asprintf(&ptr,"recv_msg:%d", (int)info_tag.length);
+		char *ptr = myucx_ts_bufs[myucx_ts_cur_buf++];
+		sprintf(ptr,"%d:recv_msg:%d", call_num, (int)info_tag.length);
 		INSERT_PROF_ON(ptr);
 		_ucx_process_msg(req->buffer, req->len);
 	}
@@ -637,8 +678,8 @@ if( pmixp_info_nodeid() ){
 		} else if (UCS_OK == UCS_PTR_STATUS(req)) {
 			/* defer release until we unlock ucp worker */
 			release = true;
-			char *ptr;
-			asprintf(&ptr, "send_inline(%d)", (int)msize);
+			char *ptr = myucx_ts_bufs[myucx_ts_cur_buf++];
+			sprintf(ptr, "send_inline(%d)", (int)msize);
 			INSERT_PROF_ON(ptr);
 		} else {
 			req->msg = msg;
@@ -646,8 +687,8 @@ if( pmixp_info_nodeid() ){
 			req->len = msize;
 			list_append(_ucx_req_snd, (void*)req);
 			_activate_progress();
-			char *ptr;
-			asprintf(&ptr, "send_regular(%d)", (int)msize);
+			char *ptr = myucx_ts_bufs[myucx_ts_cur_buf++];
+			sprintf(ptr, "send_regular(%d)", (int)msize);
 			INSERT_PROF_ON(ptr);
 		}
 	}
@@ -656,8 +697,8 @@ exit:
 
 	if (release){
 		_direct_hdr.send_complete(msg, PMIXP_P2P_INLINE, SLURM_SUCCESS);
-		char *ptr;
-		asprintf(&ptr, "send_release(%d)", (int)msize);
+		char *ptr = myucx_ts_bufs[myucx_ts_cur_buf++];
+		sprintf(ptr, "send_release(%d)", (int)msize);
 		INSERT_PROF_ON(ptr);
 	}
 	return rc;
