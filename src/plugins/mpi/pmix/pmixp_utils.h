@@ -128,13 +128,17 @@ pmixp_list_fini_pre(pmixp_list_t *l,
 		    pmixp_list_elem_t **h,
 		    pmixp_list_elem_t **t)
 {
-	*h = l->head;
-	*t = l->tail;
-
 	/* list supposed to be empty */
+	xassert(l->head && l->tail);
 	xassert(l->head->next == l->tail);
 	xassert(l->head == l->tail->prev);
 	xassert(!l->count);
+	*h = l->head;
+	*t = l->tail;
+
+	l->head = NULL;
+	l->tail = NULL;
+	l->count = 0;
 }
 
 
@@ -157,8 +161,9 @@ pmixp_list_fini(pmixp_list_t *l)
 static inline void
 pmixp_list_enq(pmixp_list_t *l, pmixp_list_elem_t *elem)
 {
-	xassert(l->head && !l->head->data);
-	xassert(!l->tail->next);
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
 
 #ifndef NDEBUG
 	elem->lptr = l;
@@ -180,7 +185,9 @@ static inline pmixp_list_elem_t *
 pmixp_list_deq(pmixp_list_t *l)
 {
 	pmixp_list_elem_t *ret;
-	xassert (l->head && l->tail);
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
 	xassert (!pmixp_list_empty(l));
 
 	/* user is responsible to ensure that
@@ -201,7 +208,9 @@ pmixp_list_deq(pmixp_list_t *l)
 static inline void
 pmixp_list_push(pmixp_list_t *l, pmixp_list_elem_t *elem)
 {
-	xassert (l->head && l->tail);
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
 
 #ifndef NDEBUG
 	elem->lptr = l;
@@ -223,7 +232,9 @@ static inline pmixp_list_elem_t *
 pmixp_list_pop(pmixp_list_t *l)
 {
 	pmixp_list_elem_t *ret = NULL;
-	xassert (l->head && l->tail);
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
 	xassert (!pmixp_list_empty(l));
 
 	/* user is responsible to ensure that
@@ -240,11 +251,17 @@ pmixp_list_pop(pmixp_list_t *l)
 static inline pmixp_list_elem_t *
 pmixp_list_rem(pmixp_list_t *l, pmixp_list_elem_t *elem)
 {
-	pmixp_list_elem_t *next = elem->next;
+	pmixp_list_elem_t *next;
+
+	xassert(elem && l);
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
 	xassert(elem->next && elem->prev);
-	xassert( (elem != l->head) && (elem != l->tail) );
+	xassert((elem != l->head) && (elem != l->tail));
 	xassert(elem->lptr == l);
 
+	next = elem->next;
 	elem->prev->next = elem->next;
 	elem->next->prev = elem->prev;
 	/* protect the list */
@@ -255,15 +272,32 @@ pmixp_list_rem(pmixp_list_t *l, pmixp_list_elem_t *elem)
 }
 
 static inline pmixp_list_elem_t*
-pmixp_list_start(pmixp_list_t *l)
+pmixp_list_begin(pmixp_list_t *l)
 {
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
 	return l->head->next;
 }
 
-static inline pmixp_list_elem_t *
-pmixp_list_next(pmixp_list_elem_t *cur)
+static inline pmixp_list_elem_t*
+pmixp_list_end(pmixp_list_t *l)
 {
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
+	return l->tail;
+}
+
+static inline pmixp_list_elem_t *
+pmixp_list_next(pmixp_list_t *l, pmixp_list_elem_t *cur)
+{
+	xassert(l->head && l->tail);
+	xassert(!l->head->data && !l->tail->data);
+	xassert(!l->tail->next && !l->head->prev);
 	xassert(cur);
+	xassert(cur->lptr == l);
+
 	return cur->next;
 }
 
@@ -373,15 +407,21 @@ pmixp_rlist_pop(pmixp_rlist_t *l)
 }
 
 static inline pmixp_list_elem_t*
-pmixp_rlist_start(pmixp_rlist_t *l)
+pmixp_rlist_begin(pmixp_rlist_t *l)
 {
-	return pmixp_list_start(&l->list);
+	return pmixp_list_begin(&l->list);
+}
+
+static inline pmixp_list_elem_t*
+pmixp_rlist_end(pmixp_rlist_t *l)
+{
+	return pmixp_list_end(&l->list);
 }
 
 static inline pmixp_list_elem_t *
-pmixp_rlist_next(pmixp_list_elem_t *cur)
+pmixp_rlist_next(pmixp_rlist_t *l, pmixp_list_elem_t *cur)
 {
-	return pmixp_list_next(cur);
+	return pmixp_list_next(&l->list, cur);
 }
 
 static inline pmixp_list_elem_t *
@@ -392,6 +432,5 @@ pmixp_rlist_rem(pmixp_rlist_t *l, pmixp_list_elem_t *elem)
 	pmixp_list_enq(l->src_list, elem);
 	return ret;
 }
-
 
 #endif /* PMIXP_UTILS_H*/
