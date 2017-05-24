@@ -277,7 +277,6 @@ typedef struct pmixp_rlist_s {
 static inline pmixp_list_elem_t *
 __pmixp_rlist_get_free(pmixp_list_t *l, size_t pre_alloc)
 {
-	pmixp_list_elem_t *elem = NULL;
 	if (pmixp_list_empty(l)) {
 		/* add l->pre_alloc elements to the source list */
 		int i;

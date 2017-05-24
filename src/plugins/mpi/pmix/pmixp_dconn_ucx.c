@@ -341,6 +341,12 @@ static void _ucx_progress()
 		/* do the progress if new messages was discovered */
 		ucp_worker_progress(ucp_worker);
 	}
+	
+	if (pmixp_rlist_empty(&_req_rcv) && pmixp_rlist_empty(&_req_snd)) {
+		/* early exit - nothing to do */
+		slurm_mutex_lock(&_ucx_worker_lock);
+		return;
+	}
 
 	/* Temp lists to hold completed requests */
 	pmixp_rlist_init(&_snd_done, &_free_list, PMIXP_UCX_LIST_PREALLOC);
@@ -450,7 +456,7 @@ static bool _progress_readable(eio_obj_t *obj)
 		return false;
 	}
 
-	if( !pmixp_rlist_empty(&_req_rcv) || pmixp_rlist_empty(&_req_snd)){
+	if( pmixp_rlist_count(&_req_rcv) || pmixp_rlist_count(&_req_snd)){
 		_activate_progress();
 	}
 	return true;
