@@ -278,16 +278,15 @@ static inline pmixp_list_elem_t *
 __pmixp_rlist_get_free(pmixp_list_t *l, size_t pre_alloc)
 {
 	pmixp_list_elem_t *elem = NULL;
-	elem = pmixp_list_deq(l);
-	if (!elem) {
+	if (pmixp_list_empty(l)) {
 		/* add l->pre_alloc elements to the source list */
 		int i;
 		for (i=0; i<pre_alloc-1; i++) {
 			pmixp_list_enq(l, pmixp_list_elem_new());
 		}
-		elem = pmixp_list_elem_new();
 	}
-	return elem;
+	return pmixp_list_deq(l);
+;
 }
 
 static inline void
