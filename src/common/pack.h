@@ -73,6 +73,7 @@ typedef struct slurm_buf * Buf;
 #define remaining_buf(__buf)		(__buf->size - __buf->processed)
 #define size_buf(__buf)			(__buf->size)
 
+int	reset_buf(Buf buf,char *data, uint32_t size);
 Buf	create_buf (char *data, uint32_t size);
 void	free_buf(Buf my_buf);
 Buf	init_buf(uint32_t size);

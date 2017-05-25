@@ -58,6 +58,7 @@
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
  * for details.
  */
+strong_alias(reset_buf,		slurm_reset_buf);
 strong_alias(create_buf,	slurm_create_buf);
 strong_alias(free_buf,		slurm_free_buf);
 strong_alias(grow_buf,		slurm_grow_buf);
@@ -94,22 +95,31 @@ strong_alias(unpackmem_array,	slurm_unpackmem_array);
 /* Basic buffer management routines */
 /* create_buf - create a buffer with the supplied contents, contents must
  * be xalloc'ed */
-Buf create_buf(char *data, uint32_t size)
-{
-	Buf my_buf;
 
+int reset_buf(Buf my_buf, char *data, uint32_t size)
+{
 	if (size > MAX_BUF_SIZE) {
 		error("%s: Buffer size limit exceeded (%u > %u)",
 		      __func__, size, MAX_BUF_SIZE);
-		return NULL;
+		return -1;
 	}
 
-	my_buf = xmalloc_nz(sizeof(struct slurm_buf));
 	my_buf->magic = BUF_MAGIC;
 	my_buf->size = size;
 	my_buf->processed = 0;
 	my_buf->head = data;
+	return 0;
+}
 
+Buf create_buf(char *data, uint32_t size)
+{
+	Buf my_buf;
+
+	my_buf = xmalloc_nz(sizeof(struct slurm_buf));
+	if( reset_buf(my_buf, data, size) ){
+		xfree(my_buf);
+		return NULL;
+	}
 	return my_buf;
 }
 
@@ -140,19 +150,21 @@ void grow_buf (Buf buffer, uint32_t size)
 Buf init_buf(uint32_t size)
 {
 	Buf my_buf;
+	void *data;
 
 	if (size > MAX_BUF_SIZE) {
 		error("%s: Buffer size limit exceeded (%u > %u)",
 		      __func__, size, MAX_BUF_SIZE);
 		return NULL;
 	}
+
 	if (size <= 0)
 		size = BUF_SIZE;
-	my_buf = xmalloc_nz(sizeof(struct slurm_buf));
-	my_buf->magic = BUF_MAGIC;
-	my_buf->size = size;
-	my_buf->processed = 0;
-	my_buf->head = xmalloc(sizeof(char)*size);
+	data = xmalloc(sizeof(char)*size);
+	my_buf = create_buf(data, size);
+	if (!my_buf) {
+		xfree(data);
+	}
 	return my_buf;
 }
 
