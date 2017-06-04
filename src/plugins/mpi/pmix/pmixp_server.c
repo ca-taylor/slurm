@@ -1478,7 +1478,7 @@ int pmixp_server_pp_send(int nodeid, int size)
 
 	int rc;
 	pmixp_ep_t ep;
-	struct pp_cbdata *cbdata = xmalloc(sizeof(*cbdata));
+//	struct pp_cbdata *cbdata = xmalloc(sizeof(*cbdata));
 
 //	grow_buf(buf, size);
 	ep.type = PMIXP_EP_NOIDEID;
@@ -1488,6 +1488,12 @@ int pmixp_server_pp_send(int nodeid, int size)
 
 	reset_buf(buf, _my_send_buf, 10*1024*1024);
 	set_buf_offset(buf, PMIXP_BASE_HDR_MAX);
+
+	size_t tsz = sizeof(uint32_t);
+	size_t goffs = (size_t)get_buf_data(buf);
+	uint32_t *chk_ptr = (uint32_t *)(((goffs + (tsz - 1)) / tsz) * tsz);
+	*chk_ptr = PMIXP_SERVER_BUF_MAGIC;
+
 
 	set_buf_offset(buf,get_buf_offset(buf) + size);
 	rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
