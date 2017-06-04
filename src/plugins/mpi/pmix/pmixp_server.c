@@ -1460,27 +1460,38 @@ struct pp_cbdata
 
 void pingpong_complete(int rc, pmixp_p2p_ctx_t ctx, void *data)
 {
+	/*
 	struct pp_cbdata *d = (struct pp_cbdata*)data;
 	free_buf(d->buf);
 	xfree(data);
 	//    PMIXP_ERROR("Send complete: %d %lf", d->size, GET_TS - d->start);
+	*/
 }
+
+static char _my_send_buf[10*1024*1024];
 
 int pmixp_server_pp_send(int nodeid, int size)
 {
-	Buf buf = pmixp_server_buf_new();
+//	Buf buf = pmixp_server_buf_new();
+	static struct slurm_buf buf_val;
+	Buf buf = &buf_val; // pmixp_server_buf_new();
+
 	int rc;
 	pmixp_ep_t ep;
 	struct pp_cbdata *cbdata = xmalloc(sizeof(*cbdata));
 
-	grow_buf(buf, size);
+//	grow_buf(buf, size);
 	ep.type = PMIXP_EP_NOIDEID;
 	ep.ep.nodeid = nodeid;
-	cbdata->buf = buf;
-	cbdata->size = size;
+//	cbdata->buf = buf;
+//	cbdata->size = size;
+
+	reset_buf(buf, _my_send_buf, 10*1024*1024);
+	set_buf_offset(buf, PMIXP_BASE_HDR_MAX);
+
 	set_buf_offset(buf,get_buf_offset(buf) + size);
 	rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
-				  _pmixp_pp_count, buf, pingpong_complete, (void*)cbdata);
+				  _pmixp_pp_count, buf, pingpong_complete, (void*)NULL);
 	if (SLURM_SUCCESS != rc) {
 		char *nodename = pmixp_info_job_host(nodeid);
 		PMIXP_ERROR("Was unable to wait for the parent %s to become alive", nodename);
