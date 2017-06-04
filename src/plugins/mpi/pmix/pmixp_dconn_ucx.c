@@ -350,8 +350,12 @@ static bool _ucx_progress()
 		}
 		events_observed++;
 
-//		char *msg = xmalloc(info_tag.length);
-		char *msg = _my_ucx_buf;
+		char *msg;
+		if( info_tag.sender_tag != 4 ){
+			msg = xmalloc(info_tag.length);
+		} else {
+			msg = _my_ucx_buf;
+		}
 		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
 				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
 						    ucp_dt_make_contig(1), msg_tag, recv_handle);
@@ -666,7 +670,7 @@ static int _ucx_send(void *_priv, void *msg)
 		size_t msize = _direct_hdr.buf_size(msg);
 		req = (pmixp_ucx_req_t*)ucp_tag_send_nb(priv->server_ep,
 						(void*)mptr, msize,
-						ucp_dt_make_contig(1), 1,
+						ucp_dt_make_contig(1), _direct_hdr.buf_type(msg),
 						send_handle);
 		if (UCS_PTR_IS_ERR(req)) {
 			PMIXP_ERROR("Unable to send UCX message: %s\n", ucs_status_string(UCS_PTR_STATUS(req)));

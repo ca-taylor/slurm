@@ -132,6 +132,7 @@ static void *_buf_finalize(Buf buf, void *nhdr, size_t hsize,
 {
 	char *ptr = get_buf_data(buf);
 	size_t offset = PMIXP_BASE_HDR_MAX - hsize;
+
 #ifndef NDEBUG
 	xassert(PMIXP_BASE_HDR_MAX >= hsize);
 	xassert(PMIXP_BASE_HDR_MAX <= get_buf_offset(buf));
@@ -145,6 +146,7 @@ static void *_buf_finalize(Buf buf, void *nhdr, size_t hsize,
 	uint32_t *chk_ptr = (uint32_t *)(((goffs + (tsz - 1)) / tsz) * tsz);
 	xassert(PMIXP_SERVER_BUF_MAGIC == *chk_ptr);
 #endif
+
 	/* Enough space for any header was reserved at the
 	 * time of buffer initialization in `pmixp_server_new_buf`
 	 * put the header in place and return proper pointer
@@ -308,6 +310,7 @@ _direct_hdr_pack_t _direct_hdr_pack = _direct_hdr_pack_samearch;
 
 static void *_direct_msg_ptr(void *msg);
 static size_t _direct_msg_size(void *msg);
+static int _direct_msg_type(void *msg);
 static void _direct_send_complete(void *msg, pmixp_p2p_ctx_t ctx, int rc);
 
 static void _direct_new_msg(void *hdr, Buf buf);
@@ -339,6 +342,7 @@ pmixp_p2p_data_t _direct_proto = {
 	.send_on = 1,
 	.buf_ptr = _direct_msg_ptr,
 	.buf_size = _direct_msg_size,
+	.buf_type = _direct_msg_type,
 	.send_complete = _direct_send_complete
 };
 
@@ -942,6 +946,12 @@ static size_t _direct_msg_size(void *msg)
 	return (_msg->hdr.msgsize + PMIXP_BASE_HDR_SIZE);
 }
 
+static int _direct_msg_type(void *msg)
+{
+	_direct_proto_message_t *_msg = (_direct_proto_message_t*)msg;
+	return (_msg->hdr.type);
+}
+
 /* Release message.
  * TODO: We need to fix that: I/O engine needs a way
  * to provide the error code
@@ -1394,6 +1404,7 @@ void pmixp_server_run_pp()
 		return;
 	}
 
+//pmixp_debug_hang(1);
 
 	start = 1 << _pmixp_pp_low;
 	end = 1 << _pmixp_pp_up;
@@ -1480,12 +1491,21 @@ int pmixp_server_pp_send(int nodeid, int size)
 
 //	struct pp_cbdata *cbdata = xmalloc(sizeof(*cbdata));
 
-	grow_buf(buf, size);
+//	grow_buf(buf, size);
 	ep.type = PMIXP_EP_NOIDEID;
 	ep.ep.nodeid = nodeid;
 
 	reset_buf(buf, _my_send_buf, 10*1024*1024);
+	
+
 	set_buf_offset(buf, PMIXP_BASE_HDR_MAX);
+
+	size_t tsz = sizeof(uint32_t);
+	size_t goffs = (size_t)get_buf_data(buf);
+	uint32_t *chk_ptr = (uint32_t *)(((goffs + (tsz - 1)) / tsz) * tsz);
+	*chk_ptr = PMIXP_SERVER_BUF_MAGIC;
+
+
 	set_buf_offset(buf,get_buf_offset(buf) + size);
 	rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
 				  _pmixp_pp_count, buf, pingpong_complete, NULL);
