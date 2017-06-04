@@ -314,13 +314,19 @@ static int _activate_progress()
 
 void _ucx_process_msg(char *buffer, size_t len)
 {
+	statuc struct slurm_buf buf_val;
+	Buf buf = & buf_val;
+
 	xassert(_direct_hdr_set);
 	_direct_hdr.hdr_unpack_cb(buffer, _host_hdr);
 
-	Buf buf = create_buf(buffer, len);
+//	Buf buf = create_buf(buffer, len);
+	reset_buf(buf, buffer, len);
 	set_buf_offset(buf, _direct_hdr.rhdr_net_size);
 	_direct_hdr.new_msg(_host_hdr, buf);
 }
+
+static char _my_ucx_buf[10*1024*1024];
 
 static bool _ucx_progress()
 {
@@ -344,7 +350,8 @@ static bool _ucx_progress()
 		}
 		events_observed++;
 
-		char *msg = xmalloc(info_tag.length);
+//		char *msg = xmalloc(info_tag.length);
+		char *msg = _my_ucx_buf;
 		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
 				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
 						    ucp_dt_make_contig(1), msg_tag, recv_handle);
