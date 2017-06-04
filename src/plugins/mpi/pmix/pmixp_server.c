@@ -791,6 +791,7 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 	}
 
 exit:
+	return;
 //	free_buf(buf);
 }
 
@@ -1322,7 +1323,7 @@ void pmixp_server_init_pp(char ***env)
     slurm_mutex_init(&_pmixp_pp_lock);
 
 
-pmixp_debug_hang(1);
+//pmixp_debug_hang(1);
 
 	/* check if we want to run ping-pong */
 	if (!(env_ptr = getenvp(*env, PMIXP_PP_ON))) {
@@ -1468,7 +1469,7 @@ void pingpong_complete(int rc, pmixp_p2p_ctx_t ctx, void *data)
 	//    PMIXP_ERROR("Send complete: %d %lf", d->size, GET_TS - d->start);
 }
 
-stativ char _my_send_buf[10*1024*1024];
+static char _my_send_buf[10*1024*1024];
 
 int pmixp_server_pp_send(int nodeid, int size)
 {
@@ -1482,14 +1483,12 @@ int pmixp_server_pp_send(int nodeid, int size)
 	grow_buf(buf, size);
 	ep.type = PMIXP_EP_NOIDEID;
 	ep.ep.nodeid = nodeid;
-	cbdata->buf = buf;
-	cbdata->size = size;
 
 	reset_buf(buf, _my_send_buf, 10*1024*1024);
 	set_buf_offset(buf, PMIXP_BASE_HDR_MAX);
 	set_buf_offset(buf,get_buf_offset(buf) + size);
 	rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
-				  _pmixp_pp_count, buf, pingpong_complete, (void*)cbdata);
+				  _pmixp_pp_count, buf, pingpong_complete, NULL);
 	if (SLURM_SUCCESS != rc) {
 		char *nodename = pmixp_info_job_host(nodeid);
 		PMIXP_ERROR("Was unable to wait for the parent %s to become alive", nodename);

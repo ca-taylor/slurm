@@ -314,7 +314,7 @@ static int _activate_progress()
 
 void _ucx_process_msg(char *buffer, size_t len)
 {
-	statuc struct slurm_buf buf_val;
+	static struct slurm_buf buf_val;
 	Buf buf = & buf_val;
 
 	xassert(_direct_hdr_set);
