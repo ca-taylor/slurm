@@ -314,13 +314,17 @@ static int _activate_progress()
 
 void _ucx_process_msg(char *buffer, size_t len)
 {
-	xassert(_direct_hdr_set);
+//	xassert(_direct_hdr_set);
 	_direct_hdr.hdr_unpack_cb(buffer, _host_hdr);
 
-	Buf buf = create_buf(buffer, len);
+	static struct slurm_buf buf_val;
+	Buf buf = &buf_val; //create_buf(buffer, len);
+	reset_buf(buf, buffer, len);
 	set_buf_offset(buf, _direct_hdr.rhdr_net_size);
 	_direct_hdr.new_msg(_host_hdr, buf);
 }
+
+static char _my_ucx_buffer[10*1024*1024];
 
 static bool _ucx_progress()
 {
@@ -344,7 +348,12 @@ static bool _ucx_progress()
 		}
 		events_observed++;
 
-		char *msg = xmalloc(info_tag.length);
+		char *msg;
+		if( 1 == info_tag.sender_tag ){
+			msg = xmalloc(info_tag.length);
+		} else {
+			msg = _my_ucx_buffer;
+		}
 		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
 				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
 						    ucp_dt_make_contig(1), msg_tag, recv_handle);
@@ -642,6 +651,7 @@ exit:
 	return rc;
 }
 
+extern char _my_send_buf[10*1024*1024];
 
 static int _ucx_send(void *_priv, void *msg)
 {
@@ -657,9 +667,13 @@ static int _ucx_send(void *_priv, void *msg)
 		xassert(_direct_hdr_set);
 		char *mptr = _direct_hdr.buf_ptr(msg);
 		size_t msize = _direct_hdr.buf_size(msg);
+		int tag = 1;
+		if( mptr > _my_send_buf && mptr < (_my_send_buf + 200)){
+			tag = 2;
+		}
 		req = (pmixp_ucx_req_t*)ucp_tag_send_nb(priv->server_ep,
 						(void*)mptr, msize,
-						ucp_dt_make_contig(1), 1,
+						ucp_dt_make_contig(1), tag,
 						send_handle);
 		if (UCS_PTR_IS_ERR(req)) {
 			PMIXP_ERROR("Unable to send UCX message: %s\n", ucs_status_string(UCS_PTR_STATUS(req)));

@@ -791,7 +791,8 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 	}
 
 exit:
-	free_buf(buf);
+	return;
+	//free_buf(buf);
 }
 
 void pmixp_server_sent_buf_cb(int rc, pmixp_p2p_ctx_t ctx, void *data)
@@ -1468,7 +1469,7 @@ void pingpong_complete(int rc, pmixp_p2p_ctx_t ctx, void *data)
 	*/
 }
 
-static char _my_send_buf[10*1024*1024];
+char _my_send_buf[10*1024*1024];
 
 int pmixp_server_pp_send(int nodeid, int size)
 {
