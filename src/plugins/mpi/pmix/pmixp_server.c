@@ -1299,7 +1299,7 @@ bool pmixp_server_pp_check_fini(int size)
 
     if ( (pmixp_server_pp_count() + 1) >= (_pmixp_pp_warmup + _pmixp_pp_iters)){
         slurm_mutex_lock(&_pmixp_pp_lock);
-		PMIXP_ERROR("latency: %d - %lf", size,
+		PMIXP_ERROR("latency: %d - %.9lf", size,
 			    (GET_TS() - _pmixp_pp_start) / _pmixp_pp_iters );
         slurm_mutex_unlock(&_pmixp_pp_lock);
 		return true;
@@ -1430,7 +1430,7 @@ void pmixp_server_run_pp()
 			time = tv2.tv_sec + 1E-6 * tv2.tv_usec -
 					(tv1.tv_sec + 1E-6 * tv1.tv_usec);
 			/* Output measurements to the slurmd.log */
-			PMIXP_ERROR("latency: %d - %lf", i, time / iters );
+			PMIXP_ERROR("latency: %d - %.9lf", i, time / iters );
 		} else {
 			int count = iters + iters/10;
 			
