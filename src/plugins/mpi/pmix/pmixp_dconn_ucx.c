@@ -70,6 +70,7 @@ typedef struct {
     void *buffer;
     size_t len;
     void *msg;
+    ucp_tag_t tag;
 } pmixp_ucx_req_t;
 
 typedef struct {
@@ -312,14 +313,18 @@ static int _activate_progress()
 	return SLURM_SUCCESS;
 }
 
-void _ucx_process_msg(char *buffer, size_t len)
+void _ucx_process_msg(char *buffer, size_t len, ucp_tag_t tag)
 {
 //	xassert(_direct_hdr_set);
 	_direct_hdr.hdr_unpack_cb(buffer, _host_hdr);
-
 	static struct slurm_buf buf_val;
-	Buf buf = &buf_val; //create_buf(buffer, len);
-	reset_buf(buf, buffer, len);
+	Buf buf;
+	if( tag == 2 ) {
+		buf = create_buf(buffer, len);
+	} else {
+		buf = &buf_val; //create_buf(buffer, len);
+		reset_buf(buf, buffer, len);
+	}
 	set_buf_offset(buf, _direct_hdr.rhdr_net_size);
 	_direct_hdr.new_msg(_host_hdr, buf);
 }
@@ -342,14 +347,14 @@ static bool _ucx_progress()
 
 	/* check for new messages */
 	while(1) {
-		msg_tag = ucp_tag_probe_nb(ucp_worker, 1, 0xffffffffffffffff, 1, &info_tag);
+		msg_tag = ucp_tag_probe_nb(ucp_worker, 3, 0xfffffffffffffff0, 1, &info_tag);
 		if( NULL == msg_tag ) {
 			break;
 		}
 		events_observed++;
 
 		char *msg;
-		if( 1 == info_tag.sender_tag ){
+		if( 2 == info_tag.sender_tag ){
 			msg = xmalloc(info_tag.length);
 		} else {
 			msg = _my_ucx_buffer;
@@ -363,6 +368,7 @@ static bool _ucx_progress()
 		}
 		req->buffer = msg;
 		req->len = info_tag.length;
+		req->tag = info_tag.sender_tag;
 		pmixp_rlist_enq(&_rcv_pending, req);
 		if (PMIXP_UCX_ACTIVE == req->status) {
 			/* this message is long enough, so it makes
@@ -419,7 +425,7 @@ static bool _ucx_progress()
 		/* Skip failed receives
 		 * TODO: what more can we do? */
 		if (PMIXP_UCX_FAILED != req->status){
-			_ucx_process_msg(req->buffer, req->len);
+			_ucx_process_msg(req->buffer, req->len, req->tag);
 		}
 		elem = pmixp_rlist_next(&_rcv_complete, elem);
 	}
@@ -667,9 +673,9 @@ static int _ucx_send(void *_priv, void *msg)
 		xassert(_direct_hdr_set);
 		char *mptr = _direct_hdr.buf_ptr(msg);
 		size_t msize = _direct_hdr.buf_size(msg);
-		int tag = 1;
+		int tag = 2;
 		if( mptr > _my_send_buf && mptr < (_my_send_buf + 200)){
-			tag = 2;
+			tag = 1;
 		}
 		req = (pmixp_ucx_req_t*)ucp_tag_send_nb(priv->server_ep,
 						(void*)mptr, msize,
