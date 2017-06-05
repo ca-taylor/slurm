@@ -950,7 +950,7 @@ static void _direct_send_complete(void *_msg, pmixp_p2p_ctx_t ctx, int rc)
 {
 	_direct_proto_message_t *msg = (_direct_proto_message_t*)_msg;
 	msg->sent_cb(rc, ctx, msg->cbdata);
-	xfree(msg);
+//	xfree(msg);
 }
 
 /*
@@ -1063,12 +1063,20 @@ _direct_send(pmixp_dconn_t *dconn, pmixp_ep_t *ep,
 	char nhdr[PMIXP_BASE_HDR_SIZE];
 	size_t dsize = 0, hsize = 0;
 	int rc;
+	extern char _my_send_buf[10*1024*1024];
 
 	hsize = _direct_hdr_pack(&bhdr, nhdr);
 
 	xassert(PMIXP_EP_NOIDEID == ep->type);
 	/* TODO: I think we can avoid locking */
-	_direct_proto_message_t *msg = xmalloc(sizeof(*msg));
+	_direct_proto_message_t *msg = NULL;
+	
+	if( buf->head != _my_send_buf ){
+		msg = xmalloc(sizeof(*msg));
+	} else {
+		static _direct_proto_message_t msg_val;
+		msg = &msg_val;
+	}
 	msg->sent_cb = complete_cb;
 	msg->cbdata = cb_data;
 	msg->hdr = bhdr;
@@ -1079,7 +1087,7 @@ _direct_send(pmixp_dconn_t *dconn, pmixp_ep_t *ep,
 	rc = pmixp_dconn_send(dconn, msg);
 	if (SLURM_SUCCESS != rc) {
 		msg->sent_cb(rc, PMIXP_P2P_INLINE, msg->cbdata);
-		xfree( msg );
+//		xfree( msg );
 	}
 }
 
