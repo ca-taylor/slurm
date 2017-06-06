@@ -51,7 +51,8 @@ static pmixp_p2p_data_t _direct_hdr;
 static void *_host_hdr = NULL;
 pthread_mutex_t _ucx_worker_lock;
 
-
+#define likely(x)       __builtin_expect((x),1)
+#define unlikely(x)     __builtin_expect((x),0)
 
 /* UCX objects */
 ucp_context_h ucp_context;
@@ -371,7 +372,8 @@ static bool _ucx_progress()
 		req->len = info_tag.length;
 		req->tag = info_tag.sender_tag;
 
-		if (PMIXP_UCX_ACTIVE == req->status) {
+		/* Short messages are more latency sensitive! */
+		if (unlikely(PMIXP_UCX_ACTIVE == req->status)) {
 			/* this message is long enough, so it makes
 			 * sense to do the progres one more timer */
 			more_progr = true;
@@ -381,12 +383,14 @@ static bool _ucx_progress()
 		}
 	}
 
-	if (more_progr) {
+	if (unlikely(more_progr)) {
 		/* do the progress if we have incomplete receives */
 		ucp_worker_progress(ucp_worker);
 	}
 	
-	if (!new_msg && pmixp_rlist_empty(&_rcv_pending) && pmixp_rlist_empty(&_snd_pending)) {
+	/* Give the preference to the non-empty progress for sake of performance */
+	if (unlikely(!new_msg && pmixp_rlist_empty(&_rcv_pending) && 
+			pmixp_rlist_empty(&_snd_pending)) ) {
 		/* early exit - nothing to do */
 		slurm_mutex_unlock(&_ucx_worker_lock);
 		return false;
@@ -394,7 +398,7 @@ static bool _ucx_progress()
 
 	/* Check pending requests */
 	elem = pmixp_rlist_begin(&_rcv_pending);
-	while (pmixp_rlist_end(&_rcv_pending) != elem) {
+	while (unlikely(pmixp_rlist_end(&_rcv_pending) != elem)) {
 		req = PMIXP_LIST_VAL(elem);
 		if (PMIXP_UCX_ACTIVE == req->status){
 			/* go to the next element */
@@ -408,7 +412,7 @@ static bool _ucx_progress()
 	}
 
 	elem = pmixp_rlist_begin(&_snd_pending);
-	while (pmixp_rlist_end(&_snd_pending) != elem) {
+	while (unlikely(pmixp_rlist_end(&_snd_pending) != elem)) {
 		req = PMIXP_LIST_VAL(elem);
 		if (PMIXP_UCX_ACTIVE == req->status){
 			/* go to the next element */
