@@ -90,7 +90,7 @@ typedef struct {
 Buf pmixp_server_buf_new(void)
 {
 	Buf buf = create_buf(xmalloc(PMIXP_BASE_HDR_MAX), PMIXP_BASE_HDR_MAX);
-#ifndef NDEBUG
+#if (0 && NDEBUG)
 	xassert( PMIXP_BASE_HDR_MAX >= sizeof(uint32_t));
 
 	/* Makesure that we only use buffers allocated through
@@ -110,7 +110,7 @@ Buf pmixp_server_buf_new(void)
 
 size_t pmixp_server_buf_reset(Buf buf)
 {
-#ifndef NDEBUG
+#if (0 && NDEBUG)
 	xassert( PMIXP_BASE_HDR_MAX >= sizeof(uint32_t));
 	xassert( PMIXP_BASE_HDR_MAX <= get_buf_offset(buf) );
 	/* Makesure that we only use buffers allocated through
@@ -132,7 +132,7 @@ static void *_buf_finalize(Buf buf, void *nhdr, size_t hsize,
 {
 	char *ptr = get_buf_data(buf);
 	size_t offset = PMIXP_BASE_HDR_MAX - hsize;
-#ifndef NDEBUG
+#if (0 && NDEBUG)
 	xassert(PMIXP_BASE_HDR_MAX >= hsize);
 	xassert(PMIXP_BASE_HDR_MAX <= get_buf_offset(buf));
 
@@ -1498,11 +1498,12 @@ int pmixp_server_pp_send(int nodeid, int size)
 	reset_buf(buf, _my_send_buf, 10*1024*1024);
 	set_buf_offset(buf, PMIXP_BASE_HDR_MAX);
 
+#if 0
 	size_t tsz = sizeof(uint32_t);
 	size_t goffs = (size_t)get_buf_data(buf);
 	uint32_t *chk_ptr = (uint32_t *)(((goffs + (tsz - 1)) / tsz) * tsz);
 	*chk_ptr = PMIXP_SERVER_BUF_MAGIC;
-
+#endif
 
 	set_buf_offset(buf,get_buf_offset(buf) + size);
 	rc = pmixp_server_send_nb(&ep, PMIXP_MSG_PINGPONG,
