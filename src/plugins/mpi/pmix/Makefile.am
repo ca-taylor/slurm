@@ -14,8 +14,8 @@ pmix_src = mpi_pmix.c \
 			pmixp_agent.h pmixp_client.h pmixp_coll.h pmixp_nspaces.h pmixp_info.h \
 			pmixp_server.c pmixp_state.c pmixp_io.c pmixp_utils.c pmixp_dmdx.c \
 			pmixp_server.h pmixp_state.h pmixp_io.h pmixp_utils.h pmixp_dmdx.h \
-			pmixp_conn.c pmixp_dconn.c pmixp_dconn_tcp.c \
-			pmixp_conn.h pmixp_dconn.h pmixp_dconn_tcp.h
+			pmixp_conn.c pmixp_dconn.c pmixp_dconn_tcp.c pmixp_debug.c \
+			pmixp_conn.h pmixp_dconn.h pmixp_dconn_tcp.h pmixp_debug.h
 
 if HAVE_UCX
 pmix_src += pmixp_dconn_ucx.c pmixp_dconn_ucx.h

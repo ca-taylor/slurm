@@ -343,8 +343,11 @@ static bool _ucx_progress()
 			break;
 		}
 		events_observed++;
+		PMIXP_PROF_ADD("ucx_progress:probe x");
 
 		char *msg = xmalloc(info_tag.length);
+
+		PMIXP_PROF_ADD_FMT("ucx_progress:alloc[%zd] x", (size_t)info_tag.length);
 		pmixp_ucx_req_t *req = (pmixp_ucx_req_t*)
 				ucp_tag_msg_recv_nb(ucp_worker, (void*)msg, info_tag.length,
 						    ucp_dt_make_contig(1), msg_tag, recv_handle);
@@ -352,6 +355,8 @@ static bool _ucx_progress()
 			PMIXP_ERROR("ucp_tag_msg_recv_nb failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
 			continue;
 		}
+		PMIXP_PROF_ADD_FMT("ucx_progress:recv.start[%p] x", req);
+
 		req->buffer = msg;
 		req->len = info_tag.length;
 		pmixp_rlist_enq(&_rcv_pending, req);
@@ -359,6 +364,7 @@ static bool _ucx_progress()
 			/* this message is long enough, so it makes
 			 * sense to do the progres one more timer */
 			new_msg = true;
+			PMIXP_PROF_ADD_FMT("ucx_progress:recv.done[%p] x",req);
 		}
 	}
 
@@ -410,6 +416,7 @@ static bool _ucx_progress()
 		/* Skip failed receives
 		 * TODO: what more can we do? */
 		if (PMIXP_UCX_FAILED != req->status){
+			PMIXP_PROF_ADD_FMT("ucx_progress:recv.done[%p] x", req);
 			_ucx_process_msg(req->buffer, req->len);
 		}
 		elem = pmixp_rlist_next(&_rcv_complete, elem);
@@ -423,6 +430,7 @@ static bool _ucx_progress()
 			rc = SLURM_ERROR;
 		}
 		xassert(_direct_hdr_set);
+		PMIXP_PROF_ADD_FMT("ucx_progress:send.done[%p] x",req);
 		if( req->buffer ){
 			_direct_hdr.send_complete(req->msg, PMIXP_P2P_REGULAR, rc);
 		}
@@ -657,6 +665,8 @@ static int _ucx_send(void *_priv, void *msg)
 		xassert(_direct_hdr_set);
 		char *mptr = _direct_hdr.buf_ptr(msg);
 		size_t msize = _direct_hdr.buf_size(msg);
+
+		PMIXP_PROF_ADD("ucx_send:start x");
 		req = (pmixp_ucx_req_t*)ucp_tag_send_nb(priv->server_ep,
 						(void*)mptr, msize,
 						ucp_dt_make_contig(1), 1,
@@ -666,6 +676,7 @@ static int _ucx_send(void *_priv, void *msg)
 			goto exit;
 		} else if (UCS_OK == UCS_PTR_STATUS(req)) {
 			/* defer release until we unlock ucp worker */
+			PMIXP_PROF_ADD("ucx_send:inline x");
 			release = true;
 		} else {
 			req->msg = msg;
@@ -673,7 +684,7 @@ static int _ucx_send(void *_priv, void *msg)
 			req->len = msize;
 			pmixp_rlist_enq(&_snd_pending, (void*)req);
 			_activate_progress();
-
+			PMIXP_PROF_ADD_FMT("ucx_send:regular[%p] x", req);
 		}
 	}
 exit:

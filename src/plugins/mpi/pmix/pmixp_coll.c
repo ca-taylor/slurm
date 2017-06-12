@@ -350,6 +350,7 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data, size_t size)
 	PMIXP_DEBUG("%s:%d: get local contribution", pmixp_info_namespace(),
 			pmixp_info_nodeid());
 
+	PMIXP_PROF_ADD_FMT("contrib_local:start[%zd] %d", size, coll->seq);
 	/* sanity check */
 	pmixp_coll_sanity_check(coll);
 
@@ -390,11 +391,16 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, uint32_t glob_nodeid, Buf buf)
 	char *data = NULL;
 	uint32_t size;
 	char *state = NULL;
+
+	PMIXP_PROF_ADD_FMT("contrib_node:start[%u] %d", remaining_buf(buf), coll->seq);
 	/* TODO: send remote nodeid for this collective to avoid this
 	 * heavy resolution
 	 */
 	char *nodename = pmixp_info_job_host(glob_nodeid);
 	int nodeid = hostlist_find(coll->ch_hosts, nodename);
+
+	PMIXP_PROF_ADD_FMT("contrib_node:resolve %d", coll->seq);
+
 	xassert(0 <= nodeid);
 	if (0 > nodeid) {
 		/* protect ourselfs if we are running with no asserts */
@@ -437,11 +443,15 @@ int pmixp_coll_contrib_node(pmixp_coll_t *coll, uint32_t glob_nodeid, Buf buf)
 		goto proceed;
 	}
 
+	PMIXP_PROF_ADD_FMT("contrib_node:checks %d", coll->seq);
+
 	data = get_buf_data(buf) + get_buf_offset(buf);
 	size = remaining_buf(buf);
 	pmixp_server_buf_reserve(coll->buf, size);
 	memcpy(get_buf_data(coll->buf) + get_buf_offset(coll->buf), data, size);
 	set_buf_offset(coll->buf, get_buf_offset(coll->buf) + size);
+
+	PMIXP_PROF_ADD_FMT("contrib_node:append %d", coll->seq);
 
 	/* increase number of individual contributions */
 	coll->ch_contribs[nodeid]++;
@@ -520,9 +530,11 @@ static int _copy_payload(Buf inbuf, size_t offs, Buf *outbuf)
 	return rc;
 }
 
-static void _sent_complete_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
+static void _send_complete_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 {
 	pmixp_coll_t *coll = (pmixp_coll_t *)cb_data;
+
+	PMIXP_PROF_ADD_FMT("send_complete_cb:start %d", coll->seq);
 
 	if( PMIXP_P2P_REGULAR == ctx ){
 		/* lock the collective */
@@ -531,8 +543,9 @@ static void _sent_complete_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 
 	/* We don't want to release buffer */
 	if( SLURM_SUCCESS == rc ){
-		_fan_in_finished(coll);
 
+		_fan_in_finished(coll);
+		PMIXP_PROF_ADD_FMT("send_complete_cb:fanin_done %d", coll->seq);
 		/* if we are root - push data to PMIx here.
 		 * Originally there was a homogenuous solution:
 		 * root nodename was in the hostlist. However this
@@ -554,6 +567,7 @@ static void _sent_complete_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 		/* unlock the collective */
 		slurm_mutex_unlock(&coll->lock);
 	}
+	PMIXP_PROF_ADD_FMT("send_complete_cb:exit %d", coll->seq);
 }
 
 static void _progress_fan_in(pmixp_coll_t *coll)
@@ -610,8 +624,9 @@ static void _progress_fan_in(pmixp_coll_t *coll)
 
 	/* Check for the singletone case */
 	if (PMIXP_EP_NONE != ep.type) {
+		PMIXP_PROF_ADD_FMT("progress_fan_in:send %d", coll->seq);
 		rc = pmixp_server_send_nb(&ep, type, coll->seq, coll->buf,
-					  _sent_complete_cb, coll);
+					  _send_complete_cb, coll);
 
 		if (SLURM_SUCCESS != rc) {
 			PMIXP_ERROR("Cannot send data (size = %lu), to hostlist:\n%s",
