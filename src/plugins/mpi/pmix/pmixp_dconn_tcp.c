@@ -56,6 +56,11 @@ static void _tcp_regio(eio_handle_t *h);
 int pmixp_dconn_tcp_prepare(pmixp_dconn_handlers_t *handlers,
 			    char **ep_data, size_t *ep_len)
 {
+
+	if( pmixp_info_nodeid() == 0 ){
+		PMIXP_ERROR("Use TCP!!!!!!!!!!!!");
+	}
+
 	memset(handlers, 0, sizeof(*handlers));
 	handlers->init = _tcp_init;
 	handlers->fini = _tcp_fini;

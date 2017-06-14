@@ -205,6 +205,10 @@ int pmixp_dconn_ucx_prepare(pmixp_dconn_handlers_t *handlers,
 	 */
 	_load_ucx_lib();
 
+	if( pmixp_info_nodeid() == 0 ){
+		PMIXP_ERROR("Use UCX!!!!!!!!!!!!");
+	}
+
 	slurm_mutex_init(&_ucx_worker_lock);
 
 	/* container of the free elements */
