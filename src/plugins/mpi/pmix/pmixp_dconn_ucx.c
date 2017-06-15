@@ -157,6 +157,7 @@ static int _load_ucx_lib()
 	 * loading UCX library.
 	 */
 	setenv("UCX_MEM_MALLOC_HOOKS", "no", 1);
+	setenv("UCX_ZCOPY_THRESH","1000000000", 1);
 
 #ifdef PMIXP_UCX_LIBPATH
 	/* If this SLURM build doesn't allow RPATH's
