@@ -405,9 +405,6 @@ static bool _ucx_progress()
 		}
 		req->buffer = msg;
 		req->len = info_tag.length;
-		if (PMIXP_UCX_REQ_COMPLETE == req->status) {
-			pmixp_rlist_enq(&_req_complete, req);
-		}
 	}
 
 	slurm_mutex_unlock(&_ucx_worker_lock);
