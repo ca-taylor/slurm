@@ -1,4 +1,4 @@
-/*****************************************************************************\
+﻿/*****************************************************************************\
  **  pmix_coll.h - PMIx collective primitives
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
@@ -40,12 +40,38 @@
 #include "pmixp_common.h"
 #include "pmixp_debug.h"
 
+#define PMIXP_COLL_DEBUG 1
+
 typedef enum {
 	PMIXP_COLL_SYNC,
-	PMIXP_COLL_FAN_IN,
-	PMIXP_COLL_FAN_OUT,
-	PMIXP_COLL_FAN_OUT_IN
+	PMIXP_COLL_COLLECT,
+	PMIXP_COLL_UPFWD,
+	PMIXP_COLL_DOWNFWD
 } pmixp_coll_state_t;
+
+typedef enum {
+	PMIXP_COLL_SND_NONE,
+	PMIXP_COLL_SND_ACTIVE,
+	PMIXP_COLL_SND_DONE,
+	PMIXP_COLL_SND_FAILED,
+} pmixp_coll_sndstate_t;
+
+inline static char *
+pmixp_coll_state2str(pmixp_coll_state_t state)
+{
+	switch (state) {
+	case PMIXP_COLL_SYNC:
+		return "COLL_SYNC";
+	case PMIXP_COLL_COLLECT:
+		return "COLL_COLLECT";
+	case PMIXP_COLL_UPFWD:
+		return "COLL_FWDUP";
+	case PMIXP_COLL_DOWNFWD:
+		return "COLL_FWDOWN";
+	default:
+		return "COLL_UNKNOWN";
+	}
+}
 
 typedef enum {
 	PMIXP_COLL_TYPE_FENCE,
@@ -75,24 +101,33 @@ typedef struct {
 	size_t nprocs;
 	int my_nspace;
 	uint32_t nodeid;
-	/* tree structure */
+
+	/* tree topology */
 	char *parent_host;
 	int parent_nodeid;
 	hostlist_t all_children;
+	char *all_children_str;
 	uint32_t children_cnt;
+	int *children_ids;
+#ifdef PMIXP_COLL_DEBUG
+	hostlist_t all_nodes;
+#endif
 
-	/* */
+	/* collective state */
 	uint32_t seq;
-	uint32_t contrib_cntr;
 	bool contrib_local;
+	uint32_t contrib_children;
+	bool *contrib_child;
+	pmixp_coll_sndstate_t ufwd_status;
+	bool contrib_parent;
+	uint32_t dfwd_complete_cnt;
+	pmixp_coll_sndstate_t dfwd_status;
 
-	/* Check who contributes */
-	hostlist_t ch_hosts;
-	bool *ch_contribs;
 
 	/* collective data */
-	Buf buf, root_buf;
-	size_t serv_offs;
+	Buf ufwd_buf, dfwd_buf;
+	size_t serv_offs, dfwd_offset, ufwd_offset;
+
 
 	/* libpmix callback data */
 	pmix_modex_cbfunc_t cbfunc;
@@ -198,7 +233,8 @@ static inline int pmixp_coll_check_seq(pmixp_coll_t *coll, uint32_t seq)
 
 int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data,
 			     size_t ndata);
-int pmixp_coll_contrib_node(pmixp_coll_t *coll, uint32_t nodeid, Buf buf);
+int pmixp_coll_contrib_child(pmixp_coll_t *coll, uint32_t nodeid,
+			     uint32_t seq, Buf buf);
 void pmixp_coll_bcast(pmixp_coll_t *coll);
 bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
 			 void **data, uint64_t size);

@@ -750,10 +750,10 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		}
 
 		if (PMIXP_MSG_FAN_IN == hdr->type) {
-			pmixp_coll_contrib_node(coll, hdr->nodeid, buf);
+			pmixp_coll_contrib_child(coll, hdr->nodeid, hdr->seq, buf);
 			goto exit;
 		} else {
-			coll->root_buf = buf;
+			coll->dfwd_buf = buf;
 			pmixp_coll_bcast(coll);
 			/* buf will be free'd by the PMIx callback so
 			 * protect the data by voiding the buffer.
