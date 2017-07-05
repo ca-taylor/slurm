@@ -708,8 +708,10 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		pmix_proc_t *procs = NULL;
 		size_t nprocs = 0;
 		pmixp_coll_type_t type = 0;
+		int c_nodeid;
 
-		rc = pmixp_coll_unpack_ranges(buf, &type, &procs, &nprocs);
+		rc = pmixp_coll_unpack_info(buf, &type, &c_nodeid,
+					    &procs, &nprocs);
 		if (SLURM_SUCCESS != rc) {
 			char *nodename = pmixp_info_job_host(hdr->nodeid);
 			PMIXP_ERROR("Bad message header from node %s",
@@ -750,18 +752,11 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		}
 
 		if (PMIXP_MSG_FAN_IN == hdr->type) {
-			pmixp_coll_contrib_child(coll, hdr->nodeid, hdr->seq, buf);
-			goto exit;
+			pmixp_coll_contrib_child(coll, c_nodeid,
+						 hdr->seq, buf);
 		} else {
-			coll->dfwd_buf = buf;
-			pmixp_coll_bcast(coll);
-			/* buf will be free'd by the PMIx callback so
-			 * protect the data by voiding the buffer.
-			 * Use the statement below instead of (buf = NULL)
-			 * to maintain incapsulation - in general `buf`is
-			 * not a pointer, but opaque type.
-			 */
-			buf = create_buf(NULL, 0);
+			pmixp_coll_contrib_parent(coll, c_nodeid,
+						  hdr->seq, buf);
 		}
 
 		break;

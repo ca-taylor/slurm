@@ -97,29 +97,31 @@ typedef struct {
 	pmixp_coll_state_t state;
 	pmixp_coll_type_t type;
 	/* PMIx collective id */
-	pmix_proc_t *procs;
-	size_t nprocs;
-	int my_nspace;
-	uint32_t nodeid;
+	struct {
+		pmix_proc_t *procs;
+		size_t nprocs;
+	} pset;
+	int my_peerid;
+	int peers_cnt;
+#ifdef PMIXP_COLL_DEBUG
+	hostlist_t peers_hl;
+#endif
 
 	/* tree topology */
-	char *parent_host;
-	int parent_nodeid;
-	hostlist_t all_children;
-	char *all_children_str;
-	uint32_t children_cnt;
-	int *children_ids;
-#ifdef PMIXP_COLL_DEBUG
-	hostlist_t all_nodes;
-#endif
+	char *prnt_host;
+	int prnt_peerid;
+	int chldrn_cnt;
+	hostlist_t chldrn_hl;
+	char *chldrn_str;
+	int *chldrn_ids;
 
 	/* collective state */
 	uint32_t seq;
 	bool contrib_local;
 	uint32_t contrib_children;
-	bool *contrib_child;
+	bool *contrib_chld;
 	pmixp_coll_sndstate_t ufwd_status;
-	bool contrib_parent;
+	bool contrib_prnt;
 	uint32_t dfwd_complete_cnt;
 	pmixp_coll_sndstate_t dfwd_status;
 
@@ -235,11 +237,14 @@ int pmixp_coll_contrib_local(pmixp_coll_t *coll, char *data,
 			     size_t ndata);
 int pmixp_coll_contrib_child(pmixp_coll_t *coll, uint32_t nodeid,
 			     uint32_t seq, Buf buf);
+int pmixp_coll_contrib_parent(pmixp_coll_t *coll, uint32_t nodeid,
+			     uint32_t seq, Buf buf);
 void pmixp_coll_bcast(pmixp_coll_t *coll);
 bool pmixp_coll_progress(pmixp_coll_t *coll, char *fwd_node,
 			 void **data, uint64_t size);
-int pmixp_coll_unpack_ranges(Buf buf, pmixp_coll_type_t *type,
-			     pmix_proc_t **ranges, size_t *nranges);
+int pmixp_coll_unpack_info(Buf buf, pmixp_coll_type_t *type,
+			   int *nodeid, pmix_proc_t **r,
+			   size_t *nr);
 int pmixp_coll_belong_chk(pmixp_coll_type_t type,
 			  const pmix_proc_t *procs, size_t nprocs);
 void pmixp_coll_reset_if_to(pmixp_coll_t *coll, time_t ts);
