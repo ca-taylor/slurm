@@ -49,13 +49,6 @@ typedef enum {
 	PMIXP_COLL_DOWNFWD
 } pmixp_coll_state_t;
 
-typedef enum {
-	PMIXP_COLL_SND_NONE,
-	PMIXP_COLL_SND_ACTIVE,
-	PMIXP_COLL_SND_DONE,
-	PMIXP_COLL_SND_FAILED,
-} pmixp_coll_sndstate_t;
-
 inline static char *
 pmixp_coll_state2str(pmixp_coll_state_t state)
 {
@@ -68,6 +61,30 @@ pmixp_coll_state2str(pmixp_coll_state_t state)
 		return "COLL_FWDUP";
 	case PMIXP_COLL_DOWNFWD:
 		return "COLL_FWDOWN";
+	default:
+		return "COLL_UNKNOWN";
+	}
+}
+
+typedef enum {
+	PMIXP_COLL_SND_NONE,
+	PMIXP_COLL_SND_ACTIVE,
+	PMIXP_COLL_SND_DONE,
+	PMIXP_COLL_SND_FAILED,
+} pmixp_coll_sndstate_t;
+
+inline static char *
+pmixp_coll_sndstatus2str(pmixp_coll_sndstate_t state)
+{
+	switch (state) {
+	case PMIXP_COLL_SND_NONE:
+		return "COLL_SND_NONE";
+	case PMIXP_COLL_SND_ACTIVE:
+		return "COLL_SND_ACTIVE";
+	case PMIXP_COLL_SND_DONE:
+		return "COLL_SND_DONE";
+	case PMIXP_COLL_SND_FAILED:
+		return "COLL_SND_FAILED";
 	default:
 		return "COLL_UNKNOWN";
 	}
@@ -111,7 +128,7 @@ typedef struct {
 	char *prnt_host;
 	int prnt_peerid;
 	int chldrn_cnt;
-	hostlist_t chldrn_hl;
+	hostlist_t all_chldrn_hl;
 	char *chldrn_str;
 	int *chldrn_ids;
 

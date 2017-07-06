@@ -752,10 +752,10 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 		}
 
 		if (PMIXP_MSG_FAN_IN == hdr->type) {
-			pmixp_coll_contrib_child(coll, c_nodeid,
+			pmixp_coll_contrib_child(coll, hdr->nodeid,
 						 hdr->seq, buf);
 		} else {
-			pmixp_coll_contrib_parent(coll, c_nodeid,
+			pmixp_coll_contrib_parent(coll, hdr->nodeid,
 						  hdr->seq, buf);
 		}
 
