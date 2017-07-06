@@ -202,7 +202,8 @@ static void _reset_coll_dfwd(pmixp_coll_t *coll)
 	if (SLURM_SUCCESS != _pack_coll_info(coll, coll->dfwd_buf)) {
 		PMIXP_ERROR("Cannot pack ranges to message header!");
 	}
-	coll->dfwd_complete_cnt = 0;
+	coll->dfwd_cb_cnt = 0;
+	coll->dfwd_cb_wait = 0;
 	coll->dfwd_status = PMIXP_COLL_SND_NONE;
 	coll->contrib_prnt = false;
 	/* Save the toal service offset */
@@ -316,11 +317,25 @@ int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs,
 		 */
 		int i;
 
+		/*
+		 * setup parent id's
+		 */
 		p = hostlist_nth(hl, coll->prnt_peerid);
 		coll->prnt_host = xstrdup(p);
 		free(p);
 		/* reset prnt_peerid to the global peer */
 		coll->prnt_peerid = pmixp_info_job_hostid(coll->prnt_host);
+
+		/*
+		 * setup root id's
+		 * (we need this for the SLURM API communication case)
+		 */
+		p = hostlist_nth(hl, 0);
+		coll->root_host = xstrdup(p);
+		free(p);
+		/* reset prnt_peerid to the global peer */
+		coll->root_peerid = pmixp_info_job_hostid(coll->root_host);
+
 		/* fixup children peer ids to te global ones */
 		for(i=0; i<coll->chldrn_cnt; i++){
 			p = hostlist_nth(hl, coll->chldrn_ids[i]);
@@ -357,6 +372,9 @@ void pmixp_coll_free(pmixp_coll_t *coll)
 	}
 	if (NULL != coll->prnt_host) {
 		xfree(coll->prnt_host);
+	}
+	if (NULL != coll->root_host) {
+		xfree(coll->root_host);
 	}
 	hostlist_destroy(coll->all_chldrn_hl);
 	if (coll->chldrn_str) {
@@ -419,7 +437,7 @@ static void _dfwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 
 	/* Change  the status */
 	if( SLURM_SUCCESS == rc ){
-		coll->dfwd_complete_cnt++;
+		coll->dfwd_cb_cnt++;
 	} else {
 		coll->dfwd_status = PMIXP_COLL_SND_FAILED;
 	}
@@ -428,7 +446,7 @@ static void _dfwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 	PMIXP_DEBUG("%p: state: %s, snd_status=%s, compl_cnt=%d",
 		    coll, pmixp_coll_state2str(coll->state),
 		    pmixp_coll_sndstatus2str(coll->dfwd_status),
-		    coll->dfwd_complete_cnt);
+		    coll->dfwd_cb_cnt);
 #endif
 
 	if( PMIXP_P2P_REGULAR == ctx ){
@@ -450,12 +468,12 @@ static void _libpmix_cb(void *cb_data)
 
 	xassert(PMIXP_COLL_DOWNFWD == coll->state);
 
-	coll->dfwd_complete_cnt++;
+	coll->dfwd_cb_cnt++;
 #ifdef PMIXP_COLL_DEBUG
 	PMIXP_DEBUG("%p: state: %s, snd_status=%s, compl_cnt=%d",
 		    coll, pmixp_coll_state2str(coll->state),
 		    pmixp_coll_sndstatus2str(coll->dfwd_status),
-		    coll->dfwd_complete_cnt);
+		    coll->dfwd_cb_cnt);
 #endif
 	_progress_coll(coll);
 
@@ -583,15 +601,28 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 	coll->state = PMIXP_COLL_DOWNFWD;
 	coll->dfwd_status = PMIXP_COLL_SND_ACTIVE;
 	if (!pmixp_info_srv_direct_conn()) {
-		ep[ep_cnt].type = PMIXP_EP_HLIST;
-		ep[ep_cnt].ep.hostlist = coll->chldrn_str;
-		ep_cnt++;
+		if (0 > coll->prnt_peerid) {
+			/* only the root of the whole tree is sending
+			 * in this case */
+			ep[ep_cnt].type = PMIXP_EP_HLIST;
+			ep[ep_cnt].ep.hostlist = coll->chldrn_str;
+			ep_cnt++;
+			/* we are waiting for one bcast and one local
+			 * libpmix completion */
+			coll->dfwd_cb_wait = 2;
+		} else {
+			/* we are waiting for local libpmix completion only */
+			coll->dfwd_cb_wait = 1;
+		}
 	} else {
 		for(i=0; i<coll->chldrn_cnt; i++){
 			ep[i].type = PMIXP_EP_NOIDEID;
 			ep[i].ep.nodeid = coll->chldrn_ids[i];
 			ep_cnt++;
 		}
+		/* we are waiting for coll->chldrn_cnt send and one
+		 * local libpmix completions */
+		coll->dfwd_cb_wait = coll->chldrn_cnt + 1;
 	}
 
 	for(i=0; i < ep_cnt; i++){
@@ -622,13 +653,19 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 			coll->dfwd_status = PMIXP_COLL_SND_FAILED;
 		}
 #ifdef PMIXP_COLL_DEBUG
-		nodename = hostlist_nth(coll->peers_hl,
-					ep[i].ep.nodeid);
-		PMIXP_DEBUG("%p: fwd to %s:%d, size = %lu",
-			    coll, nodename, ep[i].ep.nodeid,
-			    (uint64_t) get_buf_offset(coll->dfwd_buf));
+		if (PMIXP_EP_NOIDEID == ep[i].type) {
+			nodename = hostlist_nth(coll->peers_hl,
+						ep[i].ep.nodeid);
+			PMIXP_DEBUG("%p: fwd to %s:%d, size = %lu",
+				    coll, nodename, ep[i].ep.nodeid,
+				    (uint64_t) get_buf_offset(coll->dfwd_buf));
+			xfree(nodename);
+		} else {
+			PMIXP_DEBUG("%p: fwd to %s, size = %lu",
+				    coll, ep[i].ep.hostlist,
+				    (uint64_t) get_buf_offset(coll->dfwd_buf));
+		}
 #endif
-
 	}
 
 	if (coll->cbfunc) {
@@ -638,8 +675,6 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata,
 			     _libpmix_cb, (void *)coll);
 #ifdef PMIXP_COLL_DEBUG
-		nodename = hostlist_nth(coll->all_chldrn_hl,
-					ep[i].ep.nodeid);
 		PMIXP_DEBUG("%p: local delivery, size = %lu",
 			    coll, (uint64_t)size);
 #endif
@@ -654,7 +689,7 @@ static int _progress_dfwd(pmixp_coll_t *coll)
 	xassert(PMIXP_COLL_DOWNFWD == coll->state);
 
 	/* if all childrens + local callbacks was invoked */
-	if ((coll->chldrn_cnt + 1) == coll->dfwd_complete_cnt) {
+	if (coll->dfwd_cb_wait == coll->dfwd_cb_cnt) {
 		coll->dfwd_status = PMIXP_COLL_SND_DONE;
 	}
 
@@ -950,27 +985,35 @@ int pmixp_coll_contrib_parent(pmixp_coll_t *coll, uint32_t peerid,
 {
 	char *data_src = NULL, *data_dst = NULL;
 	uint32_t size;
+	int expected_peerid;
 
 	/* lock the structure */
 	slurm_mutex_lock(&coll->lock);
 
+	if (pmixp_info_srv_direct_conn()) {
+		expected_peerid = coll->prnt_peerid;
+	} else {
+		expected_peerid = coll->root_peerid;
+	}
+
 	/* Sanity check */
 	pmixp_coll_sanity_check(coll);
-	if (coll->prnt_peerid != peerid) {
+	if (expected_peerid != peerid) {
 		char *nodename = pmixp_info_job_host(peerid);
 		/* protect ourselfs if we are running with no asserts */
 		PMIXP_ERROR("%p: parent contrib from bad nodeid=%s:%u, "
 			    "expect=%d",
-			    coll, nodename, peerid, coll->prnt_peerid);
+			    coll, nodename, peerid, expected_peerid);
 		xfree(nodename);
 		goto proceed;
 	}
 
 #ifdef PMIXP_COLL_DEBUG
-	int lpeerid = hostlist_find(coll->peers_hl, coll->prnt_host);
+	char *nodename = pmixp_info_job_host(peerid);
+	int lpeerid = hostlist_find(coll->peers_hl, nodename);
 	/* Mark this event */
 	PMIXP_DEBUG("%p: contrib/rem from %s:%d(%d): state=%s, size=%u",
-		    coll, coll->prnt_host, coll->prnt_peerid, lpeerid,
+		    coll, nodename, peerid, lpeerid,
 		    pmixp_coll_state2str(coll->state), remaining_buf(buf));
 #endif
 
@@ -983,20 +1026,21 @@ int pmixp_coll_contrib_parent(pmixp_coll_t *coll, uint32_t peerid,
 #ifdef PMIXP_COLL_DEBUG
 		PMIXP_DEBUG("%p: prev contrib from %s:%d(%d): "
 			    "seq=%u, cur_seq=%u, state=%s",
-			    coll,
-			    coll->prnt_host, coll->prnt_peerid, lpeerid,
+			    coll, nodename, peerid, lpeerid,
 			    seq, coll->seq,
 			    pmixp_coll_state2str(coll->state));
 #endif
 		/* sanity check */
 		if ((coll->seq - 1) != seq) {
 			/* FATAL: should not happen in normal workflow */
+			char *nodename = pmixp_info_job_host(peerid);
 			PMIXP_ERROR("%p: unexpected contrib from %s:%d: "
 				    "contrib_seq = %d, coll->seq = %d, "
 				    "state=%s",
-				    coll, coll->prnt_host, coll->prnt_peerid,
+				    coll, nodename, peerid,
 				    seq, coll->seq,
 				    pmixp_coll_state2str(coll->state));
+			xfree(nodename);
 			xassert((coll->seq - 1) == seq);
 			abort();
 		}
@@ -1011,18 +1055,20 @@ int pmixp_coll_contrib_parent(pmixp_coll_t *coll, uint32_t peerid,
 #ifdef PMIXP_COLL_DEBUG
 		PMIXP_DEBUG("%p: double contrib from %s:%d(%d) "
 			    "seq=%u, cur_seq=%u, state=%s",
-			    coll, coll->prnt_host, coll->prnt_peerid, lpeerid,
+			    coll, nodename, peerid, lpeerid,
 			    seq, coll->seq, pmixp_coll_state2str(coll->state));
 #endif
 		/* sanity check */
 		if (coll->seq != seq) {
+			char *nodename = pmixp_info_job_host(peerid);
 			/* FATAL: should not happen in normal workflow */
 			PMIXP_ERROR("%p: unexpected contrib from %s:%d: "
 				    "seq = %d, coll->seq = %d, state=%s",
-				    coll, coll->prnt_host, coll->prnt_peerid,
+				    coll, nodename, peerid,
 				    seq, coll->seq,
 				    pmixp_coll_state2str(coll->state));
 			xassert((coll->seq - 1) == seq);
+			xfree(nodename);
 			abort();
 		}
 		goto proceed;
@@ -1037,11 +1083,13 @@ int pmixp_coll_contrib_parent(pmixp_coll_t *coll, uint32_t peerid,
 	 * can receive a contribution second time. Avoid duplications
 	 * by checking our records. */
 	if (coll->contrib_prnt) {
+		char *nodename = pmixp_info_job_host(peerid);
 		/* May be 0 or 1. If grater - transmission skew, ignore.
 		 * NOTE: this output is not on the critical path -
 		 * don't preprocess it out */
 		PMIXP_DEBUG("%p: multiple contributions from parent %s:%d",
-			    coll, coll->prnt_host, coll->prnt_peerid);
+			    coll, nodename, peerid);
+		xfree(nodename);
 		/* this is duplication, skip. */
 		goto proceed;
 	}
@@ -1061,8 +1109,9 @@ proceed:
 
 #ifdef PMIXP_COLL_DEBUG
 	PMIXP_DEBUG("%p: finish: node=%s:%d(%d), state=%s",
-		    coll, coll->prnt_host, coll->prnt_peerid, lpeerid,
+		    coll, nodename, peerid, lpeerid,
 		    pmixp_coll_state2str(coll->state));
+	xfree(nodename);
 #endif
 	/* unlock the structure */
 	slurm_mutex_unlock(&coll->lock);

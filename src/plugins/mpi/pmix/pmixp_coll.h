@@ -127,6 +127,8 @@ typedef struct {
 	/* tree topology */
 	char *prnt_host;
 	int prnt_peerid;
+	char *root_host;
+	int root_peerid;
 	int chldrn_cnt;
 	hostlist_t all_chldrn_hl;
 	char *chldrn_str;
@@ -139,7 +141,7 @@ typedef struct {
 	bool *contrib_chld;
 	pmixp_coll_sndstate_t ufwd_status;
 	bool contrib_prnt;
-	uint32_t dfwd_complete_cnt;
+	uint32_t dfwd_cb_cnt, dfwd_cb_wait;
 	pmixp_coll_sndstate_t dfwd_status;
 
 
