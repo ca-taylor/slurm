@@ -632,18 +632,12 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 
 		if (SLURM_SUCCESS != rc) {
 			if (PMIXP_EP_NOIDEID == ep[i].type){
-
-#ifdef PMIXP_COLL_DEBUG
-				nodename = hostlist_nth(coll->peers_hl,
-							ep[i].ep.nodeid);
-#else
-				nodename = strdup("unknown");
-#endif
+				nodename = pmixp_info_job_host(ep[i].ep.nodeid);
 				PMIXP_ERROR("Cannot send data (size = %lu), "
 				    "to %s:%d",
 				    (uint64_t) get_buf_offset(coll->dfwd_buf),
 				    nodename, ep[i].ep.nodeid);
-				free(nodename);
+				xfree(nodename);
 			} else {
 				PMIXP_ERROR("Cannot send data (size = %lu), "
 				    "to %s",
@@ -654,8 +648,7 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 		}
 #ifdef PMIXP_COLL_DEBUG
 		if (PMIXP_EP_NOIDEID == ep[i].type) {
-			nodename = hostlist_nth(coll->peers_hl,
-						ep[i].ep.nodeid);
+			nodename = pmixp_info_job_host(ep[i].ep.nodeid);
 			PMIXP_DEBUG("%p: fwd to %s:%d, size = %lu",
 				    coll, nodename, ep[i].ep.nodeid,
 				    (uint64_t) get_buf_offset(coll->dfwd_buf));
@@ -921,6 +914,7 @@ int pmixp_coll_contrib_child(pmixp_coll_t *coll, uint32_t peerid,
 			    seq, coll->seq, pmixp_coll_state2str(coll->state));
 #endif
 		if ((coll->seq +1) != seq) {
+			char *nodename = pmixp_info_job_host(peerid);
 			/* should not happen in normal workflow */
 			PMIXP_ERROR("%p: unexpected contrib from %s:%d(x:%d) "
 				    "seq = %d, coll->seq = %d, "
@@ -928,6 +922,7 @@ int pmixp_coll_contrib_child(pmixp_coll_t *coll, uint32_t peerid,
 				    coll, nodename, peerid, chld_id,
 				    seq, coll->seq,
 				    pmixp_coll_state2str(coll->state));
+			xfree(nodename);
 			xassert((coll->seq +1) == seq);
 			abort();
 		}
@@ -943,12 +938,14 @@ int pmixp_coll_contrib_child(pmixp_coll_t *coll, uint32_t peerid,
 	 * can receive a contribution second time. Avoid duplications
 	 * by checking our records. */
 	if (coll->contrib_chld[chld_id]) {
+		char *nodename = pmixp_info_job_host(peerid);
 		/* May be 0 or 1. If grater - transmission skew, ignore.
 		 * NOTE: this output is not on the critical path -
 		 * don't preprocess it out */
 		PMIXP_DEBUG("%p: multiple contribs from %s:%d(x:%d)",
 			    coll, nodename, peerid, chld_id);
 		/* this is duplication, skip. */
+		xfree(nodename);
 		goto proceed;
 	}
 
