@@ -46,7 +46,9 @@ typedef enum {
 	PMIXP_COLL_SYNC,
 	PMIXP_COLL_COLLECT,
 	PMIXP_COLL_UPFWD,
-	PMIXP_COLL_DOWNFWD
+	PMIXP_COLL_UPFWD_WSC, /* Wait for the upward Send Complete */
+	PMIXP_COLL_UPFWD_WPC, /* Wait for Parent Contrib */
+	PMIXP_COLL_DOWNFWD,
 } pmixp_coll_state_t;
 
 inline static char *
@@ -58,9 +60,13 @@ pmixp_coll_state2str(pmixp_coll_state_t state)
 	case PMIXP_COLL_COLLECT:
 		return "COLL_COLLECT";
 	case PMIXP_COLL_UPFWD:
-		return "COLL_FWDUP";
+		return "COLL_UPFWD";
+	case PMIXP_COLL_UPFWD_WSC:
+		return "COLL_UPFWD_WAITSND";
+	case PMIXP_COLL_UPFWD_WPC:
+		return "COLL_UPFWD_WAITPRNT";
 	case PMIXP_COLL_DOWNFWD:
-		return "COLL_FWDOWN";
+		return "COLL_DOWNFWD";
 	default:
 		return "COLL_UNKNOWN";
 	}
