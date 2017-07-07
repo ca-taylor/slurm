@@ -88,11 +88,7 @@ static int _pack_coll_info(pmixp_coll_t *coll, Buf buf)
 	size = coll->type;
 	pack32(size, buf);
 
-	/* 2. store local nodeid in this collective */
-	size = coll->my_peerid;
-	pack32(size, buf);
-
-	/* 3. Put the number of ranges */
+	/* 2. Put the number of ranges */
 	pack32(nprocs, buf);
 	for (i = 0; i < (int)nprocs; i++) {
 		/* Pack namespace */
@@ -118,14 +114,7 @@ int pmixp_coll_unpack_info(Buf buf, pmixp_coll_type_t *type,
 	}
 	*type = tmp;
 
-	/* 2. extract the type of collective */
-	if (SLURM_SUCCESS != (rc = unpack32(&tmp, buf))) {
-		PMIXP_ERROR("Cannot unpack collective type");
-		return rc;
-	}
-	*nodeid = tmp;
-
-	/* 3. get the number of ranges */
+	/* 2. get the number of ranges */
 	if (SLURM_SUCCESS != (rc = unpack32(&nprocs, buf))) {
 		PMIXP_ERROR("Cannot unpack collective type");
 		return rc;
@@ -926,7 +915,7 @@ int pmixp_coll_contrib_child(pmixp_coll_t *coll, uint32_t peerid,
 			xassert((coll->seq +1) == seq);
 			abort();
 		}
-		goto proceed;
+		break;
 	default:
 		/* should not happen in normal workflow */
 		PMIXP_ERROR("%p: unknown collective state %s",
