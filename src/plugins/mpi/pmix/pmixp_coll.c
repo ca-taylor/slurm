@@ -385,13 +385,28 @@ void pmixp_coll_free(pmixp_coll_t *coll)
 	free_buf(coll->dfwd_buf);
 }
 
-static void _ufwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
+typedef struct {
+	pmixp_coll_t *coll;
+	uint32_t seq;
+	volatile uint32_t refcntr;
+} pmixp_coll_cbdata_t;
+
+static void _ufwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *_vcbdata)
 {
-	pmixp_coll_t *coll = (pmixp_coll_t *)cb_data;
+	pmixp_coll_cbdata_t *cbdata = (pmixp_coll_cbdata_t*)_vcbdata;
+	pmixp_coll_t *coll = cbdata->coll;
 
 	if( PMIXP_P2P_REGULAR == ctx ){
 		/* lock the collective */
 		slurm_mutex_lock(&coll->lock);
+	}
+	if (cbdata->seq != coll->seq) {
+		/* it seems like this collective was reset since the time
+		 * we initiated this send.
+		 * Just exit to avoid data corruption.
+		 */
+		PMIXP_DEBUG("Collective was reset!");
+		goto exit;
 	}
 
 	xassert(PMIXP_COLL_UPFWD == coll->state ||
@@ -411,6 +426,13 @@ static void _ufwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 		    pmixp_coll_sndstatus2str(coll->ufwd_status));
 #endif
 
+exit:
+	xassert(0 < cbdata->refcntr);
+	cbdata->refcntr--;
+	if (!cbdata->refcntr) {
+		xfree(cbdata);
+	}
+
 	if( PMIXP_P2P_REGULAR == ctx ){
 		/* progress, in the inline case progress
 		 * will be invoked by the caller */
@@ -421,13 +443,24 @@ static void _ufwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 	}
 }
 
-static void _dfwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
+static void _dfwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *_vcbdata)
 {
-	pmixp_coll_t *coll = (pmixp_coll_t *)cb_data;
+	pmixp_coll_cbdata_t *cbdata = (pmixp_coll_cbdata_t*)_vcbdata;
+	pmixp_coll_t *coll = cbdata->coll;
+
 
 	if( PMIXP_P2P_REGULAR == ctx ){
 		/* lock the collective */
 		slurm_mutex_lock(&coll->lock);
+	}
+
+	if (cbdata->seq != coll->seq) {
+		/* it seems like this collective was reset since the time
+		 * we initiated this send.
+		 * Just exit to avoid data corruption.
+		 */
+		PMIXP_DEBUG("Collective was reset!");
+		goto exit;
 	}
 
 	xassert(PMIXP_COLL_DOWNFWD == coll->state);
@@ -446,6 +479,13 @@ static void _dfwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 		    coll->dfwd_cb_cnt, coll->dfwd_cb_wait);
 #endif
 
+exit:
+	xassert(0 < cbdata->refcntr);
+	cbdata->refcntr--;
+	if (!cbdata->refcntr) {
+		xfree(cbdata);
+	}
+
 	if( PMIXP_P2P_REGULAR == ctx ){
 		/* progress, in the inline case progress
 		 * will be invoked by the caller */
@@ -456,12 +496,23 @@ static void _dfwd_sent_cb(int rc, pmixp_p2p_ctx_t ctx, void *cb_data)
 	}
 }
 
-static void _libpmix_cb(void *cb_data)
+static void _libpmix_cb(void *_vcbdata)
 {
-	pmixp_coll_t *coll = (pmixp_coll_t *)cb_data;
+	pmixp_coll_cbdata_t *cbdata = (pmixp_coll_cbdata_t*)_vcbdata;
+	pmixp_coll_t *coll = cbdata->coll;
 
 	/* lock the collective */
 	slurm_mutex_lock(&coll->lock);
+
+	if (cbdata->seq != coll->seq) {
+		/* it seems like this collective was reset since the time
+		 * we initiated this send.
+		 * Just exit to avoid data corruption.
+		 */
+		PMIXP_ERROR("%p: collective was reset: myseq=%u, curseq=%u",
+			    coll, cbdata->seq, coll->seq);
+		goto exit;
+	}
 
 	xassert(PMIXP_COLL_DOWNFWD == coll->state);
 
@@ -473,6 +524,13 @@ static void _libpmix_cb(void *cb_data)
 		    coll->dfwd_cb_cnt, coll->dfwd_cb_wait);
 #endif
 	_progress_coll(coll);
+
+exit:
+	xassert(0 < cbdata->refcntr);
+	cbdata->refcntr--;
+	if (!cbdata->refcntr) {
+		xfree(cbdata);
+	}
 
 	/* unlock the collective */
 	slurm_mutex_unlock(&coll->lock);
@@ -551,10 +609,15 @@ static int _progress_collect(pmixp_coll_t *coll)
 	}
 
 	if (PMIXP_EP_NONE != ep.type) {
+		pmixp_coll_cbdata_t *cbdata;
+		cbdata = xmalloc(sizeof(pmixp_coll_cbdata_t));
+		cbdata->coll = coll;
+		cbdata->seq = coll->seq;
+		cbdata->refcntr++;
 		char *nodename = coll->prnt_host;
 		rc = pmixp_server_send_nb(&ep, PMIXP_MSG_FAN_IN, coll->seq,
 					  coll->ufwd_buf,
-					  _ufwd_sent_cb, coll);
+					  _ufwd_sent_cb, cbdata);
 
 		if (SLURM_SUCCESS != rc) {
 			PMIXP_ERROR("Cannot send data (size = %lu), "
@@ -580,6 +643,7 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 	int ep_cnt = 0;
 	int rc, i;
 	char *nodename = NULL;
+	pmixp_coll_cbdata_t *cbdata;
 
 	xassert(PMIXP_COLL_UPFWD == coll->state);
 
@@ -634,10 +698,15 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 	/* We need to wait for ep_cnt send completions + the local callback */
 	coll->dfwd_cb_wait = ep_cnt;
 
+	cbdata = xmalloc(sizeof(pmixp_coll_cbdata_t));
+	cbdata->coll = coll;
+	cbdata->seq = coll->seq;
+	cbdata->refcntr = ep_cnt;
+
 	for(i=0; i < ep_cnt; i++){
 		rc = pmixp_server_send_nb(&ep[i], PMIXP_MSG_FAN_OUT, coll->seq,
 					  coll->dfwd_buf,
-					  _dfwd_sent_cb, coll);
+					  _dfwd_sent_cb, cbdata);
 
 		if (SLURM_SUCCESS != rc) {
 			if (PMIXP_EP_NOIDEID == ep[i].type){
@@ -674,13 +743,18 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 		char *data = get_buf_data(coll->dfwd_buf) + coll->dfwd_offset;
 		size_t size = get_buf_offset(coll->dfwd_buf) -
 				coll->dfwd_offset;
-		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata,
-			     _libpmix_cb, (void *)coll);
+		cbdata->refcntr++;
 		coll->dfwd_cb_wait++;
+		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata,
+			     _libpmix_cb, (void *)cbdata);
 #ifdef PMIXP_COLL_DEBUG
 		PMIXP_DEBUG("%p: local delivery, size = %lu",
 			    coll, (uint64_t)size);
 #endif
+	}
+
+	if (!cbdata->refcntr) {
+		xfree(cbdata);
 	}
 
 	/* events observed - need another iteration */
@@ -735,13 +809,21 @@ static int _progress_ufwd_wpc(pmixp_coll_t *coll)
 	coll->dfwd_status = PMIXP_COLL_SND_ACTIVE;
 	coll->dfwd_cb_wait = 0;
 
+
+
 	/* local delivery */
 	if (coll->cbfunc) {
+		pmixp_coll_cbdata_t *cbdata;
+		cbdata = xmalloc(sizeof(pmixp_coll_cbdata_t));
+		cbdata->coll = coll;
+		cbdata->seq = coll->seq;
+		cbdata->refcntr = 1;
+
 		char *data = get_buf_data(coll->dfwd_buf) + coll->dfwd_offset;
 		size_t size = get_buf_offset(coll->dfwd_buf) -
 				coll->dfwd_offset;
 		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata,
-			     _libpmix_cb, (void *)coll);
+			     _libpmix_cb, (void *)cbdata);
 		coll->dfwd_cb_wait++;
 #ifdef PMIXP_COLL_DEBUG
 		PMIXP_DEBUG("%p: local delivery, size = %lu",
