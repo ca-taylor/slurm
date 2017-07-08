@@ -613,7 +613,7 @@ static int _progress_collect(pmixp_coll_t *coll)
 		cbdata = xmalloc(sizeof(pmixp_coll_cbdata_t));
 		cbdata->coll = coll;
 		cbdata->seq = coll->seq;
-		cbdata->refcntr++;
+		cbdata->refcntr = 1;
 		char *nodename = coll->prnt_host;
 		rc = pmixp_server_send_nb(&ep, PMIXP_MSG_FAN_IN, coll->seq,
 					  coll->ufwd_buf,
@@ -643,7 +643,7 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 	int ep_cnt = 0;
 	int rc, i;
 	char *nodename = NULL;
-	pmixp_coll_cbdata_t *cbdata;
+	pmixp_coll_cbdata_t *cbdata = NULL;
 
 	xassert(PMIXP_COLL_UPFWD == coll->state);
 
@@ -698,10 +698,16 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 	/* We need to wait for ep_cnt send completions + the local callback */
 	coll->dfwd_cb_wait = ep_cnt;
 
-	cbdata = xmalloc(sizeof(pmixp_coll_cbdata_t));
-	cbdata->coll = coll;
-	cbdata->seq = coll->seq;
-	cbdata->refcntr = ep_cnt;
+	if (ep_cnt || coll->cbfunc) {
+		/* allocate the callback data */
+		cbdata = xmalloc(sizeof(pmixp_coll_cbdata_t));
+		cbdata->coll = coll;
+		cbdata->seq = coll->seq;
+		cbdata->refcntr = ep_cnt;
+		if (coll->cbfunc) {
+			cbdata->refcntr++;
+		}
+	}
 
 	for(i=0; i < ep_cnt; i++){
 		rc = pmixp_server_send_nb(&ep[i], PMIXP_MSG_FAN_OUT, coll->seq,
@@ -743,7 +749,6 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 		char *data = get_buf_data(coll->dfwd_buf) + coll->dfwd_offset;
 		size_t size = get_buf_offset(coll->dfwd_buf) -
 				coll->dfwd_offset;
-		cbdata->refcntr++;
 		coll->dfwd_cb_wait++;
 		coll->cbfunc(PMIX_SUCCESS, data, size, coll->cbdata,
 			     _libpmix_cb, (void *)cbdata);
@@ -751,10 +756,6 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 		PMIXP_DEBUG("%p: local delivery, size = %lu",
 			    coll, (uint64_t)size);
 #endif
-	}
-
-	if (!cbdata->refcntr) {
-		xfree(cbdata);
 	}
 
 	/* events observed - need another iteration */
