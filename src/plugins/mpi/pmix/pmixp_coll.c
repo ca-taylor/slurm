@@ -596,10 +596,12 @@ static int _progress_collect(pmixp_coll_t *coll)
 			    coll, coll->prnt_host, coll->prnt_peerid);
 	} else {
 		/* move data from input buffer to the output */
-		char *src = get_buf_data(coll->ufwd_buf) + coll->ufwd_offset;
-		char *dst = get_buf_data(coll->dfwd_buf) + coll->dfwd_offset;
+		char *dst, *src = get_buf_data(coll->ufwd_buf) +
+				coll->ufwd_offset;
 		size_t size = get_buf_offset(coll->ufwd_buf) -
 				coll->ufwd_offset;
+		pmixp_server_buf_reserve(coll->dfwd_buf, size);
+		dst = get_buf_data(coll->dfwd_buf) + coll->dfwd_offset;
 		memcpy(dst, src, size);
 		set_buf_offset(coll->dfwd_buf, coll->dfwd_offset + size);
 		/* no need to send */
