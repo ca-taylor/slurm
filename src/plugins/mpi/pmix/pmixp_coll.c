@@ -684,9 +684,12 @@ static int _progress_ufwd(pmixp_coll_t *coll)
 	if (!pmixp_info_srv_direct_conn()) {
 		/* only root of the tree should get here */
 		xassert(0 > coll->prnt_peerid);
-		ep[ep_cnt].type = PMIXP_EP_HLIST;
-		ep[ep_cnt].ep.hostlist = coll->chldrn_str;
-		ep_cnt++;
+		if (coll->chldrn_cnt) {
+			/* We can run on just one node */
+			ep[ep_cnt].type = PMIXP_EP_HLIST;
+			ep[ep_cnt].ep.hostlist = coll->chldrn_str;
+			ep_cnt++;
+		}
 	} else {
 		for(i=0; i<coll->chldrn_cnt; i++){
 			ep[i].type = PMIXP_EP_NOIDEID;
