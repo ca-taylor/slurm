@@ -78,7 +78,7 @@ typedef struct pmixp_list_elem_s {
 #define PMIXP_LIST_VAL(elem) (elem->data)
 
 static inline pmixp_list_elem_t*
-pmixp_list_elem_new()
+pmixp_list_elem_new(void)
 {
 	return xmalloc(sizeof(pmixp_list_elem_t));
 }
