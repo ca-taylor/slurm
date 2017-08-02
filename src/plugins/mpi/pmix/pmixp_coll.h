@@ -174,6 +174,8 @@ int pmixp_coll_init(pmixp_coll_t *coll, const pmix_proc_t *procs,
 		    size_t nprocs, pmixp_coll_type_t type);
 void pmixp_coll_free(pmixp_coll_t *coll);
 
+pmixp_coll_t *pmixp_coll_from_cbdata(void *cbdata);
+
 static inline void pmixp_coll_set_callback(pmixp_coll_t *coll,
 					   pmix_modex_cbfunc_t cbfunc,
 					   void *cbdata)

@@ -108,11 +108,19 @@ int pmixp_server_pp_warmups();
 int pmixp_server_pp_same_thread();
 bool pmixp_server_pp_check_fini();
 
+void pmixp_server_init_cperf(char ***env);
+bool pmixp_server_want_cperf();
+void pmixp_server_run_cperf();
+
 #else
 /* Stubs for the initialization code */
 #define pmixp_server_want_pp() (0)
 #define pmixp_server_run_pp()
 #define pmixp_server_init_pp(env)
+
+#define pmixp_server_init_cperf(env)
+#define pmixp_server_want_cperf() (0)
+#define pmixp_server_run_cperf();
 #endif
 
 #endif /* PMIXP_SERVER_H */

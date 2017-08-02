@@ -361,7 +361,15 @@ int pmixp_agent_start(void)
 	if (pmixp_server_want_pp()) {
 		pmixp_server_run_pp();
 	}
-	
+
+	/* Check if a collective test was requested by user
+	 * NOTE: enabled only if `--enable-debug` configuration
+	 * option was passed
+	 */
+	if (pmixp_server_want_cperf()) {
+		pmixp_server_run_cperf();
+	}
+
 	PMIXP_DEBUG("agent thread started: tid = %lu",
 		    (unsigned long) _agent_tid);
 
