@@ -1673,13 +1673,22 @@ static int _env_array_entry_splitter(const char *entry,
 	ptr = xstrchr(entry, '=');
 	if (ptr == NULL)	/* Bad parsing, no '=' found */
 		return 0;
-	len = ptr - entry;
+	
+	/* 
+	 * need to consider the  byte pointed by ptr.
+	 * example: entry = 0x0 = "a=b"
+	 * ptr = 0x1
+	 * len = ptr - entry + 1 = 2 because we need
+	 * 2 characters to store 'a\0'
+	 */
+	len = ptr - entry + 1;
 	if (len > name_len-1)
 		return 0;
 	strlcpy(name, entry, len);
 
 	ptr = ptr + 1;
-	len = strlen(ptr);
+	/* account for '\0' here */
+	len = strlen(ptr) + 1;
 	if (len > value_len-1)
 		return 0;
 	strlcpy(value, ptr, len);
