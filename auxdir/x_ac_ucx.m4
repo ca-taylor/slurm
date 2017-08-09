@@ -15,7 +15,7 @@
 
 AC_DEFUN([X_AC_UCX],
 [
-  _x_ac_ucx_dirs="/usr /usr/local"
+  _x_ac_ucx_dirs="/usr /usr/local /opt/ucx"
   _x_ac_ucx_libs="lib64 lib"
 
   AC_ARG_WITH(
@@ -26,38 +26,32 @@ AC_DEFUN([X_AC_UCX],
   if [test "x$with_ucx" = xno]; then
     AC_MSG_WARN([support for ucx disabled])
   else
-    AC_CACHE_CHECK(
-      [for ucx installation],
-      [x_ac_cv_ucx_dir],
-      [
+        AC_MSG_CHECKING(for ucx installation)
+        AC_MSG_RESULT($_x_ac_ucx_dirs)
+
         for d in $_x_ac_ucx_dirs; do
-          test -d "$d" || continue
-          test -d "$d/include" || continue
-          test -d "$d/include/ucp" || continue
-          test -d "$d/include/ucp/api" || continue
-          test -d "$d/include/uct" || continue
-          test -d "$d/include/uct/api" || continue
           test -f "$d/include/ucp/api/ucp.h" || continue
-          test -f "$d/include/ucp/api/ucp_version.h" || continue
+          test -f "$d/include/uct/api/version.h" || continue
           for bit in $_x_ac_ucx_libs; do
+
+            x_ac_cv_ucx_dir=
+            x_ac_cv_ucx_libdir=
             test -d "$d/$bit" || continue
             _x_ac_ucx_cppflags_save="$CPPFLAGS"
             CPPFLAGS="-I$d/include $CPPFLAGS"
             _x_ac_ucx_libs_save="$LIBS"
-            LIBS="-L$d/$bit -lrrd $LIBS"
+            LIBS="-L$d/$bit -lucp $LIBS"
 
-            AC_COMPILE_IFELSE(
-                [AC_LANG_PROGRAM([[#include <ucp/api/ucp_version.h>]],
-                    [[
-                    ]])],
-                AS_VAR_SET(x_ac_cv_ucx_dir, $d)
-                AS_VAR_SET(x_ac_cv_ucx_libdir, $d/$bit))
+            AC_CHECK_LIB([ucp],[ucp_cleanup])
 
-            if [test -z "$x_ac_cv_ucx_dir"] ||
-               [test -z "$x_ac_cv_ucx_libdir"]; then
-              AC_MSG_WARN([unable to locate ucx installation])
-              continue
+            if [ test "x$ac_cv_lib_ucp_ucp_cleanup" = xno ]; then
+                continue
             fi
+
+            AS_VAR_SET(x_ac_cv_ucx_dir, $d)
+            AS_VAR_SET(x_ac_cv_ucx_libdir, $d/$bit)
+
+            AC_MSG_NOTICE(ucx checking result: $x_ac_cv_ucx_libdir)
 
             CPPFLAGS="$_x_ac_ucx_cppflags_save"
             LIBS="$_x_ac_ucx_libs_save"
@@ -65,7 +59,6 @@ AC_DEFUN([X_AC_UCX],
           done
           test -n "$x_ac_cv_ucx_dir" && break
         done
-      ])
 
     if test -z "$x_ac_cv_ucx_dir"; then
       AC_MSG_WARN([unable to locate ucx installation])
