@@ -28,4 +28,5 @@ SUBDIRS = \
 	slurmd			\
 	switch			\
 	task			\
+	tmpdir			\
 	topology
